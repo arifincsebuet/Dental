@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function clinicMember(clinic) {
+      return firestore.get(/databases/(default)/documents/workspaces/$(clinic)).data.config.members[request.auth.uid];
+    }
+    function clinicalRead(clinic) {
+      return signedIn() && (request.auth.uid == clinic ||
+        (clinicMember(clinic).active != false &&
+          (clinicMember(clinic).role in ['owner', 'admin', 'administrator', 'dentist', 'auditor'] ||
+            (clinicMember(clinic).role == 'assistant' &&
+              (clinicMember(clinic).permissions.clinicalRead == true || clinicMember(clinic).permissions.clinicalWrite == true)))));
+    }
+    function clinicalWrite(clinic) {
+      return signedIn() && (request.auth.uid == clinic ||
+        (clinicMember(clinic).active != false &&
+          (clinicMember(clinic).role in ['owner', 'admin', 'administrator', 'dentist'] ||
+            (clinicMember(clinic).role == 'assistant' && clinicMember(clinic).permissions.clinicalWrite == true))));
+    }
+    match /workspaces/{clinic}/patients/{patient}/{image} {
+      allow read: if clinicalRead(clinic);
+      allow create: if clinicalWrite(clinic)
+        && request.resource.size > 0 && request.resource.size <= 512 * 1024
+        && request.resource.contentType == 'image/png'
+        && image.matches('[a-f0-9]{64}\\.png');
+      allow update, delete: if false;
+    }
+  }
+}

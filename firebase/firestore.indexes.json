@@ -1,0 +1,115 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "workspaces",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "remindersEnabled",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextReminderAt",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "chart",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "history",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "story",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "treatments",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "appointments",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "invoices",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "images",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "audit",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "receipts",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "encounters",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "performedProcedures",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "medicalHistory",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "medications",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "config",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "devices",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "scheduleIndex",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "reminderJobs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "audit",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "receipts",
+      "indexes": []
+    }
+  ]
+}
