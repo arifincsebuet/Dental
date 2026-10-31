@@ -60,6 +60,12 @@ Objects use content-addressed paths `workspaces/{clinicId}/patients/{patientId}/
 
 Godot 4.5.1 Android library hosts the source project directly from `app/src/main/assets`. No texture imports, downloaded meshes or generated PCK are required. `chart.gd` constructs custom continuous enamel crown meshes for incisors, canines, premolars and molars, with cusp and fissure relief, gingiva, optional roots, implant collars, loss slots, labels, workflow cues and surface overlays. Primary/permanent/mixed inventories use canonical FDI slot mapping. The camera supports orbit, pinch zoom, pan, reset/focus, and arch/root/label toggles.
 
+The full-screen chart uses a studio sky and lighting, and its camera eases toward its target with inertia. A view switcher offers Front, Upper occlusal, Lower occlusal, Left and Right presets. A floating rail holds zoom, tooth-number and root controls; turning roots on also makes the gingiva translucent. A bottom sheet first shows the arch filter and legend. After a tooth is tapped, it shows the tooth name, status chips, an M/D/F/L/O surface pad laid out like an odontogram, and one primary "Assess" action. The bridge contract (`chart`, `selectTooth`, `selectSurface`, `closeChart`) is unchanged.
+
+### Inline 3D on profiles
+
+`Teeth3DView.kt` is a small Compose software renderer. It uses smooth-shaded triangles, a painter's sort and `Canvas.drawVertices`. It draws the same schema-2 chart snapshot directly inside the patient profile, as the first clinical card, and inside the doctor profile, using a neutral reference dentition. Only one Godot engine may run per process, so Godot cannot be embedded in scrolling screens. The inline model supports rotate, pinch zoom, double-tap reset, optional tooth numbers and tap-to-select, and selection opens the native tooth editor. Status colours match the Godot chart: amber for findings, blue for restorations, a teal "+" for planned care and a slate cross for recorded loss.
+
 `DentalBridge` validates schema/catalogue/inventory/codes and strips private profile/narrative/financial fields. Selection results contain tooth, optional surface, session token and chart revision; the native host rejects stale context. History/explanation charts are read-only. Native Canvas teeth supply the same selection/edit workflow with TalkBack and large touch targets when 3D is unavailable. These procedural teeth are educational anatomy, not clinically validated scans or diagnostic models.
 
 ## Scope and operational limits
