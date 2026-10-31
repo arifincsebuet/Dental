@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "catalogVersion": "fdi-v1",
+  "clinicId": "CLINIC-001",
+  "patientId": "PAT-1001",
+  "chartId": "CHART-1001",
+  "dentition": "permanent",
+  "numberingSystem": "FDI",
+  "chartVersion": 7,
+  "updatedAt": "2026-10-30T10:00:00Z",
+  "updatedBy": "DOC-001",
+  "teeth": {
+    "11": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": [
+            "composite"
+          ]
+        }
+      }
+    },
+    "16": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "O": {
+          "assessment": "assessed",
+          "findings": [
+            "caries",
+            "fracture"
+          ],
+          "restorations": [
+            "amalgam"
+          ]
+        }
+      },
+      "treatmentStates": [
+        "planned"
+      ]
+    },
+    "48": {
+      "assessment": "assessed",
+      "presence": "extracted"
+    }
+  }
+}

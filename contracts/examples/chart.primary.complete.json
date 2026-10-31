@@ -1,0 +1,634 @@
+{
+  "schemaVersion": 2,
+  "catalogVersion": "fdi-v1",
+  "clinicId": "CLINIC-001",
+  "patientId": "PAT-1001",
+  "chartId": "CHART-1001",
+  "dentition": "primary",
+  "numberingSystem": "FDI",
+  "chartVersion": 7,
+  "updatedAt": "2026-10-30T10:00:00Z",
+  "updatedBy": "DOC-001",
+  "teeth": {
+    "51": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "52": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "53": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "54": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "55": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "61": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "62": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "63": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "64": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "65": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "71": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "72": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "73": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "74": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "75": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "81": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "82": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "83": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "84": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    },
+    "85": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "M": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "D": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "F": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "L": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        },
+        "O": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    }
+  }
+}

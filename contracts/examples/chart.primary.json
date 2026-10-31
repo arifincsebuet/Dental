@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "catalogVersion": "fdi-v1",
+  "clinicId": "CLINIC-001",
+  "patientId": "PAT-1001",
+  "chartId": "CHART-1001",
+  "dentition": "primary",
+  "numberingSystem": "FDI",
+  "chartVersion": 1,
+  "updatedAt": "2026-10-30T10:00:00Z",
+  "updatedBy": "DOC-001",
+  "teeth": {
+    "51": {
+      "assessment": "assessed",
+      "presence": "present"
+    },
+    "55": {
+      "assessment": "not_assessed",
+      "presence": "unknown"
+    },
+    "53": {
+      "assessment": "assessed",
+      "presence": "present",
+      "surfaces": {
+        "I": {
+          "assessment": "assessed",
+          "findings": [],
+          "restorations": []
+        }
+      }
+    }
+  }
+}
