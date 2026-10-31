@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,33 +17,39 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.spala.dental.ui.theme.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.tasks.await
 import org.json.*
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.Period
 import java.util.*
 
-private val Teal = Color(0xFF0F766E)
-private val Blue = Color(0xFF2563EB)
-private val Mint = Color(0xFFF0FDFA)
-private val Slate = Color(0xFF1E293B)
 private fun date(value: Long) = SimpleDateFormat("dd MMM yyyy · HH:mm", Locale.getDefault()).format(Date(value))
+private fun ageText(dob: String): String? = runCatching {
+    val years = Period.between(LocalDate.parse(dob.trim()), LocalDate.now()).years
+    if (years in 0..130) "$years yrs" else null
+}.getOrNull()
 
 class MainActivity : ComponentActivity() {
     private val store by lazy { (application as ClinicApplication).store }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary = Teal, secondary = Blue, background = Mint, surface = Color.White, onSurface = Slate)) {
+            DentalTheme {
                 CompositionLocalProvider(LocalEditorSaveStatus provides { EditorSaveStatus(store.saveSequence, store.saveError) }) {
                     ClinicApp(store)
                 }
@@ -63,12 +70,15 @@ private fun ClinicApp(store: ClinicStore) {
     var showHowTo by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("Home") }
     var patientId by rememberSaveable { mutableStateOf<String?>(null) }
+    var doctorId by rememberSaveable { mutableStateOf<String?>(null) }
     val patient = store.patients.firstOrNull { it.optString("id") == patientId }
+    val doctor = doctorId?.let { id -> clinicianRecords(store.config).firstOrNull { it.optString("id") == id } }
     var tab by rememberSaveable { mutableStateOf("Overview") }
     var search by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Form?>(null) }
     var tooth by remember { mutableStateOf<String?>(null) }
+    var heroTooth by rememberSaveable(patientId) { mutableStateOf<String?>(null) }
     var chartPatientId by rememberSaveable { mutableStateOf<String?>(null) }
     var chartToken by rememberSaveable { mutableStateOf("") }
     var toothSurface by remember { mutableStateOf("") }
@@ -114,98 +124,242 @@ private fun ClinicApp(store: ClinicStore) {
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null && imagePatientId != null) store.attach(imagePatientId!!, uri) }
     fun addPatient() { if (store.currentRole in listOf("cashier", "auditor", "unknown")) { error = "Your current role cannot register patients"; return }; form = Form("New patient", listOf(Field("name", "Full name", required = true), Field("phone", "Phone"), Field("dob", "Date of birth (YYYY-MM-DD)"), Field("allergies", "Allergies / medical alerts"))) { values -> store.create(values["name"]!!, values["phone"]!!, values["dob"]!!, values["allergies"]!!) } }
     fun editRecord(p: JSONObject, action: String, edit: (JSONObject) -> Unit) { val copy = JSONObject(p.toString()); edit(copy); store.save(copy, action) }
+    /** Every 3D launch gets a fresh session token so stale results from an earlier chart are ignored. */
+    fun open3D(p: JSONObject, chart: JSONObject) {
+        chartPatientId = p.optString("id"); chartToken = uid()
+        chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
+    }
+    fun openPatient(id: String) { patientId = id; tab = "Overview" }
     if (showHowTo) {
         BackHandler { showHowTo = false }
         HowToUseScreen(onBack = { showHowTo = false })
         return
     }
-    Scaffold(containerColor = Mint, topBar = {
+    BackHandler(enabled = patient != null || doctor != null) { if (patient != null) patientId = null else doctorId = null }
+    Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
         TopAppBar(title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DentalAppLogo(Modifier.size(40.dp))
-                Column { Text("DENTAL CARE", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Teal); Text("Your clinic, connected", fontSize = 12.sp) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                DentalAppLogo(Modifier.size(38.dp))
+                Column {
+                    Text("Dental Care", style = MaterialTheme.typography.titleLarge, color = Ink)
+                    Text(store.config.optString("name").takeIf { it.isNotBlank() && it != "Dental Care" } ?: "Your clinic, connected",
+                        style = MaterialTheme.typography.bodySmall, color = InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
-        }, actions = { if (store.busy) CircularProgressIndicator(Modifier.size(24.dp)); TextButton(onClick = { store.sync() }, enabled = !store.busy) { Text("Sync") } }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White))
+        }, actions = {
+            if (store.busy) CircularProgressIndicator(Modifier.size(22.dp).padding(end = 4.dp), strokeWidth = 2.dp)
+            Surface(onClick = { store.sync() }, enabled = !store.busy, shape = RoundedCornerShape(50), color = Teal50,
+                modifier = Modifier.padding(end = 12.dp).semantics { contentDescription = "Synchronize changes" }) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    GlyphIcon(Glyph.Sync, Teal700, 16.dp); Text("Sync", style = MaterialTheme.typography.labelLarge, color = Teal700)
+                }
+            }
+        }, colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceWhite))
     }, bottomBar = {
-        NavigationBar(containerColor = Color.White) { listOf("Home", "Patients", "Schedule", "Reports", "Settings").forEachIndexed { index, name -> NavigationBarItem(selected = page == name && patient == null, onClick = { page = name; patientId = null }, icon = { ClinicNavIcon(index) }, label = { Text(name, fontSize = 10.sp) }) } }
+        NavigationBar(containerColor = SurfaceWhite, tonalElevation = 0.dp) {
+            listOf("Home", "Patients", "Schedule", "Reports", "Settings").forEachIndexed { index, name ->
+                NavigationBarItem(selected = page == name && patient == null && doctor == null, onClick = { page = name; patientId = null; doctorId = null },
+                    icon = { ClinicNavIcon(index) }, label = { Text(name, style = MaterialTheme.typography.labelSmall) },
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = Teal100, selectedTextColor = Teal700, unselectedTextColor = InkMuted))
+            }
+        }
     }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (store.message.isNotBlank()) Surface(color = Color(0xFFDCFCE7), shape = RoundedCornerShape(12.dp)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text(store.message, Modifier.weight(1f)); TextButton(onClick = { store.clearMessage() }) { Text("Dismiss") } } }
+        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (store.message.isNotBlank()) Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Green50).border(1.dp, Green600.copy(alpha = .25f), RoundedCornerShape(16.dp)).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlyphIcon(Glyph.Check, Green600, 18.dp)
+                Text(store.message, Modifier.weight(1f).padding(horizontal = 10.dp), style = MaterialTheme.typography.bodyMedium, color = Ink)
+                TextButton(onClick = { store.clearMessage() }) { Text("Dismiss") }
+            }
             if (patient != null) {
                 val p = patient
                 val patientTabs = if (p.has("chart")) listOf("Overview", "Chart", "Encounters", "Treatments", "Billing", "History") else if (p.has("invoices")) listOf("Overview", "Billing") else listOf("Overview")
-                TextButton(onClick = { patientId = null }) { Text("← Patients") }
-                Heading(p.optString("name"), "${p.optString("phone").ifBlank { "No phone" }} • ${if (p.optBoolean("dirty")) "Device saved · sync pending" else "Cloud synchronized"}")
-                if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy) { Text("Review conflict · retain draft and load server version") }
-                if (p.optString("allergies").isNotBlank()) CardBlock("Medical alerts", p.optString("allergies"), Color(0xFFFFF1F2))
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { patientTabs.forEach { name -> FilterChip(selected = tab == name, onClick = { tab = name }, label = { Text(name) }) } }
+                TextButton(onClick = { patientId = null }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                    GlyphIcon(Glyph.Back, Teal700, 18.dp); Spacer(Modifier.width(4.dp)); Text(if (doctor != null) "Back to ${doctor.optString("name")}" else "Patients")
+                }
+                PatientHeader(p)
+                if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy, modifier = Modifier.fillMaxWidth()) { Text("Review conflict · retain draft and load server version") }
+                // The 3D model is the first clinical element of the profile.
+                if (p.has("chart")) {
+                    val chart = p.obj("chart")
+                    val summary = chartCounts(chart)
+                    Teeth3DHeroCard(
+                        chart = chart,
+                        title = "Smile overview",
+                        subtitle = "${chart.optString("dentition", "permanent").replaceFirstChar { it.uppercase() }} dentition · revision ${chart.optLong("chartVersion")}",
+                        selectedTooth = heroTooth,
+                        onToothTap = { key -> heroTooth = if (heroTooth == key) null else key },
+                        onOpenFull = { open3D(p, JSONObject(chart.toString())) },
+                    ) {
+                        val selected = heroTooth
+                        if (selected != null) SelectedToothSummary(selected, chart.optJSONObject("teeth")?.optJSONObject(selected), onClear = { heroTooth = null }) { tooth = selected; toothSurface = "" }
+                        else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                MiniMetric("${summary.assessed}", "Assessed", Teal700, Modifier.weight(1f))
+                                MiniMetric("${summary.findings}", "Findings", Amber600, Modifier.weight(1f))
+                                MiniMetric("${summary.restorations}", "Restored", Blue600, Modifier.weight(1f))
+                                MiniMetric("${summary.planned}", "Planned", Color(0xFF7C3AED), Modifier.weight(1f))
+                            }
+                            ChartLegendRow()
+                        }
+                        Button(onClick = { open3D(p, JSONObject(chart.toString())) }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(16.dp)) {
+                            GlyphIcon(Glyph.Cube, Color.White, 18.dp); Spacer(Modifier.width(8.dp)); Text("Open interactive 3D chart")
+                        }
+                    }
+                } else if (p.has("name")) SurfaceCard(background = SurfaceTint) {
+                    Text("Dental chart", style = MaterialTheme.typography.titleSmall, color = Ink)
+                    Text("Clinical chart details are not available for your clinic role.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                }
+                SegmentedPills(patientTabs, tab.takeIf { it in patientTabs } ?: "Overview", Modifier.fillMaxWidth()) { tab = it }
                 when (tab.takeIf { it in patientTabs } ?: "Overview") {
                     "Overview" -> {
-                        CardBlock("Patient profile", "Date of birth: ${p.optString("dob").ifBlank { "Not recorded" }}\nPhone: ${p.optString("phone").ifBlank { "Not recorded" }}")
-                        OutlinedButton(onClick = {
-                            val fields = mutableListOf(Field("name", "Full name", p.optString("name"), true), Field("phone", "Phone", p.optString("phone")), Field("dob", "Date of birth (YYYY-MM-DD)", p.optString("dob")))
-                            if (p.has("allergies")) fields.add(Field("allergies", "Medical alerts", p.optString("allergies")))
-                            form = Form("Edit profile", fields) { values -> editRecord(p, "Profile amended") { changed -> values.forEach { (key, value) -> changed.put(key, value) } } }
-                        }) { Text("Edit profile") }
-                        if (p.has("story")) {
-                        CardBlock("Clinical story", p.optString("story").ifBlank { "Add complaint, medical context, examination notes, and care goals." })
-                        Button(onClick = { form = Form("Clinical story", listOf(Field("story", "Clinical narrative", p.optString("story")))) { v -> editRecord(p, "Clinical story amended") { it.put("story", v["story"]) } } }) { Text("Update clinical story") }
+                        SectionHeader("Profile")
+                        SurfaceCard {
+                            InfoRow(Glyph.Calendar, "Date of birth", p.optString("dob").ifBlank { "Not recorded" } + (ageText(p.optString("dob"))?.let { " · $it" } ?: ""))
+                            InfoRow(Glyph.Phone, "Phone", p.optString("phone").ifBlank { "Not recorded" })
+                            InfoRow(Glyph.Person, "Patient ID", p.optString("id").take(8).uppercase())
                         }
-                        OutlinedButton(onClick = { form = Form(if (p.optBoolean("archived")) "Restore archived patient" else "Archive patient", listOf(Field("reason", "Reason", required = true))) { values -> editRecord(p, "Patient archive state amended: ${values["reason"]}") { it.put("archived", !p.optBoolean("archived")) } } }) { Text(if (p.optBoolean("archived")) "Restore patient" else "Archive patient") }
-                        Text("Appointments", fontWeight = FontWeight.Bold)
-                        p.optJSONArray("appointments")?.objects().orEmpty().forEach { a -> CardBlock(a.optString("date"), "${a.optString("doctor")} · ${a.optString("reason")}\n${a.optString("status")}") }
-                        OutlinedButton(onClick = { patientId = null; page = "Schedule" }) { Text("Manage appointments") }
-                        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(p.optBoolean("communicationConsent"), { allowed -> editRecord(p, "Reminder consent updated") { it.put("communicationConsent", allowed) } }); Text("Consent to appointment reminders") }
-                        OutlinedButton(onClick = { store.stageExport(JSONObject().put("kind", "pdf").put("patient", p).put("config", store.config)) { pdfExporter.launch("care-summary-${p.optString("id")}.pdf") } }) { Text("Export care summary PDF") }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { if (p.has("images")) OutlinedButton(onClick = { imagePatientId = p.optString("id"); imagePicker.launch("image/*") }, enabled = !store.busy) { Text("Attach image") }; OutlinedButton(onClick = { store.stageExport(JSONObject().put("kind", "json").put("text", p.toString(2))) { exporter.launch("patient-${p.optString("id")}.json") } }) { Text("Export JSON") } }
-                        p.optJSONArray("images")?.objects().orEmpty().forEach { image ->
-                            OutlinedButton(onClick = { scope.launch { runCatching {
+                        SectionHeader("Quick actions")
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ActionTile("Edit profile", Glyph.Edit, Modifier.weight(1f)) {
+                                val fields = mutableListOf(Field("name", "Full name", p.optString("name"), true), Field("phone", "Phone", p.optString("phone")), Field("dob", "Date of birth (YYYY-MM-DD)", p.optString("dob")))
+                                if (p.has("allergies")) fields.add(Field("allergies", "Medical alerts", p.optString("allergies")))
+                                form = Form("Edit profile", fields) { values -> editRecord(p, "Profile amended") { changed -> values.forEach { (key, value) -> changed.put(key, value) } } }
+                            }
+                            ActionTile("Care summary PDF", Glyph.Export, Modifier.weight(1f)) { store.stageExport(JSONObject().put("kind", "pdf").put("patient", p).put("config", store.config)) { pdfExporter.launch("care-summary-${p.optString("id")}.pdf") } }
+                            ActionTile("Export JSON", Glyph.Clipboard, Modifier.weight(1f)) { store.stageExport(JSONObject().put("kind", "json").put("text", p.toString(2))) { exporter.launch("patient-${p.optString("id")}.json") } }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            ActionTile("Attach image", Glyph.Image, Modifier.weight(1f), enabled = p.has("images") && !store.busy) { imagePatientId = p.optString("id"); imagePicker.launch("image/*") }
+                            ActionTile("Appointments", Glyph.Calendar, Modifier.weight(1f)) { patientId = null; doctorId = null; page = "Schedule" }
+                            ActionTile(if (p.optBoolean("archived")) "Restore patient" else "Archive patient", Glyph.Archive, Modifier.weight(1f), tint = if (p.optBoolean("archived")) Teal700 else Rose600) {
+                                form = Form(if (p.optBoolean("archived")) "Restore archived patient" else "Archive patient", listOf(Field("reason", "Reason", required = true))) { values -> editRecord(p, "Patient archive state amended: ${values["reason"]}") { it.put("archived", !p.optBoolean("archived")) } }
+                            }
+                        }
+                        if (p.has("story")) {
+                            SectionHeader("Clinical story", action = "Update") { form = Form("Clinical story", listOf(Field("story", "Clinical narrative", p.optString("story")))) { v -> editRecord(p, "Clinical story amended") { it.put("story", v["story"]) } } }
+                            SurfaceCard { Text(p.optString("story").ifBlank { "Add complaint, medical context, examination notes, and care goals." }, style = MaterialTheme.typography.bodyMedium, color = if (p.optString("story").isBlank()) InkMuted else Ink) }
+                        }
+                        SectionHeader("Appointments", action = "Manage") { patientId = null; doctorId = null; page = "Schedule" }
+                        val appointments = p.optJSONArray("appointments")?.objects().orEmpty()
+                        if (appointments.isEmpty()) SurfaceCard { Text("No appointments recorded.", color = InkMuted, style = MaterialTheme.typography.bodyMedium) }
+                        appointments.forEach { a ->
+                            SurfaceCard(padding = 14.dp) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(Blue100), contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Calendar, Blue600, 20.dp) }
+                                    Column(Modifier.weight(1f)) {
+                                        Text(a.optString("date"), style = MaterialTheme.typography.titleSmall, color = Ink)
+                                        Text(listOf(a.optString("doctor"), a.optString("reason")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                                    }
+                                    StatusPill(a.optString("status").ifBlank { "Scheduled" }, SurfaceTint, InkMuted, dot = false)
+                                }
+                            }
+                        }
+                        SurfaceCard(padding = 12.dp) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Appointment reminders", style = MaterialTheme.typography.titleSmall, color = Ink)
+                                    Text("Patient consents to reminder messages", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                                }
+                                Switch(p.optBoolean("communicationConsent"), { allowed -> editRecord(p, "Reminder consent updated") { it.put("communicationConsent", allowed) } })
+                            }
+                        }
+                        val images = p.optJSONArray("images")?.objects().orEmpty()
+                        if (images.isNotEmpty()) SectionHeader("Clinical images")
+                        images.forEach { image ->
+                            SurfaceCard(padding = 12.dp, onClick = { scope.launch { runCatching {
                                 val bytes = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child(image.getString("path")).getBytes(512L * 1024).await()
                                 val decoded = withContext(Dispatchers.IO) { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
                                 if (patientId == p.optString("id")) preview = decoded
-                            }.onFailure { error = it.localizedMessage ?: "Unable to open image" } } }) { Text("View clinical image · ${image.optInt("bytes") / 1024} KB") }
+                            }.onFailure { error = it.localizedMessage ?: "Unable to open image" } } }) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    GlyphIcon(Glyph.Image, Teal700, 22.dp)
+                                    Text("Clinical image · ${image.optInt("bytes") / 1024} KB", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                    GlyphIcon(Glyph.Chevron, InkSubtle, 18.dp)
+                                }
+                            }
                         }
                     }
                     "Chart" -> {
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("permanent", "primary", "mixed").forEach { dentition -> FilterChip(selected = p.obj("chart").optString("dentition") == dentition, onClick = { editRecord(p, "Chart inventory: $dentition") { it.obj("chart").put("dentition", dentition) } }, label = { Text(dentition.replaceFirstChar { it.uppercase() }) }) } }
-                        Button(onClick = {
-                            chartPatientId = p.optString("id"); chartToken = uid()
-                            val payload = JSONObject(p.obj("chart").toString()).put("sessionToken", chartToken)
-                            chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", payload.toString()))
-                        }, modifier = Modifier.fillMaxWidth()) { Text("Open interactive 3D chart") }
-                        OutlinedButton(onClick = { explanation = true }) { Text("Patient explanation view") }
-                        Text("Tap a tooth to assess or plan care", color = Slate.copy(alpha = .65f))
-                        val inventory = p.obj("chart").optString("dentition")
-                        if (inventory != "primary") NativeDentalChart(p, false) { tooth = it }
-                        if (inventory != "permanent") NativeDentalChart(p, true) { tooth = it }
-                        CardBlock("Chart legend", "White · unassessed    Teal · assessed\nAmber · finding    Gray · recorded tooth loss")
+                        SectionHeader("Dentition")
+                        SegmentedPills(listOf("permanent", "primary", "mixed"), p.obj("chart").optString("dentition"), Modifier.fillMaxWidth(), label = { it.replaceFirstChar { c -> c.uppercase() } }) { dentition ->
+                            editRecord(p, "Chart inventory: $dentition") { it.obj("chart").put("dentition", dentition) }
+                        }
+                        Surface(onClick = { open3D(p, JSONObject(p.obj("chart").toString())) }, shape = RoundedCornerShape(24.dp), color = Color.Transparent, modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.background(Brush.linearGradient(listOf(Teal600, HeroDeep))).padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(alpha = .16f)), contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Cube, Color.White, 28.dp) }
+                                Column(Modifier.weight(1f)) {
+                                    Text("Open interactive 3D chart", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                                    Text("Rotate, zoom and tap any tooth or surface to assess it", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = .8f))
+                                }
+                                GlyphIcon(Glyph.Chevron, Color.White, 20.dp)
+                            }
+                        }
+                        OutlinedButton(onClick = { explanation = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("Patient explanation view") }
+                        SectionHeader("Odontogram")
+                        SurfaceCard {
+                            Text("Tap a tooth to assess or plan care", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                            val inventory = p.obj("chart").optString("dentition")
+                            if (inventory != "primary") NativeDentalChart(p, false) { tooth = it }
+                            if (inventory != "permanent") NativeDentalChart(p, true) { tooth = it }
+                        }
+                        SurfaceCard(background = SurfaceTint) {
+                            Text("Chart legend", style = MaterialTheme.typography.titleSmall, color = Ink)
+                            ChartLegendRow()
+                        }
                     }
                     "Encounters" -> EncountersScreen(p, store.config) { changed, action -> store.save(changed, action) }
                     "Treatments" -> TreatmentWorkspaceScreen(p, store.config) { changed, action -> store.save(changed, action) }
                     "Billing" -> BillingScreen(p, store.config) { changed, action -> store.save(changed, action) }
-                    "History" -> ChartHistoryScreen(p, store.config) { chart ->
-                        chartPatientId = p.optString("id"); chartToken = uid()
-                        chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
-                    }
+                    "History" -> ChartHistoryScreen(p, store.config) { chart -> open3D(p, chart) }
                 }
+            } else if (doctor != null) {
+                DoctorProfileScreen(doctor, store.patients, store.config, onBack = { doctorId = null }, onOpenPatient = { id -> openPatient(id) })
             } else when (page) {
                 "Home" -> {
-                    Heading("A clearer view of care", "Your clinic at a glance")
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { Stat("Patients", store.patients.size.toString(), Modifier.weight(1f)); Stat("Open plans", store.patients.sumOf { it.optJSONArray("treatments")?.objects().orEmpty().count { t -> t.optString("status") !in listOf("Completed", "Declined") } }.toString(), Modifier.weight(1f)) }
-                    CardBlock("Welcome to Dental Care", "Keep patient profiles, clinical stories, dental charts, and treatment records together.")
-                    Button(onClick = { addPatient() }, modifier = Modifier.fillMaxWidth()) { Text("+ Register patient") }
-                    Text("Recent patients", fontWeight = FontWeight.Bold)
-                    store.patients.sortedByDescending { it.optLong("updatedAt") }.take(5).forEach { p -> PatientCard(p) { patientId = p.optString("id"); tab = "Overview" } }
+                    HomeHero(store)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatTile("Patients", store.patients.count { !it.optBoolean("archived") }.toString(), Teal700, Glyph.Person, Modifier.weight(1f))
+                        StatTile("Open plans", store.patients.sumOf { it.optJSONArray("treatments")?.objects().orEmpty().count { t -> t.optString("status") !in listOf("Completed", "Declined", "Cancelled") } }.toString(), Color(0xFF7C3AED), Glyph.Clipboard, Modifier.weight(1f))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatTile("Today's visits", todaysVisits(store).toString(), Blue600, Glyph.Calendar, Modifier.weight(1f))
+                        StatTile("Sync pending", store.patients.count { it.optBoolean("dirty") }.toString(), Amber600, Glyph.Sync, Modifier.weight(1f))
+                    }
+                    SectionHeader("Quick actions")
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ActionTile("Register patient", Glyph.Plus, Modifier.weight(1f)) { addPatient() }
+                        ActionTile("Book visit", Glyph.Calendar, Modifier.weight(1f), tint = Blue600) { page = "Schedule" }
+                        ActionTile("Find patient", Glyph.Person, Modifier.weight(1f), tint = Color(0xFF7C3AED)) { page = "Patients" }
+                    }
+                    val team = clinicianRecords(store.config).filter { it.optBoolean("active", true) }
+                    SectionHeader("Care team")
+                    if (team.isEmpty()) SurfaceCard(background = SurfaceTint) {
+                        Text("Add your dentists in Settings › Clinic › Staff to see their profiles here.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                    } else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        team.forEach { member -> DoctorChip(member) { doctorId = member.optString("id") } }
+                    }
+                    SectionHeader("Recent patients", action = "See all") { page = "Patients" }
+                    val recent = store.patients.sortedByDescending { it.optLong("updatedAt") }.take(5)
+                    if (recent.isEmpty()) SurfaceCard(background = SurfaceTint) { Text("Register your first patient to create their profile and 3D dental chart.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
+                    recent.forEach { p -> PatientCard(p) { openPatient(p.optString("id")) } }
                 }
                 "Patients" -> {
-                    Heading("Patients", "Find a profile and continue care")
-                    OutlinedTextField(search, { search = it }, label = { Text("Search name, phone, or patient ID") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), singleLine = true)
-                    Button(onClick = { addPatient() }) { Text("+ Register patient") }
-                    Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(showArchived, { showArchived = it }); Text("Include archived patients") }
-                    store.patients.filter { (showArchived || !it.optBoolean("archived")) && "${it.optString("name")} ${it.optString("phone")} ${it.optString("id")}".contains(search, true) }.forEach { p -> PatientCard(p) { patientId = p.optString("id"); tab = "Overview" } }
-                    if (store.patients.isEmpty()) CardBlock("Your patient list starts here", "Register a patient to create their profile and dental chart.")
+                    Heading("Patients", "${store.patients.count { !it.optBoolean("archived") }} active profiles")
+                    OutlinedTextField(search, { search = it }, placeholder = { Text("Search name, phone, or patient ID") }, leadingIcon = { GlyphIcon(Glyph.Person, InkMuted, 18.dp) },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = SurfaceWhite, focusedContainerColor = SurfaceWhite, unfocusedBorderColor = Hairline))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = { addPatient() }, shape = RoundedCornerShape(14.dp)) { GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); Text("Register patient") }
+                        Spacer(Modifier.weight(1f))
+                        FilterChip(selected = showArchived, onClick = { showArchived = !showArchived }, label = { Text("Include archived") })
+                    }
+                    store.patients.filter { (showArchived || !it.optBoolean("archived")) && "${it.optString("name")} ${it.optString("phone")} ${it.optString("id")}".contains(search, true) }.forEach { p -> PatientCard(p) { openPatient(p.optString("id")) } }
+                    if (store.patients.isEmpty()) SurfaceCard(background = SurfaceTint) { Text("Your patient list starts here", style = MaterialTheme.typography.titleSmall); Text("Register a patient to create their profile and dental chart.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
                 }
-                "Schedule" -> SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action) }, { id -> patientId = id; tab = "Overview" })
+                "Schedule" -> SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action) }, { id -> openPatient(id) })
                 "Reports" -> AdvancedReportsScreen(store.patients, store.config)
                 "Settings" -> {
                     Heading("Settings", "Storage and account preferences")
@@ -240,24 +394,119 @@ private fun ClinicApp(store: ClinicStore) {
             }
         }
     }
-    if (explanation && patient != null) PatientExplanationDialog(patient, { explanation = false }) { chart ->
-        chartPatientId = patient.optString("id"); chartToken = uid()
-        chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
-    }
+    if (explanation && patient != null) PatientExplanationDialog(patient, { explanation = false }) { chart -> open3D(patient, chart) }
     preview?.let { bitmap -> AlertDialog(onDismissRequest = { preview = null }, title = { Text("Clinical image") }, text = { androidx.compose.foundation.Image(bitmap.asImageBitmap(), "Clinical attachment", Modifier.fillMaxWidth().heightIn(max = 480.dp)) }, confirmButton = { TextButton(onClick = { preview = null }) { Text("Close") } }) }
     if (error.isNotBlank()) AlertDialog(onDismissRequest = { error = "" }, title = { Text("Please review") }, text = { Text(error) }, confirmButton = { TextButton(onClick = { error = "" }) { Text("OK") } })
     form?.let { active -> key(active) {
         val values = remember { mutableStateMapOf<String, String>().apply { active.fields.forEach { put(it.key, it.value) } } }
         var formError by remember { mutableStateOf("") }
-        AlertDialog(onDismissRequest = { form = null }, title = { Text(active.title) }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { active.fields.forEach { field -> OutlinedTextField(values[field.key] ?: "", { values[field.key] = it }, label = { Text(field.label) }, modifier = Modifier.fillMaxWidth(), minLines = if (field.key == "story") 5 else 1) }; if (formError.isNotBlank()) Text(formError, color = MaterialTheme.colorScheme.error) } }, confirmButton = { TextButton(enabled = !store.busy, onClick = { runCatching { require(active.fields.none { it.required && values[it.key].isNullOrBlank() }) { "Complete the required fields" }; val before = saveStatus(); active.save(values.toMap()); requireAcceptedSave(before, saveStatus()) }.onSuccess { form = null }.onFailure { formError = it.localizedMessage ?: "Review the values" } }) { Text("Save") } }, dismissButton = { TextButton(onClick = { form = null }) { Text("Cancel") } })
+        AlertDialog(onDismissRequest = { form = null }, title = { Text(active.title) }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { active.fields.forEach { field -> OutlinedTextField(values[field.key] ?: "", { values[field.key] = it }, label = { Text(field.label) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), minLines = if (field.key == "story") 5 else 1) }; if (formError.isNotBlank()) Text(formError, color = MaterialTheme.colorScheme.error) } }, confirmButton = { TextButton(enabled = !store.busy, onClick = { runCatching { require(active.fields.none { it.required && values[it.key].isNullOrBlank() }) { "Complete the required fields" }; val before = saveStatus(); active.save(values.toMap()); requireAcceptedSave(before, saveStatus()) }.onSuccess { form = null }.onFailure { formError = it.localizedMessage ?: "Review the values" } }) { Text("Save") } }, dismissButton = { TextButton(onClick = { form = null }) { Text("Cancel") } })
     } }
     tooth?.let { number -> if (patient != null) ToothEditor(number, patient, toothSurface, { tooth = null; toothSurface = "" }) { changed, action -> store.save(changed, action); if (store.saveError == null) tooth = null } }
 }
 
-@Composable private fun Heading(title: String, subtitle: String) { Column(verticalArrangement = Arrangement.spacedBy(5.dp)) { Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold); Text(subtitle, color = Slate.copy(alpha = .65f)) } }
-@Composable private fun CardBlock(title: String, body: String, background: Color = Color.White) { Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = background)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(body, color = Slate.copy(alpha = .75f), style = MaterialTheme.typography.bodyMedium) } } }
-@Composable private fun Stat(label: String, value: String, modifier: Modifier) { Card(modifier, colors = CardDefaults.cardColors(containerColor = Color.White)) { Column(Modifier.padding(20.dp)) { Text(value, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Teal); Text(label, color = Slate) } } }
-@Composable private fun PatientCard(patient: JSONObject, click: () -> Unit) { Card(onClick = click, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) { Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = Mint, shape = RoundedCornerShape(12.dp)) { Text(patient.optString("name").take(2).uppercase(), Modifier.padding(14.dp), color = Teal, fontWeight = FontWeight.Bold) }; Column(Modifier.weight(1f).padding(start = 14.dp)) { Text(patient.optString("name"), fontWeight = FontWeight.SemiBold); Text(patient.optString("phone").ifBlank { "No phone recorded" }, fontSize = 12.sp) }; Text("→", color = Teal) } } }
+private fun todaysVisits(store: ClinicStore): Int = runCatching {
+    val zone = ClinicalRules.zone(store.config)
+    val start = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+    val end = start + 86_400_000L
+    store.patients.sumOf { p ->
+        p.optJSONArray("appointments")?.objects().orEmpty().count { a ->
+            a.optString("status") !in setOf("Cancelled", "No show") && runCatching { ClinicalRules.appointmentMillis(a, store.config) in start until end }.getOrDefault(false)
+        }
+    }
+}.getOrDefault(0)
+
+@Composable private fun HomeHero(store: ClinicStore) {
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val greeting = when (hour) { in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; else -> "Good evening" }
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Brush.linearGradient(listOf(Teal600, HeroDeep)))) {
+        Canvas(Modifier.matchParentSize()) {
+            drawCircle(Color.White.copy(alpha = .07f), size.height * .9f, androidx.compose.ui.geometry.Offset(size.width * .95f, size.height * .1f))
+            drawCircle(Color.White.copy(alpha = .05f), size.height * .6f, androidx.compose.ui.geometry.Offset(size.width * .8f, size.height * 1.05f))
+        }
+        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date()).uppercase(), style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = .75f))
+            Text(greeting, style = MaterialTheme.typography.headlineMedium, color = Color.White)
+            Text("Here is ${store.config.optString("name").ifBlank { "your clinic" }} at a glance.", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = .85f))
+        }
+    }
+}
+
+@Composable private fun PatientHeader(p: JSONObject) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Avatar(p.optString("name"), 60.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(p.optString("name"), style = MaterialTheme.typography.headlineSmall, color = Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(ageText(p.optString("dob")), p.optString("phone").ifBlank { null }, "ID ${p.optString("id").take(6).uppercase()}").joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = InkMuted)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (p.optBoolean("dirty")) StatusPill("Sync pending", Amber100, Amber600) else StatusPill("Synced", Green50, Green600)
+                if (p.optBoolean("archived")) StatusPill("Archived", SurfaceTint, InkMuted)
+                if (p.optString("allergies").isNotBlank()) StatusPill("Medical alert", Rose50, Rose600)
+            }
+        }
+    }
+    if (p.optString("allergies").isNotBlank()) AlertBanner("Medical alerts", p.optString("allergies"))
+}
+
+/** Footer of the profile 3D card when a tooth has been tapped on the model. */
+@Composable private fun SelectedToothSummary(key: String, state: JSONObject?, onClear: () -> Unit, onAssess: () -> Unit) {
+    val presence = state?.optString("presence", "unknown") ?: "unknown"
+    val assessment = state?.optString("assessment", "not_assessed") ?: "not_assessed"
+    val surfaces = state?.optJSONObject("surfaces")
+    val findings = mutableListOf<String>(); val restorations = mutableListOf<String>()
+    state?.optJSONArray("findings")?.let { a -> for (i in 0 until a.length()) findings += a.optString(i) }
+    surfaces?.keys()?.forEach { s ->
+        val o = surfaces.optJSONObject(s)
+        o?.optJSONArray("findings")?.let { a -> for (i in 0 until a.length()) findings += "${a.optString(i)} ($s)" }
+        o?.optJSONArray("restorations")?.let { a -> for (i in 0 until a.length()) restorations += "${a.optString(i)} ($s)" }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Teal500, Teal700))), contentAlignment = Alignment.Center) {
+            Text(key, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(toothName(key), style = MaterialTheme.typography.titleSmall, color = Ink)
+            Text("${assessment.replace('_', ' ').replaceFirstChar { it.uppercase() }} · ${presence.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+        }
+        TextButton(onClick = onClear) { Text("Clear") }
+    }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (findings.isEmpty() && restorations.isEmpty()) StatusPill("No coded findings recorded", SurfaceTint, InkMuted, dot = false)
+        findings.forEach { StatusPill(it.replace('_', ' '), Amber100, Amber600) }
+        restorations.forEach { StatusPill(it.replace('_', ' '), Blue100, Blue600) }
+        if ((state?.optJSONArray("treatmentStates")?.length() ?: 0) > 0) StatusPill("Planned care", Teal50, Teal700)
+    }
+    FilledTonalButton(onClick = onAssess, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Assess tooth $key") }
+}
+
+@Composable private fun DoctorChip(member: JSONObject, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(20.dp), color = SurfaceWhite, border = BorderStroke(1.dp, Hairline), shadowElevation = 1.dp, modifier = Modifier.width(150.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Avatar(member.optString("name"), 44.dp, listOf(Color(0xFF3B82F6), Teal700))
+            Text(member.optString("name"), style = MaterialTheme.typography.titleSmall, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(member.optString("role").ifBlank { "clinician" }.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall, color = InkMuted)
+        }
+    }
+}
+
+@Composable private fun Heading(title: String, subtitle: String) { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(title, style = MaterialTheme.typography.headlineMedium, color = Ink); Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = InkMuted) } }
+@Composable private fun CardBlock(title: String, body: String, background: Color = SurfaceWhite) { SurfaceCard(background = background) { Text(title, style = MaterialTheme.typography.titleSmall, color = Ink); Text(body, color = InkMuted, style = MaterialTheme.typography.bodyMedium) } }
+@Composable private fun PatientCard(patient: JSONObject, click: () -> Unit) {
+    SurfaceCard(onClick = click, padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Avatar(patient.optString("name"), 46.dp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(patient.optString("name"), style = MaterialTheme.typography.titleSmall, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(ageText(patient.optString("dob")), patient.optString("phone").ifBlank { "No phone recorded" }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+            }
+            if (patient.optString("allergies").isNotBlank()) Box(Modifier.size(8.dp).clip(CircleShape).background(Rose600).semantics { contentDescription = "Medical alert" })
+            if (patient.optBoolean("archived")) StatusPill("Archived", SurfaceTint, InkMuted, dot = false)
+            GlyphIcon(Glyph.Chevron, InkSubtle, 18.dp)
+        }
+    }
+}
+
 @Composable private fun ToothEditor(number: String, patient: JSONObject, initialSurface: String, close: () -> Unit, save: (JSONObject, String) -> Unit) {
     val saveStatus = LocalEditorSaveStatus.current
     val current = patient.obj("chart").obj("teeth").optJSONObject(number)
@@ -271,7 +520,7 @@ private fun ClinicApp(store: ClinicStore) {
     var procedure by remember(number) { mutableStateOf("") }
     var note by remember(number) { mutableStateOf("") }
     var toothError by remember(number) { mutableStateOf("") }
-    AlertDialog(onDismissRequest = close, title = { Text("Tooth $number") }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    AlertDialog(onDismissRequest = close, shape = RoundedCornerShape(28.dp), title = { Column { Text(toothName(number), style = MaterialTheme.typography.titleLarge); Text("FDI tooth $number", style = MaterialTheme.typography.bodySmall, color = InkMuted) } }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Assessment"); Choices(listOf("assessed", "not_assessed", "unable_to_assess"), assessment) { assessment = it }
         Text("Presence"); Choices(listOf("unknown", "present", "unerupted", "missing", "extracted", "exfoliated", "congenitally_absent"), presence) { presence = it }
         Text("Replacement"); Choices(listOf("not recorded", "none", "implant", "pontic", "removable_prosthesis"), replacement) { replacement = it }

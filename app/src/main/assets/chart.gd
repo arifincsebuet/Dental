@@ -1,14 +1,39 @@
 extends Node3D
-## Educational procedural dentition. Clinical records remain in the native host.
-## Each anatomical slot has a stable FDI body, including recorded missing slots.
+## Interactive 3D dental chart. Educational procedural dentition; clinical records remain in the
+## native host. Each anatomical slot has a stable FDI body, including recorded missing slots.
+## Bridge contract (unchanged): chart(), selectTooth(key), selectSurface(key, surface), closeChart().
 
-const ENAMEL := Color("fff8e8")
-const UNKNOWN := Color("d9e1e5")
+# --- Palette ----------------------------------------------------------------------------------
+const ENAMEL := Color("fff7e8")
+const UNKNOWN := Color("dfe6eb")
+const GUM := Color("e8979d")
 const TEAL := Color("0f766e")
+const TEAL_LIGHT := Color("14b8a6")
+const TEAL_TINT := Color("ccfbf1")
 const BLUE := Color("2563eb")
-const AMBER := Color("e89a38")
+const AMBER := Color("f59e0b")
+const INK := Color("0f172a")
+const MUTED := Color("5b6b7a")
+const HAIRLINE := Color("e3e9ee")
+const SHEET := Color(1, 1, 1, 0.97)
 const LOST := ["missing", "extracted", "exfoliated", "congenitally_absent"]
 const SURFACES := ["M", "D", "F", "L", "I", "O"]
+
+# --- Arch geometry ----------------------------------------------------------------------------
+const ARCH_A := 3.5
+const ARCH_B := 4.1
+const ARCH_SHIFT := 1.9
+const COLLAR := 1.45
+
+# --- Camera presets: [pitch, yaw, distance, arch filter] --------------------------------------
+const VIEWS := {
+	"Front": [0.0, 0.0, 13.5, "Both"],
+	"Upper": [-1.22, 0.0, 12.0, "Upper"],
+	"Lower": [1.22, 0.0, 12.0, "Lower"],
+	"Left": [0.0, -1.2, 12.5, "Both"],
+	"Right": [0.0, 1.2, 12.5, "Both"],
+}
+
 var bridge
 var chart: Dictionary = {}
 var teeth: Dictionary = {}
@@ -16,32 +41,60 @@ var rig := Node3D.new()
 var camera := Camera3D.new()
 var upper := Node3D.new()
 var lower := Node3D.new()
+var gum_materials: Array[StandardMaterial3D] = []
+
+# Camera: target values are set by input; current values ease toward them every frame.
 var target := Vector3.ZERO
 var yaw := 0.0
-var pitch := -0.25
-var distance := 13.0
+var pitch := 0.0
+var distance := 13.5
+var cur_target := Vector3.ZERO
+var cur_yaw := -0.9
+var cur_pitch := 0.35
+var cur_distance := 19.0
+var yaw_velocity := 0.0
+var pulse := 0.0
+
 var selected := ""
 var selected_surface := ""
 var pending_pick := Vector2(-1, -1)
 var fingers: Dictionary = {}
 var touch_origin := Vector2.ZERO
 var moved := false
-var selected_label := Label.new()
-var details_label := Label.new()
-var error_label := Label.new()
-var assess_button := Button.new()
-var surface_row := HFlowContainer.new()
+var last_tap_ms := 0
 var selected_halo: MeshInstance3D
 var show_labels := true
 var show_roots := false
+var arch_filter := "Both"
+var current_view := "Front"
 var input_valid := true
 var read_only := false
 
-func mat(color: Color, roughness: float = 0.28) -> StandardMaterial3D:
+# UI
+var canvas := CanvasLayer.new()
+var sheet := PanelContainer.new()
+var sheet_idle := VBoxContainer.new()
+var sheet_detail := VBoxContainer.new()
+var badge_label := Label.new()
+var name_label := Label.new()
+var status_label := Label.new()
+var chip_row := HFlowContainer.new()
+var surface_pad := GridContainer.new()
+var surface_hint := Label.new()
+var assess_button := Button.new()
+var view_buttons: Dictionary = {}
+var arch_buttons: Dictionary = {}
+var toggle_buttons: Dictionary = {}
+var surface_buttons: Dictionary = {}
+
+func mat(color: Color, roughness: float = 0.26) -> StandardMaterial3D:
 	var result := StandardMaterial3D.new()
 	result.albedo_color = color
 	result.roughness = roughness
-	result.metallic_specular = 0.52
+	result.metallic_specular = 0.58
+	result.rim_enabled = true
+	result.rim = 0.28
+	result.rim_tint = 0.6
 	result.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if color.a < 1.0:
 		result.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -63,28 +116,45 @@ func _ready() -> void:
 	rig.add_child(upper)
 	rig.add_child(lower)
 	add_child(camera)
-	camera.fov = 43
+	camera.fov = 40
 	camera.near = 0.05
-	var environment := WorldEnvironment.new()
-	environment.environment = Environment.new()
-	environment.environment.background_mode = Environment.BG_COLOR
-	environment.environment.background_color = Color("f0fdfa")
-	environment.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.environment.ambient_light_color = Color("e8f0f4")
-	environment.environment.ambient_light_energy = 0.67
-	add_child(environment)
-	for position in [Vector3(-5, 8, 6), Vector3(6, 2, -5), Vector3(0, -5, 5)]:
-		var light := DirectionalLight3D.new()
-		add_child(light)
-		light.position = position
-		light.look_at(Vector3.ZERO)
-		light.light_energy = 0.7
-		light.light_color = Color("fff7ec") if position.y > 5 else Color("e8f6ff")
+	build_environment()
 	if input_valid:
 		build_inventory()
 	build_ui()
 	update_camera()
 	set_process_unhandled_input(input_valid)
+
+func build_environment() -> void:
+	var world := WorldEnvironment.new()
+	var environment := Environment.new()
+	var sky_material := ProceduralSkyMaterial.new()
+	sky_material.sky_top_color = Color("cfe9ee")
+	sky_material.sky_horizon_color = Color("f5fbfc")
+	sky_material.ground_horizon_color = Color("f5fbfc")
+	sky_material.ground_bottom_color = Color("dde9ee")
+	var sky := Sky.new()
+	sky.sky_material = sky_material
+	environment.background_mode = Environment.BG_SKY
+	environment.sky = sky
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color("eaf2f6")
+	environment.ambient_light_energy = 0.62
+	world.environment = environment
+	add_child(world)
+	# Studio lighting: warm key, cool fill, soft back light for a clean rim on enamel.
+	for setup in [[Vector3(-5, 8, 7), Color("fff6ea"), 0.85], [Vector3(7, 2, 5), Color("e6f4ff"), 0.45], [Vector3(0, 3, -8), Color("ffffff"), 0.5], [Vector3(0, -6, 4), Color("f0f6ff"), 0.3]]:
+		var light := DirectionalLight3D.new()
+		add_child(light)
+		light.position = setup[0]
+		light.look_at(Vector3.ZERO)
+		light.light_color = setup[1]
+		light.light_energy = setup[2]
+		light.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+
+# ==============================================================================================
+# Dentition
+# ==============================================================================================
 
 func build_inventory() -> void:
 	var dentition: String = chart.get("dentition", "permanent")
@@ -94,42 +164,50 @@ func build_inventory() -> void:
 	if dentition != "primary":
 		build_jaw(1, false, upper, 1.0, 0.0)
 		build_jaw(4, false, lower, 0.96, 0.0)
+		upper.add_child(gum_band(COLLAR, 1.0, 0.0, dentition == "mixed"))
+		lower.add_child(gum_band(-COLLAR, 0.96, 0.0, dentition == "mixed"))
 	if dentition != "permanent":
-		# Mixed dentition has two labeled inventories. Primary slots occupy an inner
+		# Mixed dentition keeps two labeled inventories: primary slots occupy an inner
 		# diagrammatic row rather than replacing or silently overlapping successors.
-		var factor := 0.72 if dentition == "mixed" else 0.92
-		var shift := 0.2 if dentition == "mixed" else 0.0
-		build_jaw(5, true, upper, factor, shift)
-		build_jaw(8, true, lower, factor * 0.96, shift)
+		var factor := 0.70 if dentition == "mixed" else 0.92
+		build_jaw(5, true, upper, factor, 0.0)
+		build_jaw(8, true, lower, factor * 0.96, 0.0)
+		if dentition == "primary":
+			upper.add_child(gum_band(COLLAR * 0.92, factor * 0.78, 0.0, false))
+			lower.add_child(gum_band(-COLLAR * 0.92, factor * 0.75, 0.0, false))
 
 func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float, shift: float) -> void:
 	var max_position := 5 if primary else 8
 	var is_upper := first_quadrant in [1, 5]
 	var sign_y := -1.0 if is_upper else 1.0
-	var collar_y := 1.55 if is_upper else -1.55
-	var spatial_factor := factor * (0.72 if primary else 1.0)
-	parent.add_child(gum_band(collar_y, spatial_factor, shift))
+	var collar_y := COLLAR if is_upper else -COLLAR
+	if dentition_is_primary_only(): collar_y *= 0.92
+	var spatial_factor := factor * (0.78 if primary else 1.0)
 	for side in range(2):
 		var quadrant := first_quadrant + side if is_upper else first_quadrant - side
+		var patient_right := quadrant in [1, 4, 5, 8]
+		var side_sign := -1.0 if patient_right else 1.0
 		for position in range(1, max_position + 1):
 			var key := str(quadrant) + str(position)
 			var state: Dictionary = chart.get("teeth", {}).get(key, {})
-			var theta := (float(position) - 0.45) / float(max_position) * 1.68
-			var side_sign := -1.0 if side == 0 else 1.0
+			var theta := (float(position) - 0.45) / float(max_position) * 1.62
 			var body := StaticBody3D.new()
 			body.name = "Tooth_" + key
-			body.position = Vector3(sin(theta) * 3.5 * side_sign * spatial_factor, collar_y, (-cos(theta) * 4.0 + 1.1) * spatial_factor + shift)
-			body.rotation.y = atan2(sin(theta) * side_sign, -cos(theta))
+			body.position = Vector3(sin(theta) * ARCH_A * side_sign * spatial_factor, collar_y, (cos(theta) * ARCH_B - ARCH_SHIFT) * spatial_factor + shift)
+			var facial := Vector3(sin(theta) * side_sign / ARCH_A, 0, cos(theta) / ARCH_B).normalized()
+			# Local +Z faces the lips/cheeks (facial), local +X runs mesial on the patient's right.
+			body.basis = Basis.looking_at(-facial, Vector3.UP)
 			body.set_meta("toothKey", key)
 			body.set_meta("signY", sign_y)
 			body.set_meta("primary", primary)
+			body.set_meta("mesialSign", 1.0 if patient_right else -1.0)
 			parent.add_child(body)
 			var kind := "incisor" if position <= 2 else "canine" if position == 3 else "molar" if primary or position >= 6 else "premolar"
 			var dimensions := Vector3(0.72, 0.96, 0.39)
 			if position == 2: dimensions.x = 0.62
-			if kind == "canine": dimensions = Vector3(0.64, 1.11, 0.61)
-			if kind == "premolar": dimensions = Vector3(0.73, 0.86, 0.82)
-			if kind == "molar": dimensions = Vector3(0.96, 0.82, 1.0)
+			if kind == "canine": dimensions = Vector3(0.64, 1.08, 0.61)
+			if kind == "premolar": dimensions = Vector3(0.71, 0.86, 0.80)
+			if kind == "molar": dimensions = Vector3(0.88 if position == 8 else 0.96, 0.80, 0.98)
 			dimensions *= factor
 			body.set_meta("dimensions", dimensions)
 			var presence: String = state.get("presence", "unknown")
@@ -137,11 +215,14 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 			var absent := presence in LOST
 			if not absent or replacement not in ["none", ""]:
 				var color := ENAMEL if state.get("assessment", "not_assessed") == "assessed" else UNKNOWN
-				if presence == "unerupted": color = Color(0.76, 0.84, 0.88, 0.42)
+				if presence == "unerupted": color = Color(0.80, 0.87, 0.91, 0.5)
+				if absent and replacement == "implant": color = Color("e9eef2")
 				var crown := MeshInstance3D.new()
 				crown.name = "Crown"
 				crown.mesh = crown_mesh(kind, dimensions, sign_y)
-				crown.material_override = mat(color)
+				var crown_material := mat(color)
+				crown.material_override = crown_material
+				body.set_meta("crownMaterial", crown_material)
 				body.add_child(crown)
 				if replacement == "implant": add_implant(body, dimensions, sign_y)
 				else: add_roots(body, kind, dimensions, sign_y, is_upper)
@@ -150,27 +231,32 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 				add_absent_marker(body, dimensions, sign_y)
 			var collision := CollisionShape3D.new()
 			var box := BoxShape3D.new()
-			box.size = dimensions * Vector3(1.05, 1.0, 1.05)
+			box.size = dimensions * Vector3(1.08, 1.0, 1.08)
 			collision.position.y = sign_y * dimensions.y * 0.45
 			collision.shape = box
 			body.add_child(collision)
 			var tooth_label := Label3D.new()
 			tooth_label.name = "SlotLabel"
 			tooth_label.text = key
-			tooth_label.font_size = 38
-			tooth_label.pixel_size = 0.006
+			tooth_label.font_size = 40
+			tooth_label.outline_size = 12
+			tooth_label.pixel_size = 0.0042
 			tooth_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			tooth_label.modulate = TEAL
-			tooth_label.outline_modulate = Color.WHITE
-			tooth_label.position = Vector3(0, sign_y * (dimensions.y + 0.20), dimensions.z * 0.55)
+			tooth_label.modulate = Color("334155")
+			tooth_label.outline_modulate = Color(1, 1, 1, 0.95)
+			tooth_label.position = Vector3(0, sign_y * (dimensions.y + 0.24), dimensions.z * 0.35)
+			tooth_label.visible = show_labels
 			body.add_child(tooth_label)
 			teeth[key] = body
+
+func dentition_is_primary_only() -> bool:
+	return chart.get("dentition", "permanent") == "primary"
 
 func crown_mesh(kind: String, size: Vector3, sign_y: float) -> ArrayMesh:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var segments := 40
-	var levels := 8
+	var levels := 10
 	var half_x := size.x * 0.5
 	var half_z := size.z * 0.5
 	var exponent := 2.8 if kind in ["premolar", "molar"] else 2.5
@@ -214,11 +300,11 @@ func tip_width(kind: String) -> float:
 	return 0.88 if kind == "incisor" else 0.90
 
 func tip_depth(kind: String) -> float:
-	return 0.48 if kind == "incisor" else 0.83 if kind == "canine" else 0.90
+	return 0.46 if kind == "incisor" else 0.80 if kind == "canine" else 0.88
 
 func crown_side(angle: float, level: float, half_x: float, half_z: float, height: float, exponent: float, kind: String, sign_y: float) -> Vector3:
 	var edge := boundary(angle, half_x, half_z, exponent)
-	var belly := 0.74 + sin(level * PI * 0.85) * 0.27
+	var belly := 0.76 + sin(level * PI * 0.85) * 0.26
 	var width: float = lerpf(belly, tip_width(kind), pow(level, 4.0))
 	var depth: float = lerpf(belly, tip_depth(kind), pow(level, 4.0))
 	var x := edge.x * width
@@ -240,26 +326,42 @@ func top_height(kind: String, x: float, z: float) -> float:
 	if kind == "molar": base -= 0.035 * exp(-x * x * 70.0)
 	return base
 
-func gum_band(height: float, factor: float, shift: float) -> MeshInstance3D:
+## Gingiva: a soft tube following the arch with scalloped papillae toward the teeth.
+func gum_band(height: float, factor: float, shift: float, wide: bool) -> MeshInstance3D:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for section in range(64):
-		for ring in range(12):
+	var sections := 120
+	var rings := 18
+	var radius_x := (0.78 if wide else 0.50) * factor
+	var radius_y := 0.30 * factor + 0.06
+	var inner := -0.22 * factor if wide else 0.0
+	var up := 1.0 if height > 0 else -1.0
+	var center_y := height + up * 0.14
+	for section in range(sections):
+		for ring in range(rings):
 			var vertices: Array[Vector3] = []
 			var normals: Array[Vector3] = []
 			for point in [Vector2(section, ring), Vector2(section + 1, ring), Vector2(section, ring + 1), Vector2(section + 1, ring + 1)]:
-				var angle: float = -1.72 + point.x / 64.0 * 3.44
-				var cross_angle: float = point.y / 12.0 * TAU
-				var outward := Vector3(sin(angle), 0, -cos(angle))
-				var center := Vector3(sin(angle) * 3.5 * factor, height + (0.12 if height > 0 else -0.12), (-cos(angle) * 4.0 + 1.1) * factor + shift)
-				vertices.append(center + outward * cos(cross_angle) * 0.42 * factor + Vector3.UP * sin(cross_angle) * 0.24)
+				var angle: float = -1.70 + point.x / float(sections) * 3.40
+				var cross_angle: float = point.y / float(rings) * TAU
+				var outward := Vector3(sin(angle) / ARCH_A, 0, cos(angle) / ARCH_B).normalized()
+				var center := Vector3(sin(angle) * ARCH_A * factor, center_y, (cos(angle) * ARCH_B - ARCH_SHIFT) * factor + shift)
+				var toward_teeth: float = max(0.0, -sin(cross_angle) * up)
+				var papilla := 0.07 * toward_teeth * (0.5 + 0.5 * cos(angle * 16.0 / factor))
+				var offset := outward * (cos(cross_angle) * radius_x + inner) + Vector3.UP * (sin(cross_angle) * (radius_y + papilla))
+				vertices.append(center + offset)
 				normals.append((outward * cos(cross_angle) + Vector3.UP * sin(cross_angle)).normalized())
 			for index in [0, 2, 1, 1, 2, 3]:
 				tool.set_normal(normals[index])
 				tool.add_vertex(vertices[index])
 	var mesh := MeshInstance3D.new()
+	mesh.name = "Gingiva"
 	mesh.mesh = tool.commit()
-	mesh.material_override = mat(Color("dca3a1"), 0.55)
+	var gum_material := mat(GUM, 0.42)
+	gum_material.rim = 0.4
+	gum_material.rim_tint = 0.2
+	mesh.material_override = gum_material
+	gum_materials.append(gum_material)
 	return mesh
 
 func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_upper: bool) -> void:
@@ -271,36 +373,50 @@ func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_uppe
 	for index in range(count):
 		var root := MeshInstance3D.new()
 		var cylinder := CylinderMesh.new()
-		cylinder.top_radius = 0.045 if sign_y > 0 else 0.12
-		cylinder.bottom_radius = 0.12 if sign_y > 0 else 0.045
-		cylinder.height = size.y * 1.05
-		cylinder.radial_segments = 16
+		var wide := size.x * (0.30 if count == 1 else 0.20)
+		# The wide end always meets the crown at the cervical line; the apex points away.
+		cylinder.top_radius = wide if sign_y > 0 else 0.035
+		cylinder.bottom_radius = 0.035 if sign_y > 0 else wide
+		cylinder.height = size.y * (1.35 if kind == "canine" else 1.1)
+		cylinder.radial_segments = 18
+		cylinder.rings = 3
 		root.mesh = cylinder
-		root.position = Vector3((float(index) - (count - 1) * 0.5) * size.x * 0.35, -sign_y * size.y * 0.51, 0)
-		root.rotation.z = (float(index) - (count - 1) * 0.5) * 0.15 * sign_y
-		root.material_override = mat(Color("e8d3ad"), 0.5)
+		root.position = Vector3((float(index) - (count - 1) * 0.5) * size.x * 0.34, -sign_y * cylinder.height * 0.5, 0)
+		root.rotation.z = (float(index) - (count - 1) * 0.5) * 0.14 * sign_y
+		root.material_override = mat(Color("ecd8b4"), 0.5)
 		root_group.add_child(root)
 
 func add_implant(body: Node3D, size: Vector3, sign_y: float) -> void:
-	for index in range(7):
+	var titanium := mat(Color("9aa8b0"), 0.22)
+	titanium.metallic = 0.85
+	for index in range(8):
 		var screw := MeshInstance3D.new()
 		var cylinder := CylinderMesh.new()
-		cylinder.top_radius = size.x * 0.20
-		cylinder.bottom_radius = size.x * 0.18
+		cylinder.top_radius = size.x * 0.20 - index * 0.004
+		cylinder.bottom_radius = size.x * 0.17 - index * 0.004
 		cylinder.height = 0.07
 		cylinder.radial_segments = 20
 		screw.mesh = cylinder
-		screw.position.y = -sign_y * (0.04 + index * 0.065)
-		var titanium := mat(Color("98a6ad"), 0.24)
-		titanium.metallic = 0.8
+		screw.position.y = -sign_y * (0.04 + index * 0.075)
 		screw.material_override = titanium
 		body.add_child(screw)
 
 func add_absent_marker(body: Node3D, size: Vector3, sign_y: float) -> void:
-	for angle in [-0.65, 0.65]:
+	# A crossed, softly glowing socket marker keeps recorded loss explicit and selectable.
+	var socket := MeshInstance3D.new()
+	var disc := CylinderMesh.new()
+	disc.top_radius = size.x * 0.42
+	disc.bottom_radius = size.x * 0.42
+	disc.height = 0.02
+	disc.radial_segments = 28
+	socket.mesh = disc
+	socket.position.y = sign_y * 0.03
+	socket.material_override = mat(Color(0.39, 0.45, 0.55, 0.25), 0.7)
+	body.add_child(socket)
+	for angle in [-0.75, 0.75]:
 		var mark := MeshInstance3D.new()
 		var box := BoxMesh.new()
-		box.size = Vector3(size.x * 0.65, 0.035, 0.06)
+		box.size = Vector3(size.x * 0.7, 0.035, 0.06)
 		mark.mesh = box
 		mark.rotation.y = angle
 		mark.position.y = sign_y * 0.06
@@ -310,14 +426,20 @@ func add_absent_marker(body: Node3D, size: Vector3, sign_y: float) -> void:
 func face_anchor(body: Node3D, surface: String) -> Vector3:
 	var size: Vector3 = body.get_meta("dimensions")
 	var sign_y: float = body.get_meta("signY")
-	var quadrant := int(str(body.get_meta("toothKey"))[0])
-	var mesial_sign := -1.0 if quadrant in [1, 4, 5, 8] else 1.0
+	var mesial_sign: float = body.get_meta("mesialSign")
 	match surface:
 		"F": return Vector3(0, size.y * sign_y * 0.45, size.z * 0.49)
 		"L": return Vector3(0, size.y * sign_y * 0.45, -size.z * 0.49)
 		"M": return Vector3(size.x * mesial_sign * 0.49, size.y * sign_y * 0.45, 0)
 		"D": return Vector3(-size.x * mesial_sign * 0.49, size.y * sign_y * 0.45, 0)
 	return Vector3(0, size.y * sign_y * 0.96, 0)
+
+func glow(color: Color) -> StandardMaterial3D:
+	var result := mat(color, 0.3)
+	result.emission_enabled = true
+	result.emission = color
+	result.emission_energy_multiplier = 0.35
+	return result
 
 func add_state_markers(body: Node3D, state: Dictionary, size: Vector3, sign_y: float) -> void:
 	var surfaces: Dictionary = state.get("surfaces", {})
@@ -335,169 +457,552 @@ func add_state_markers(body: Node3D, state: Dictionary, size: Vector3, sign_y: f
 			if (index == 0 and findings.is_empty()) or (index == 1 and restorations.is_empty()): continue
 			var marker := MeshInstance3D.new()
 			var sphere := SphereMesh.new()
-			sphere.radius = 0.095
-			sphere.height = 0.19
-			sphere.radial_segments = 16
+			sphere.radius = 0.12 * size.x / 0.72
+			sphere.height = sphere.radius * 2.0
+			sphere.radial_segments = 20
+			sphere.rings = 10
 			marker.mesh = sphere
-			marker.scale = Vector3(1, 0.14, 1)
+			marker.scale = Vector3(1, 0.16, 1)
 			marker.quaternion = Quaternion(Vector3.UP, normal)
-			marker.position = anchor + normal * 0.025 + Vector3(0.08 if index == 1 else -0.08, 0, 0)
-			marker.material_override = mat(AMBER if index == 0 else BLUE, 0.3)
+			var both := not findings.is_empty() and not restorations.is_empty()
+			var lateral := (0.09 if index == 1 else -0.09) if both else 0.0
+			marker.position = anchor + normal * 0.02 + Vector3(lateral, 0, 0)
+			marker.material_override = glow(AMBER if index == 0 else BLUE)
 			body.add_child(marker)
 	if not state.get("findings", []).is_empty() or not state.get("treatmentStates", []).is_empty():
 		var badge := Label3D.new()
 		badge.text = "!" if not state.get("findings", []).is_empty() else "+"
-		badge.position = Vector3(0, sign_y * size.y * 0.45, size.z * 0.7)
-		badge.font_size = 48
-		badge.pixel_size = 0.005
+		badge.position = Vector3(0, sign_y * size.y * 0.45, size.z * 0.75)
+		badge.font_size = 56
+		badge.outline_size = 14
+		badge.outline_modulate = Color.WHITE
+		badge.pixel_size = 0.0045
 		badge.modulate = AMBER if badge.text == "!" else TEAL
 		badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		body.add_child(badge)
 
-func build_ui() -> void:
-	var canvas := CanvasLayer.new()
-	add_child(canvas)
-	var header := VBoxContainer.new()
-	header.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	header.offset_left = 24
-	header.offset_right = -24
-	header.offset_top = 28
-	canvas.add_child(header)
-	var title := Label.new()
-	title.text = "DENTAL CARE  /  3D CHART  ·  REV " + str(chart.get("chartVersion", 0))
-	title.add_theme_font_size_override("font_size", 29)
-	title.add_theme_color_override("font_color", TEAL)
-	header.add_child(title)
-	var hint := Label.new()
-	hint.text = "Drag to orbit · two fingers to pan / pinch to zoom · tap a tooth"
-	hint.add_theme_font_size_override("font_size", 19)
-	hint.add_theme_color_override("font_color", Color("475569"))
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	header.add_child(hint)
-	var controls := HFlowContainer.new()
-	header.add_child(controls)
-	for caption in ["Back", "Reset", "Focus", "Upper", "Lower", "Labels", "Roots", "−", "+"]:
-		var button := ui_button(caption)
-		button.pressed.connect(action.bind(caption))
-		controls.add_child(button)
-	if chart.get("dentition", "permanent") == "mixed":
-		var mixed_note := Label.new()
-		mixed_note.text = "MIXED DENTITION · inner row = primary; outer row = permanent"
-		mixed_note.add_theme_color_override("font_color", Color("475569"))
-		mixed_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		header.add_child(mixed_note)
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	panel.offset_left = 24
-	panel.offset_right = -24
-	panel.offset_top = -330
-	panel.offset_bottom = -24
-	panel.add_theme_stylebox_override("panel", panel_style(Color(1, 1, 1, 0.96)))
-	canvas.add_child(panel)
-	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 10)
-	panel.add_child(content)
-	selected_label.text = "Select a tooth"
-	if read_only: selected_label.text = "Historical chart · read only"
-	selected_label.add_theme_font_size_override("font_size", 26)
-	selected_label.add_theme_color_override("font_color", TEAL)
-	content.add_child(selected_label)
-	details_label.text = "Gray enamel: unassessed · Amber: finding · Blue: restoration\nA + badge indicates open planned care. Recorded loss uses a crossed slot."
-	details_label.add_theme_font_size_override("font_size", 20)
-	details_label.add_theme_color_override("font_color", Color("334155"))
-	details_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(details_label)
-	content.add_child(surface_row)
-	assess_button = ui_button("Assess selected tooth")
-	assess_button.disabled = true
-	assess_button.pressed.connect(edit_selected)
-	content.add_child(assess_button)
-	if not input_valid:
-		error_label.text = "This chart version cannot be displayed safely. Return to the native 2D chart."
-		error_label.add_theme_color_override("font_color", Color("b91c1c"))
-		error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		header.add_child(error_label)
+# ==============================================================================================
+# Interface
+# ==============================================================================================
 
-func panel_style(color: Color) -> StyleBoxFlat:
+func box_style(color: Color, radius: int = 24, shadow: int = 0, border: Color = Color(0, 0, 0, 0)) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = color
-	style.set_corner_radius_all(18)
-	style.content_margin_left = 18
-	style.content_margin_right = 18
-	style.content_margin_top = 14
-	style.content_margin_bottom = 14
+	style.set_corner_radius_all(radius)
+	style.content_margin_left = 20
+	style.content_margin_right = 20
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
+	style.anti_aliasing = true
+	if shadow > 0:
+		style.shadow_color = Color(0.06, 0.09, 0.16, 0.12)
+		style.shadow_size = shadow
+		style.shadow_offset = Vector2(0, shadow * 0.35)
+	if border.a > 0:
+		style.set_border_width_all(2)
+		style.border_color = border
 	return style
 
-func ui_button(text: String) -> Button:
+func label(text: String, size: int, color: Color, bold: bool = false) -> Label:
+	var result := Label.new()
+	result.text = text
+	result.add_theme_font_size_override("font_size", size)
+	result.add_theme_color_override("font_color", color)
+	if bold:
+		result.add_theme_constant_override("outline_size", 1)
+		result.add_theme_color_override("font_outline_color", color)
+	result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return result
+
+## Pill button. Toggle buttons show a filled teal state when pressed.
+func pill(text: String, toggle: bool = false, primary: bool = false, min_width: int = 0) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.custom_minimum_size = Vector2(96, 58)
-	button.add_theme_stylebox_override("normal", panel_style(Color.WHITE))
-	button.add_theme_stylebox_override("hover", panel_style(Color("ccfbf1")))
-	button.add_theme_stylebox_override("pressed", panel_style(Color("99f6e4")))
-	button.add_theme_color_override("font_color", TEAL)
-	button.add_theme_color_override("font_hover_color", TEAL)
-	button.add_theme_color_override("font_pressed_color", TEAL)
-	button.add_theme_font_size_override("font_size", 20)
+	button.toggle_mode = toggle
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(min_width, 72)
+	var base := TEAL if primary else Color(1, 1, 1, 0.0)
+	var text_color := Color.WHITE if primary else Color("334155")
+	button.add_theme_stylebox_override("normal", box_style(base, 36))
+	button.add_theme_stylebox_override("hover", box_style(TEAL.darkened(0.08) if primary else Color(0.06, 0.46, 0.43, 0.08), 36))
+	button.add_theme_stylebox_override("pressed", box_style(TEAL.darkened(0.15) if primary else Color.WHITE, 36, 8 if not primary else 0))
+	button.add_theme_stylebox_override("hover_pressed", box_style(TEAL.darkened(0.15) if primary else Color.WHITE, 36, 8 if not primary else 0))
+	button.add_theme_stylebox_override("disabled", box_style(Color("cbd5df") if primary else Color(1, 1, 1, 0), 36))
+	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	button.add_theme_color_override("font_color", text_color)
+	button.add_theme_color_override("font_hover_color", text_color if primary else TEAL)
+	button.add_theme_color_override("font_pressed_color", Color.WHITE if primary else TEAL)
+	button.add_theme_color_override("font_hover_pressed_color", Color.WHITE if primary else TEAL)
+	button.add_theme_color_override("font_disabled_color", Color("94a3b8"))
+	button.add_theme_font_size_override("font_size", 26)
 	return button
 
-func action(caption: String) -> void:
+## Round floating action used in the right-hand rail.
+func fab(text: String, toggle: bool = false) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.toggle_mode = toggle
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(96, 96)
+	button.add_theme_stylebox_override("normal", box_style(Color(1, 1, 1, 0.94), 48, 14, HAIRLINE))
+	button.add_theme_stylebox_override("hover", box_style(Color.WHITE, 48, 16, TEAL_TINT))
+	button.add_theme_stylebox_override("pressed", box_style(TEAL, 48, 14))
+	button.add_theme_stylebox_override("hover_pressed", box_style(TEAL, 48, 14))
+	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	button.add_theme_color_override("font_color", TEAL)
+	button.add_theme_color_override("font_hover_color", TEAL)
+	button.add_theme_color_override("font_pressed_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
+	button.add_theme_font_size_override("font_size", 24 if text.length() > 2 else 40)
+	return button
+
+func segmented(options: Array, store: Dictionary, on_pick: Callable) -> PanelContainer:
+	var holder := PanelContainer.new()
+	holder.add_theme_stylebox_override("panel", box_style(Color(0.93, 0.95, 0.96, 0.92), 44, 0))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	holder.add_child(row)
+	var group := ButtonGroup.new()
+	for option in options:
+		var button := pill(option, true)
+		button.button_group = group
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.pressed.connect(on_pick.bind(option))
+		row.add_child(button)
+		store[option] = button
+	return holder
+
+func chip(text: String, background: Color, foreground: Color) -> PanelContainer:
+	var holder := PanelContainer.new()
+	var style := box_style(background, 30)
+	style.content_margin_left = 18
+	style.content_margin_right = 18
+	style.content_margin_top = 6
+	style.content_margin_bottom = 6
+	holder.add_theme_stylebox_override("panel", style)
+	holder.add_child(label(text, 22, foreground))
+	return holder
+
+func legend_item(color: Color, text: String, hollow: bool = false) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	var dot := Panel.new()
+	dot.custom_minimum_size = Vector2(22, 22)
+	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var style := box_style(Color(0, 0, 0, 0) if hollow else color, 11, 0, color if hollow else Color(0, 0, 0, 0))
+	dot.add_theme_stylebox_override("panel", style)
+	row.add_child(dot)
+	row.add_child(label(text, 22, MUTED))
+	return row
+
+func build_ui() -> void:
+	add_child(canvas)
+	var safe := MarginContainer.new()
+	safe.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	safe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["margin_left", "margin_right"]: safe.add_theme_constant_override(side, 28)
+	safe.add_theme_constant_override("margin_top", 36)
+	safe.add_theme_constant_override("margin_bottom", 28)
+	canvas.add_child(safe)
+
+	# --- Top bar --------------------------------------------------------------------------
+	var top := VBoxContainer.new()
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	top.add_theme_constant_override("separation", 16)
+	safe.add_child(top)
+	var bar := PanelContainer.new()
+	bar.add_theme_stylebox_override("panel", box_style(Color(1, 1, 1, 0.94), 36, 18))
+	top.add_child(bar)
+	var bar_row := HBoxContainer.new()
+	bar_row.add_theme_constant_override("separation", 18)
+	bar.add_child(bar_row)
+	var back := pill("‹  Back")
+	back.pressed.connect(go_back)
+	bar_row.add_child(back)
+	var titles := VBoxContainer.new()
+	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	titles.add_theme_constant_override("separation", 0)
+	bar_row.add_child(titles)
+	titles.add_child(label("3D Dental Chart", 32, INK, true))
+	var dentition: String = str(chart.get("dentition", "permanent"))
+	var subtitle := dentition.capitalize() + " dentition  ·  Rev " + str(chart.get("chartVersion", 0))
+	if read_only: subtitle += "  ·  Read only"
+	titles.add_child(label(subtitle, 22, MUTED))
+	var reset := pill("Reset")
+	reset.pressed.connect(apply_view.bind("Front"))
+	bar_row.add_child(reset)
+
+	top.add_child(segmented(VIEWS.keys(), view_buttons, apply_view))
+	if dentition == "mixed":
+		top.add_child(chip("Mixed dentition  ·  inner row primary, outer row permanent", Color(1, 1, 1, 0.9), MUTED))
+	if not input_valid:
+		var error := PanelContainer.new()
+		error.add_theme_stylebox_override("panel", box_style(Color("fff1f2"), 28, 10, Color("fecdd3")))
+		error.add_child(label("This chart version cannot be displayed safely. Return and use the 2D chart.", 26, Color("be123c")))
+		top.add_child(error)
+
+	# --- Right rail -------------------------------------------------------------------------
+	var rail := VBoxContainer.new()
+	rail.add_theme_constant_override("separation", 14)
+	rail.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	rail.offset_left = -128
+	rail.offset_right = -28
+	rail.offset_top = -330
+	rail.offset_bottom = 170
+	canvas.add_child(rail)
+	for spec in [["+", false], ["−", false], ["123", true], ["Root", true]]:
+		var button := fab(spec[0], spec[1])
+		rail.add_child(button)
+		if spec[1]: toggle_buttons[spec[0]] = button
+		button.pressed.connect(rail_action.bind(spec[0]))
+	toggle_buttons["123"].button_pressed = show_labels
+
+	# --- Bottom sheet -----------------------------------------------------------------------
+	sheet.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	sheet.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	sheet.offset_left = 20
+	sheet.offset_right = -20
+	sheet.offset_top = -20
+	sheet.offset_bottom = -20
+	var sheet_style := box_style(SHEET, 44, 26)
+	sheet_style.content_margin_left = 32
+	sheet_style.content_margin_right = 32
+	sheet_style.content_margin_top = 18
+	sheet_style.content_margin_bottom = 30
+	sheet.add_theme_stylebox_override("panel", sheet_style)
+	canvas.add_child(sheet)
+	var sheet_body := VBoxContainer.new()
+	sheet_body.add_theme_constant_override("separation", 18)
+	sheet.add_child(sheet_body)
+	var grabber := Panel.new()
+	grabber.custom_minimum_size = Vector2(90, 10)
+	grabber.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	grabber.add_theme_stylebox_override("panel", box_style(Color("cbd5df"), 5))
+	sheet_body.add_child(grabber)
+	sheet_body.add_child(sheet_idle)
+	sheet_body.add_child(sheet_detail)
+
+	# Idle: arch filter, guidance and legend.
+	sheet_idle.add_theme_constant_override("separation", 18)
+	sheet_idle.add_child(segmented(["Both", "Upper", "Lower"], arch_buttons, set_arch))
+	sheet_idle.add_child(label("Historical chart · read only. Tap a tooth to review it." if read_only else "Tap any tooth to inspect it, then choose a surface to assess.", 25, INK))
+	sheet_idle.add_child(label("Drag to rotate  ·  pinch to zoom  ·  two fingers to pan  ·  double-tap to reset", 21, MUTED))
+	var legend := HFlowContainer.new()
+	legend.add_theme_constant_override("h_separation", 26)
+	legend.add_theme_constant_override("v_separation", 12)
+	legend.add_child(legend_item(ENAMEL.darkened(0.12), "Assessed"))
+	legend.add_child(legend_item(Color("94a3b8"), "Unassessed", true))
+	legend.add_child(legend_item(AMBER, "Finding"))
+	legend.add_child(legend_item(BLUE, "Restoration"))
+	legend.add_child(legend_item(TEAL, "Planned care (+)"))
+	legend.add_child(legend_item(Color("64748b"), "Recorded loss (×)"))
+	sheet_idle.add_child(legend)
+
+	# Detail: selected tooth summary, surface pad and the primary action.
+	sheet_detail.visible = false
+	sheet_detail.add_theme_constant_override("separation", 18)
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 20)
+	sheet_detail.add_child(header)
+	var badge := PanelContainer.new()
+	badge.custom_minimum_size = Vector2(104, 104)
+	badge.add_theme_stylebox_override("panel", box_style(TEAL, 30))
+	badge_label.add_theme_font_size_override("font_size", 38)
+	badge_label.add_theme_color_override("font_color", Color.WHITE)
+	badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	badge.add_child(badge_label)
+	header.add_child(badge)
+	var names := VBoxContainer.new()
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	names.alignment = BoxContainer.ALIGNMENT_CENTER
+	header.add_child(names)
+	name_label.add_theme_font_size_override("font_size", 30)
+	name_label.add_theme_color_override("font_color", INK)
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	names.add_child(name_label)
+	status_label.add_theme_font_size_override("font_size", 23)
+	status_label.add_theme_color_override("font_color", MUTED)
+	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	names.add_child(status_label)
+	var close := fab("×")
+	close.custom_minimum_size = Vector2(80, 80)
+	close.pressed.connect(clear_selection)
+	header.add_child(close)
+	chip_row.add_theme_constant_override("h_separation", 10)
+	chip_row.add_theme_constant_override("v_separation", 10)
+	sheet_detail.add_child(chip_row)
+
+	var pad_row := HBoxContainer.new()
+	pad_row.add_theme_constant_override("separation", 24)
+	sheet_detail.add_child(pad_row)
+	surface_pad.columns = 3
+	surface_pad.add_theme_constant_override("h_separation", 8)
+	surface_pad.add_theme_constant_override("v_separation", 8)
+	pad_row.add_child(surface_pad)
+	var pad_text := VBoxContainer.new()
+	pad_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pad_text.alignment = BoxContainer.ALIGNMENT_CENTER
+	pad_row.add_child(pad_text)
+	pad_text.add_child(label("Surface", 24, INK, true))
+	surface_hint.add_theme_font_size_override("font_size", 22)
+	surface_hint.add_theme_color_override("font_color", MUTED)
+	surface_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	pad_text.add_child(surface_hint)
+	var whole := pill("Whole tooth", true)
+	whole.pressed.connect(pick_surface.bind(""))
+	surface_buttons[""] = whole
+	pad_text.add_child(whole)
+
+	assess_button = pill("Assess tooth", false, true)
+	assess_button.custom_minimum_size = Vector2(0, 96)
+	assess_button.add_theme_font_size_override("font_size", 30)
+	assess_button.pressed.connect(edit_selected)
+	sheet_detail.add_child(assess_button)
+
+	view_buttons["Front"].button_pressed = true
+	arch_buttons["Both"].button_pressed = true
+
+func go_back() -> void:
+	if bridge: bridge.closeChart()
+
+func rail_action(caption: String) -> void:
 	match caption:
-		"Back":
-			if bridge: bridge.closeChart()
-		"Reset":
-			yaw = 0
-			pitch = -0.25
-			distance = 13
-			target = Vector3.ZERO
-		"Focus":
-			if teeth.has(selected):
-				target = teeth[selected].global_position
-				distance = 7.0
-		"Upper": toggle_arch(upper)
-		"Lower": toggle_arch(lower)
-		"Labels":
-			show_labels = not show_labels
-			for body in teeth.values(): body.get_node("SlotLabel").visible = show_labels
-		"Roots":
-			show_roots = not show_roots
+		"+": distance = clamp(distance / 1.18, 6.0, 26.0)
+		"−": distance = clamp(distance * 1.18, 6.0, 26.0)
+		"123":
+			show_labels = toggle_buttons["123"].button_pressed
+			for body in teeth.values(): body.get_node("SlotLabel").visible = show_labels or body.get_meta("toothKey") == selected
+		"Root":
+			show_roots = toggle_buttons["Root"].button_pressed
 			for body in teeth.values():
 				if body.has_node("Roots"): body.get_node("Roots").visible = show_roots
-		"−": distance = clamp(distance * 1.1, 7.0, 24.0)
-		"+": distance = clamp(distance / 1.1, 7.0, 24.0)
-	update_camera()
+			# X-ray look: soften the gingiva so roots are visible inside the bone line.
+			for gum_material in gum_materials:
+				gum_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if show_roots else BaseMaterial3D.TRANSPARENCY_DISABLED
+				gum_material.albedo_color = Color(GUM, 0.32 if show_roots else 1.0)
 
-func toggle_arch(arch: Node3D) -> void:
-	arch.visible = not arch.visible
+func apply_view(view: String) -> void:
+	if not VIEWS.has(view): return
+	var preset: Array = VIEWS[view]
+	current_view = view
+	pitch = preset[0]
+	yaw = preset[1]
+	distance = preset[2]
+	target = Vector3.ZERO
+	yaw_velocity = 0.0
+	set_arch(preset[3])
+	if view_buttons.has(view): view_buttons[view].button_pressed = true
+
+func set_arch(filter: String) -> void:
+	arch_filter = filter
+	set_arch_visible(upper, filter != "Lower")
+	set_arch_visible(lower, filter != "Upper")
+	if arch_buttons.has(filter): arch_buttons[filter].button_pressed = true
+
+func set_arch_visible(arch: Node3D, visible_now: bool) -> void:
+	arch.visible = visible_now
 	# Visibility alone does not disable physics picking; keep hidden arches out of rays.
 	for child in arch.get_children():
-		if child is StaticBody3D: child.collision_layer = 1 if arch.visible else 0
-	if teeth.has(selected) and teeth[selected].get_parent() == arch and not arch.visible:
-		selected = ""
-		selected_surface = ""
-		selected_label.text = "Select a tooth"
-		assess_button.disabled = true
-		for child in surface_row.get_children(): child.queue_free()
+		if child is StaticBody3D: child.collision_layer = 1 if visible_now else 0
+	if not visible_now and teeth.has(selected) and teeth[selected].get_parent() == arch:
+		clear_selection()
 
 func update_camera() -> void:
-	rig.rotation = Vector3(pitch, yaw, 0)
-	camera.position = target + Vector3(0, distance * 0.42, distance)
-	camera.look_at(target)
+	rig.rotation = Vector3(cur_pitch, cur_yaw, 0)
+	camera.position = cur_target + Vector3(0, cur_distance * 0.30, cur_distance)
+	camera.look_at(cur_target)
+
+func _process(delta: float) -> void:
+	# Inertial orbit after a fling, then critically damped easing toward the targets.
+	if fingers.is_empty() and abs(yaw_velocity) > 0.001:
+		yaw += yaw_velocity * delta
+		yaw_velocity *= exp(-4.0 * delta)
+	var ease := 1.0 - exp(-10.0 * delta)
+	cur_yaw = lerpf(cur_yaw, yaw, ease)
+	cur_pitch = lerpf(cur_pitch, pitch, ease)
+	cur_distance = lerpf(cur_distance, distance, ease)
+	cur_target = cur_target.lerp(target, ease)
+	update_camera()
+	if teeth.has(selected):
+		pulse += delta
+		var body: Node3D = teeth[selected]
+		if body.has_meta("crownMaterial"):
+			var material: StandardMaterial3D = body.get_meta("crownMaterial")
+			material.emission_energy_multiplier = 0.22 + 0.12 * sin(pulse * 3.2)
+		if selected_halo:
+			selected_halo.rotation.y += delta * 0.8
+
+# ==============================================================================================
+# Selection
+# ==============================================================================================
+
+func clear_selection() -> void:
+	if teeth.has(selected):
+		var body: Node3D = teeth[selected]
+		if body.has_meta("crownMaterial"):
+			var material: StandardMaterial3D = body.get_meta("crownMaterial")
+			material.emission_enabled = false
+		body.get_node("SlotLabel").visible = show_labels
+		body.get_node("SlotLabel").modulate = Color("334155")
+	if selected_halo:
+		selected_halo.queue_free()
+		selected_halo = null
+	selected = ""
+	selected_surface = ""
+	target = Vector3.ZERO
+	sheet_detail.visible = false
+	sheet_idle.visible = true
+	animate_sheet()
+
+func select_tooth(body: Node3D) -> void:
+	var key: String = body.get_meta("toothKey")
+	if key == selected: return
+	clear_selection()
+	selected = key
+	selected_surface = ""
+	var state: Dictionary = chart.get("teeth", {}).get(selected, {})
+	if body.has_meta("crownMaterial"):
+		var material: StandardMaterial3D = body.get_meta("crownMaterial")
+		material.emission_enabled = true
+		material.emission = TEAL_LIGHT
+		material.emission_energy_multiplier = 0.25
+	var slot_label: Label3D = body.get_node("SlotLabel")
+	slot_label.visible = true
+	slot_label.modulate = TEAL
+	selected_halo = MeshInstance3D.new()
+	var ring := TorusMesh.new()
+	ring.inner_radius = 0.44
+	ring.outer_radius = 0.49
+	ring.rings = 32
+	ring.ring_segments = 12
+	selected_halo.mesh = ring
+	var size: Vector3 = body.get_meta("dimensions")
+	selected_halo.scale = Vector3(size.x * 1.25, 0.5, size.z * 1.25)
+	selected_halo.position.y = body.get_meta("signY") * 0.02
+	selected_halo.material_override = glow(TEAL_LIGHT)
+	body.add_child(selected_halo)
+	# Gently bring the tooth toward the centre without losing arch context.
+	target = body.global_position * 0.45
+	distance = min(distance, 10.5)
+	badge_label.text = selected
+	name_label.text = tooth_name(selected)
+	status_label.text = str(state.get("assessment", "not_assessed")).replace("_", " ").capitalize() + "  ·  " + str(state.get("presence", "unknown")).replace("_", " ")
+	if state.get("replacement", "none") not in ["none", ""]:
+		status_label.text += "  ·  " + str(state.get("replacement")).replace("_", " ")
+	build_surface_pad(state)
+	refresh_details(state)
+	sheet_idle.visible = false
+	sheet_detail.visible = true
+	animate_sheet()
+
+func animate_sheet() -> void:
+	# Fade only: the sheet resizes with its content, so its position is owned by layout.
+	sheet.modulate.a = 0.0
+	create_tween().tween_property(sheet, "modulate:a", 1.0, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+func build_surface_pad(state: Dictionary) -> void:
+	for child in surface_pad.get_children(): child.queue_free()
+	for key in surface_buttons.keys():
+		if key != "": surface_buttons.erase(key)
+	var anterior := int(selected[1]) <= 3
+	var centre := "I" if anterior else "O"
+	# Seen from the front, a tooth on the patient's right has its mesial side on the viewer's right.
+	var patient_right := float(teeth[selected].get_meta("mesialSign")) > 0.0
+	var layout := ["", "F", "", "D" if patient_right else "M", centre, "M" if patient_right else "D", "", "L", ""]
+	var group := ButtonGroup.new()
+	surface_buttons[""].button_group = group
+	surface_buttons[""].button_pressed = true
+	for cell in layout:
+		if cell == "":
+			var spacer := Control.new()
+			spacer.custom_minimum_size = Vector2(84, 84)
+			surface_pad.add_child(spacer)
+			continue
+		var button := pill(cell, true)
+		button.custom_minimum_size = Vector2(84, 84)
+		button.add_theme_stylebox_override("normal", box_style(surface_tint(state, cell), 20, 0, HAIRLINE))
+		button.add_theme_stylebox_override("pressed", box_style(TEAL, 20, 6))
+		button.add_theme_stylebox_override("hover_pressed", box_style(TEAL, 20, 6))
+		button.add_theme_color_override("font_pressed_color", Color.WHITE)
+		button.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
+		button.button_group = group
+		button.pressed.connect(pick_surface.bind(cell))
+		surface_buttons[cell] = button
+		surface_pad.add_child(button)
+
+func surface_tint(state: Dictionary, surface: String) -> Color:
+	var observation: Dictionary = state.get("surfaces", {}).get(surface, {})
+	if not observation.get("findings", []).is_empty(): return Color("fef3c7")
+	if not observation.get("restorations", []).is_empty(): return Color("dbeafe")
+	if observation.get("assessment", "") == "assessed": return Color("f0fdfa")
+	return Color.WHITE
+
+func pick_surface(surface: String) -> void:
+	selected_surface = surface
+	if surface_buttons.has(surface): surface_buttons[surface].button_pressed = true
+	refresh_details(chart.get("teeth", {}).get(selected, {}))
+
+func refresh_details(state: Dictionary) -> void:
+	for child in chip_row.get_children(): child.queue_free()
+	var facts: Dictionary = state if selected_surface == "" else state.get("surfaces", {}).get(selected_surface, {})
+	var findings: Array = facts.get("findings", [])
+	var restorations: Array = facts.get("restorations", [])
+	for code in findings: chip_row.add_child(chip("Finding · " + str(code).replace("_", " "), Color("fef3c7"), Color("92400e")))
+	for code in restorations: chip_row.add_child(chip("Restoration · " + str(code).replace("_", " "), Color("dbeafe"), Color("1e40af")))
+	for code in state.get("treatmentStates", []): chip_row.add_child(chip("Care · " + str(code).replace("_", " "), TEAL_TINT, TEAL))
+	if chip_row.get_child_count() == 0:
+		chip_row.add_child(chip("No coded findings recorded" + ("" if selected_surface == "" else " on " + surface_name(selected_surface)), Color("eef3f6"), MUTED))
+	if selected_surface == "":
+		surface_hint.text = "Whole tooth selected. Tap a surface on the pad to assess it individually."
+	else:
+		surface_hint.text = surface_name(selected_surface) + " surface · " + str(facts.get("assessment", "not_assessed")).replace("_", " ")
+	assess_button.text = "Assess tooth " + selected + ("" if selected_surface == "" else "  ·  " + surface_name(selected_surface))
+	assess_button.disabled = read_only
+	if read_only: assess_button.text = "Historical chart · read only"
+
+func surface_name(surface: String) -> String:
+	var anterior := selected != "" and int(selected[1]) <= 3
+	var upper_arch := selected != "" and selected[0] in ["1", "2", "5", "6"]
+	match surface:
+		"M": return "Mesial"
+		"D": return "Distal"
+		"F": return "Labial" if anterior else "Buccal"
+		"L": return "Palatal" if upper_arch else "Lingual"
+		"I": return "Incisal"
+		"O": return "Occlusal"
+	return surface
+
+func tooth_name(key: String) -> String:
+	var quadrant := int(key[0])
+	var position := int(key[1])
+	var primary := quadrant >= 5
+	var arch := "Upper" if quadrant in [1, 2, 5, 6] else "Lower"
+	var side := "right" if quadrant in [1, 4, 5, 8] else "left"
+	var names := ["central incisor", "lateral incisor", "canine", "first molar", "second molar"] if primary else ["central incisor", "lateral incisor", "canine", "first premolar", "second premolar", "first molar", "second molar", "third molar"]
+	if position < 1 or position > names.size(): return "Tooth " + key
+	return arch + " " + side + " " + ("primary " if primary else "") + names[position - 1]
 
 func edit_selected() -> void:
 	if not input_valid or read_only or selected == "" or not bridge: return
 	if selected_surface != "": bridge.selectSurface(selected, selected_surface)
 	else: bridge.selectTooth(selected)
 
+# ==============================================================================================
+# Input
+# ==============================================================================================
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			fingers[event.index] = event.position
 			touch_origin = event.position
+			yaw_velocity = 0.0
 			if fingers.size() == 1: moved = false
 		else:
 			fingers.erase(event.index)
-			if not moved and event.position.distance_to(touch_origin) < 14: pending_pick = event.position
+			if not moved and event.position.distance_to(touch_origin) < 14: register_tap(event.position)
 	elif event is InputEventScreenDrag:
 		moved = moved or event.position.distance_to(touch_origin) > 8
 		if fingers.size() >= 2:
@@ -508,30 +1013,41 @@ func _unhandled_input(event: InputEvent) -> void:
 			var after: Array = fingers.values()
 			var new_distance: float = after[0].distance_to(after[1])
 			var center: Vector2 = (after[0] + after[1]) * 0.5
-			if new_distance > 8 and old_distance > 8: distance = clamp(distance * old_distance / new_distance, 7.0, 24.0)
+			if new_distance > 8 and old_distance > 8: distance = clamp(distance * old_distance / new_distance, 6.0, 26.0)
 			pan(center - old_center)
 		else:
 			fingers[event.index] = event.position
-			yaw += event.relative.x * 0.005
-			pitch = clamp(pitch + event.relative.y * 0.005, -1.25, 1.25)
-		update_camera()
+			orbit(event.relative)
 	elif event is InputEventMagnifyGesture:
-		distance = clamp(distance / event.factor, 7.0, 24.0)
-		update_camera()
+		distance = clamp(distance / event.factor, 6.0, 26.0)
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		moved = moved or event.relative.length() > 2
-		yaw += event.relative.x * 0.005
-		pitch = clamp(pitch + event.relative.y * 0.005, -1.25, 1.25)
-		update_camera()
+		orbit(event.relative)
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		pan(event.relative)
-		update_camera()
 	elif event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			if event.pressed: moved = false
-			elif not moved: pending_pick = event.position
-		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP: action("+")
-		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN: action("−")
+			if event.pressed:
+				moved = false
+				yaw_velocity = 0.0
+			elif not moved: register_tap(event.position)
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP: rail_action("+")
+		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN: rail_action("−")
+
+func orbit(relative: Vector2) -> void:
+	yaw += relative.x * 0.006
+	pitch = clamp(pitch + relative.y * 0.005, -1.35, 1.35)
+	yaw_velocity = relative.x * 0.006 * 60.0
+	if view_buttons.has(current_view) and (abs(relative.x) > 2 or abs(relative.y) > 2):
+		view_buttons[current_view].button_pressed = false
+
+func register_tap(at: Vector2) -> void:
+	# Double tap on empty space resets the view; single taps pick teeth.
+	var now := Time.get_ticks_msec()
+	if now - last_tap_ms < 300 and selected == "":
+		apply_view("Front")
+	last_tap_ms = now
+	pending_pick = at
 
 func _input(event: InputEvent) -> void:
 	# A touch may begin on the model and end over a GUI button, whose release is
@@ -559,45 +1075,4 @@ func pick(screen: Vector2) -> void:
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + camera.project_ray_normal(screen) * 100.0)
 	var result := get_world_3d().direct_space_state.intersect_ray(query)
 	if result.is_empty() or not result.collider.has_meta("toothKey"): return
-	var body: Node3D = result.collider
-	selected = body.get_meta("toothKey")
-	selected_surface = ""
-	var state: Dictionary = chart.get("teeth", {}).get(selected, {})
-	selected_label.text = "Tooth " + selected + "  ·  " + state.get("presence", "unknown").replace("_", " ")
-	refresh_details(state)
-	if selected_halo: selected_halo.queue_free()
-	selected_halo = MeshInstance3D.new()
-	var ring := TorusMesh.new()
-	ring.inner_radius = 0.42
-	ring.outer_radius = 0.48
-	ring.rings = 24
-	ring.ring_segments = 12
-	selected_halo.mesh = ring
-	var size: Vector3 = body.get_meta("dimensions")
-	selected_halo.scale = Vector3(size.x * 1.2, 0.45, size.z * 1.2)
-	selected_halo.position.y = body.get_meta("signY") * size.y * 0.48
-	selected_halo.material_override = mat(TEAL)
-	body.add_child(selected_halo)
-	for child in surface_row.get_children(): child.queue_free()
-	var last := int(selected[1])
-	for surface in ["Whole tooth", "M", "D", "F", "L", "I" if last <= 3 else "O"]:
-		var button := ui_button(surface)
-		button.pressed.connect(func():
-			selected_surface = "" if surface == "Whole tooth" else surface
-			refresh_details(state)
-		)
-		surface_row.add_child(button)
-	assess_button.disabled = read_only
-
-func refresh_details(state: Dictionary) -> void:
-	var lines: Array[String] = ["Assessment: " + state.get("assessment", "not_assessed").replace("_", " ")]
-	if state.get("replacement", "none") != "none": lines.append("Replacement: " + state.get("replacement", "").replace("_", " "))
-	var facts: Dictionary = state if selected_surface == "" else state.get("surfaces", {}).get(selected_surface, {})
-	if selected_surface != "": lines.append("Surface " + selected_surface + ": " + facts.get("assessment", "not_assessed").replace("_", " "))
-	if not facts.get("findings", []).is_empty(): lines.append("Findings: " + ", ".join(facts.get("findings", [])))
-	if not facts.get("restorations", []).is_empty(): lines.append("Restorations: " + ", ".join(facts.get("restorations", [])))
-	if not state.get("treatmentStates", []).is_empty(): lines.append("Open care: " + ", ".join(state.get("treatmentStates", [])))
-	if selected_surface == "": lines.append("Choose a surface below, or assess the whole tooth.")
-	details_label.text = "\n".join(lines)
-	assess_button.text = "Assess tooth " + selected + (" · " + selected_surface if selected_surface != "" else "")
-	if read_only: assess_button.text = "Historical chart · read only"
+	select_tooth(result.collider)

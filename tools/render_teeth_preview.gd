@@ -12,6 +12,7 @@ func capture() -> void:
 	root.add_child(scene)
 	for child in scene.get_children():
 		if child is CanvasLayer: child.visible = false
+	scene.gum_materials.clear()
 	for arch: Node3D in [scene.upper, scene.lower]:
 		for child in arch.get_children():
 			arch.remove_child(child)
@@ -26,9 +27,13 @@ func capture() -> void:
 	states["36"]["surfaces"] = {"O": {"assessment": "assessed", "findings": [], "restorations": ["composite"]}}
 	scene.chart = {"schemaVersion": 2, "catalogVersion": "fdi-v1", "dentition": "permanent", "chartVersion": 1, "teeth": states}
 	scene.build_inventory()
+	# The chart eases its camera toward targets; set both so the capture is immediate.
 	scene.yaw = -0.42
-	scene.pitch = -0.18
+	scene.pitch = 0.12
 	scene.distance = 12.7
+	scene.cur_yaw = scene.yaw
+	scene.cur_pitch = scene.pitch
+	scene.cur_distance = scene.distance
 	scene.update_camera()
 	var canvas := CanvasLayer.new()
 	root.add_child(canvas)

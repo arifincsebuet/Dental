@@ -8,11 +8,12 @@ run/main_scene="res://chart.tscn"
 window/size/viewport_width=1080
 window/size/viewport_height=1600
 window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
 window/handheld/orientation=1
 
 [rendering]
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-anti_aliasing/quality/msaa_3d=1
-environment/defaults/default_clear_color=Color(0.94,0.99,0.98,1)
+anti_aliasing/quality/msaa_3d=2
+environment/defaults/default_clear_color=Color(0.94,0.98,0.99,1)
 textures/default_filters/use_nearest_mipmap_filter=false
