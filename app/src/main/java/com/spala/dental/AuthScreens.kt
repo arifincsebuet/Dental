@@ -256,7 +256,7 @@ fun PatientPortalScreen(store: ClinicStore) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-fun PatientAccessCard(patient: JSONObject, store: ClinicStore, onNotify: (() -> Unit)? = null) {
+fun PatientAccessCard(patient: JSONObject, store: ClinicStore) {
     val portal = patient.optJSONObject("portal")
     SurfaceCard {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -273,10 +273,8 @@ fun PatientAccessCard(patient: JSONObject, store: ClinicStore, onNotify: (() -> 
             Text("Create patient login")
         } else {
             OutlinedButton(onClick = { store.resetPatientPassword(patient.optString("id")) }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Text("Reset password")
+                Text("Reset password (issues a new Patient ID)")
             }
-            if (onNotify != null && (store.isSuperAdmin || store.currentRole in listOf("owner", "admin", "administrator")))
-                FilledTonalButton(onClick = onNotify, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) { Text("Send notification") }
         }
         if (store.cloudConfigured && (patient.optBoolean("dirty") || patient.optLong("remoteVersion") == 0L))
             Text("Sync this patient first so the cloud record exists.", style = MaterialTheme.typography.bodySmall, color = Amber600)
@@ -291,10 +289,11 @@ fun CredentialDialog(notice: JSONObject, onClose: () -> Unit) {
     val text = "Dental Care patient login for ${notice.optString("name")}\nPatient ID: ${notice.optString("loginId")}\nTemporary password: ${notice.optString("password")}\nYou will be asked to choose a new password after signing in."
     AlertDialog(
         onDismissRequest = {}, shape = RoundedCornerShape(28.dp),
-        title = { Text(if (notice.optBoolean("reset")) "Password reset" else "Patient login created") },
+        title = { Text(if (notice.optBoolean("reset")) "New login issued" else "Patient login created") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Share these with ${notice.optString("name")}. The password is shown only once.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                Text("Share these with ${notice.optString("name")}. The password is shown only once." +
+                    if (notice.optBoolean("reset")) " The previous Patient ID no longer works." else "", style = MaterialTheme.typography.bodySmall, color = InkMuted)
                 listOf("Patient ID" to notice.optString("loginId"), "Temporary password" to notice.optString("password")).forEach { (label, value) ->
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(SurfaceTint).padding(12.dp)) {
                         Text(label, style = MaterialTheme.typography.labelSmall, color = InkMuted)

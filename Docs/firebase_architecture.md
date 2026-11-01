@@ -4,13 +4,13 @@ Firebase holds all clinic data:
 - **Firestore:** patients, staff/doctors, clinic settings, appointments, billing and treatment history.
 - **Cloud Storage:** clinical images.
 - **Firebase Authentication:** Google sign-in for the clinic team, and Patient ID + password for patients.
+- **App Check (Play Integrity):** only the genuine app from Google Play can call Firebase.
 
-The Android app never reads or writes Firestore directly. Every call goes through **callable Cloud Functions**. They enforce roles, validate clinical rules, and return only what the caller may see.
-
-The design is built to **keep the number of documents and reads small**:
-- one document per clinic and one per patient
-- no subcollections, listeners or polling
-- incremental sync that reads only patients that changed
+There are **no Cloud Functions**. The Android app reads and writes Firestore directly. Security
+rules decide who may read or change what. The design keeps documents, reads and writes small:
+- two documents per clinic (settings + patient-visible info) and one per patient
+- every list (staff, members, availability, appointments, treatments, invoices, history) is embedded
+- no listeners or polling; incremental sync reads only patients that changed
 
 ## 1. System overview
 
@@ -18,74 +18,76 @@ The design is built to **keep the number of documents and reads small**:
 flowchart LR
   subgraph Android["Android app (com.spala.dental)"]
     UI["Compose UI<br/>Home · Patients · 3D profile · Schedule · Billing"]
-    Store["ClinicStore<br/>encrypted local cache (AES-GCM, Keystore)<br/>offline edits marked dirty"]
+    Store["ClinicStore + ClinicCloud<br/>encrypted local cache (AES-GCM, Keystore)<br/>direct Firestore transactions"]
     Img["ImageCompressor<br/>lossless WebP/PNG ≤ 512 KB"]
+    WM["WorkManager<br/>on-device reminders"]
     G3D["Godot 3D chart<br/>separate :chart3d process"]
+    AC["App Check<br/>Play Integrity (release) · debug provider (debug)"]
     UI --> Store
     UI --> G3D
     UI --> Img
+    Store --> WM
   end
 
-  subgraph Firebase["Firebase project"]
-    Auth["Authentication<br/>Google (staff) · Email/Password (patients, synthetic email)<br/>custom claims: role=patient, clinicId, patientId"]
-    Fn["Cloud Functions (callable, us-central1)<br/>resolveWorkspace · getClinic · updateClinic<br/>listPatients · getPatient · commitPatient<br/>createPatientLogin · resetPatientPassword<br/>completePasswordChange · getMyRecord · registerDevice<br/>verifySubscription"]
-    FS[("Firestore<br/>workspaces/{clinicId}<br/>workspaces/{clinicId}/patients/{patientId}")]
+  subgraph Firebase["Firebase project dental-sm"]
+    Auth["Authentication<br/>Google (staff) · Email/Password (patients, synthetic email)"]
+    Rules{{"Security rules<br/>firestore.rules · storage.rules"}}
+    FS[("Firestore<br/>workspaces/{clinicId}<br/>workspaces/{clinicId}/public/info<br/>workspaces/{clinicId}/patients/{patientId}")]
     ST[("Cloud Storage<br/>workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png")]
-    Play["Google Play Billing<br/>dental_care_pro: $10/month base plan, $5 launch offer"]
-    Sch["Scheduled function<br/>dispatchClinicReminders (15 min)"]
-    FCM["Cloud Messaging"]
   end
+  Play["Google Play Billing<br/>dental_care_pro: $10/month, $5 launch offer"]
 
-  Store -- "ID token" --> Auth
-  Store -- "callable HTTPS" --> Fn
-  Fn --> FS
-  Fn -- "verify image metadata" --> ST
-  Img -- "putBytes (rules: member + ≤512 KB + png/webp)" --> ST
-  Android -- "checkout" --> Play
-  Fn -- "Play Developer API: verify + acknowledge" --> Play
-  Sch --> FS
-  Sch --> FCM --> Android
-  Fn -- "createUser / setCustomUserClaims / updateUser" --> Auth
+  Store -- "sign-in" --> Auth
+  AC -. "token on every request" .-> Rules
+  Store -- "get / query / transaction" --> Rules --> FS
+  Img -- "putBytes" --> Rules --> ST
+  Store -- "checkout + acknowledge" --> Play
 ```
 
-## 2. Firestore data model (two document types)
+## 2. Firestore data model (three document kinds)
 
 ```mermaid
 erDiagram
-  WORKSPACE ||--o{ PATIENT : "subcollection patients"
+  WORKSPACE ||--|| PUBLIC_INFO : "public/info"
+  WORKSPACE ||--o{ PATIENT : "patients"
   WORKSPACE {
     string id "clinicId = owner's Firebase UID"
-    map config "name, timeZone, currency, staff[], services[], members{uid: role}"
-    array inviteEmails "active staff emails (only indexed lookup)"
-    array scheduleIndex "active appointment slots (conflict checks)"
-    array reminderJobs "bounded queue, 256 max"
-    map devices "FCM tokens per member (≤8)"
-    int revision
-    array audit "configuration audit"
-    array receipts "idempotent operation receipts (128)"
+    map config "name, timeZone, currency, staff[], services[], availability[], members{uid: role}"
+    map invites "email -> role (from the staff list)"
+    array inviteEmails "lookup for joining staff"
+    map subscription "active, expiresAt, productId (from the admin device)"
+    bool complimentary "super-admin clinic"
+    int revision "optimistic concurrency"
+  }
+  PUBLIC_INFO {
+    string name
+    string timeZone
+    array availability "slot sessions"
+    array busy "{s, e, d} busy times, no names"
+    bool patientBooking
+    int reminderHours
   }
   PATIENT {
     string id
     string name "profile: phone, dob, allergies, consent"
-    map chart "schema 2 sparse FDI tooth map (≤32 KB)"
-    array treatments "one item per tooth, groupId for multi-tooth"
-    array performedProcedures "completed care + outcome"
+    map chart "sparse FDI tooth map"
+    array treatments
     array appointments
     array invoices "payments/refunds embedded"
-    array images "gs:// references only"
-    array encounters
-    array history "append-only clinical history"
-    map portal "patient login: loginId, uid, createdAt, passwordResetAt"
+    array images "gs:// references"
+    array history "append-only"
+    map portal "loginId, uid, mustChange"
     int revision
-    array audit
-    array receipts
+    timestamp syncedAt "server time, for incremental sync"
   }
 ```
 
-- **Staff and doctors** are entries in `config.staff` inside the clinic document. That means no `staff/` collection, and adding a doctor costs one write.
-- **Patient logins** live in Firebase Authentication, not Firestore. Their custom claims say which clinic and patient they belong to. The patient document keeps one small `portal` field.
-- **Large arrays and maps are exempt from indexing** (`firestore.indexes.json`), which saves index storage and write cost. Only two lookups are indexed: `inviteEmails`, and `updatedAt` for incremental sync.
-- **Hard limit:** a patient document is capped at about 750 KB (Firestore allows 1 MiB). The server refuses writes near the cap rather than truncating history.
+- **Why one document per patient, not one for all?** Rules protect whole documents. A patient who can
+  read a shared list document would see every other patient in it, and one document holds at most 1 MiB.
+- **Patient logins** are Firebase Auth accounts; the patient document's `portal.uid` links them, so no
+  login or index documents are needed.
+- **Large arrays and maps are exempt from indexing.** Only `inviteEmails`, `syncedAt` and
+  `portal.uid` (collection group) are queried.
 
 ## 3. Key flows
 
@@ -95,43 +97,37 @@ erDiagram
 sequenceDiagram
   participant A as Android (staff)
   participant Auth as Firebase Auth
-  participant F as Functions
-  participant DB as Firestore
+  participant DB as Firestore (rules)
   A->>Auth: Google ID token → signInWithCredential
-  A->>F: resolveWorkspace()
-  F->>DB: get workspaces/{uid}  (1 read)
-  alt caller owns a clinic
-    F-->>A: {clinicId: uid, role: owner}
+  A->>DB: get workspaces/{uid}  (1 read)
+  alt owns a clinic
+    A->>A: clinicId = uid, role owner
   else invited by email
-    F->>DB: query inviteEmails array-contains email (1 read)
-    F->>DB: add config.members[uid] once (1 write)
-    F-->>A: {clinicId, role}
+    A->>DB: query inviteEmails array-contains email (1 read)
+    A->>DB: transaction: add config.members[uid] = invited role (rules check it)
   else new user
-    F-->>A: {clinicId: uid, role: owner} (clinic doc created on first save)
+    A->>A: clinicId = uid (clinic doc created on first sync)
   end
-  A->>F: getClinic + listPatients (1 + N reads, first time only)
+  A->>DB: get clinic + all patients (first time only)
 ```
 
-### Patient login created by the admin, then the patient's first sign-in
+### Patient login created on the admin's phone
 
 ```mermaid
 sequenceDiagram
   participant Ad as Admin app
-  participant F as Functions
-  participant Auth as Firebase Auth
-  participant DB as Firestore
+  participant Auth2 as Firebase Auth (2nd app instance)
+  participant DB as Firestore (rules)
   participant P as Patient app
-  Ad->>F: createPatientLogin(clinicId, patientId)
-  F->>DB: read patient (1 read)
-  F->>Auth: createUser(ID@patient.dentalcare.local, temp password)
-  F->>Auth: claims {role: patient, clinicId, patientId, mustChange: true}
-  F->>DB: update patient.portal (1 write)
-  F-->>Ad: Patient ID + temporary password (shown once → share)
-  P->>Auth: signInWithEmailAndPassword
+  Ad->>Auth2: createUser(ID@patient.dentalcare.local, temp password)
+  Ad->>Auth2: signOut (admin stays signed in on the main instance)
+  Ad->>DB: transaction: patient.portal = {loginId, uid, mustChange: true}
+  Ad-->>Ad: Patient ID + temporary password shown once → share
+  P->>DB: signIn, then collectionGroup('patients').where('portal.uid','==',uid) (1 read)
   P->>P: forced "Choose your password" (reauthenticate + updatePassword)
-  P->>F: completePasswordChange → claims mustChange=false
-  P->>F: getMyRecord (2 reads) → read-only 3D chart, history, appointments, balance
-  Note over Ad,F: Forgotten password → resetPatientPassword: new temporary password,<br/>mustChange=true, refresh tokens revoked (1 read + 1 write)
+  P->>DB: portal.mustChange = false
+  P->>DB: read own record + public/info (2 reads), schedule reminders on the phone
+  Note over Ad,DB: Reset = new Patient ID + temporary password; the old ID loses access
 ```
 
 ### Save and sync (offline-first, incremental)
@@ -139,49 +135,46 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant A as Android
-  participant F as Functions
-  participant DB as Firestore
+  participant DB as Firestore (rules)
   A->>A: edit → validate → encrypted local cache (dirty)
-  A->>F: commitPatient(expectedRevision, operationId) per dirty patient
-  F->>DB: transaction: read patient + clinic (2 reads) → write patient (1 write)<br/>(+ clinic write only if schedule/reminders changed)
-  A->>F: listPatients(updatedAfter = lastPullAt)
-  F->>DB: query updatedAt > lastPullAt (reads only changed patients)
-  F-->>A: changed patients → merge (local unsynced edits are never overwritten)
+  A->>DB: transaction per dirty patient: read revision → write with revision+1, syncedAt=server time
+  A->>DB: query patients where syncedAt > lastPull (only changed patients)
+  A->>DB: public/info.busy rewritten only if appointments changed
 ```
 
-### Clinical image upload
+### Patient booking
 
 ```mermaid
 sequenceDiagram
-  participant A as Android
-  participant ST as Storage
-  participant F as Functions
-  A->>A: decode → lossless WebP vs PNG (keep smaller)<br/>if > 512 KB: scale down in steps, re-encode losslessly
-  A->>ST: put {sha256}.webp (rules: clinical member, ≤512 KB, png/webp)
-  A->>A: add gs:// reference to patient (dirty)
-  A->>F: commitPatient → server checks Storage metadata (size/type) once
+  participant P as Patient app
+  participant DB as Firestore (rules)
+  P->>P: free slots = availability − busy (from public/info)
+  P->>DB: transaction: read public/info + own record, re-check slot free
+  P->>DB: append appointment + 1 history line (revision+1), arrayUnion busy time
 ```
 
 ## 4. Cost controls
 
 | Area | Choice | Effect |
 |---|---|---|
-| Documents | 1 clinic doc + 1 doc per patient. Staff, appointments, invoices and treatments are embedded. | Few documents, and opening a patient is 1 read |
-| Sync | Push only dirty patients, then pull `updatedAt > lastPullAt` | Routine sync reads only changed patients, not the whole clinic |
-| Listeners | None (callables on demand) | No continuous read charges |
-| Indexes | Large fields exempt; only `inviteEmails`, `updatedAt`, reminder compound index | Lower index storage and write cost |
-| Patient logins | Firebase Auth users + custom claims | No Firestore docs per login |
-| Images | Lossless WebP ≤ 512 KB, SHA-256 names (deduplicated), private `gs://` refs | Small storage and egress, no duplicate uploads |
-| Functions | `maxInstances: 4`, 60 s timeout, no min instances | No idle compute cost |
-| Reminders | One due-clinic query every 15 min; jobs embedded in the clinic doc | No per-patient polling |
-| Subscription | Play Billing token verified once by `verifySubscription`; entitlement stored on the clinic doc; renewals re-checked only when the period ends | No extra documents, no Pub/Sub, about one Play API call per month per clinic |
-| Offline cache | Encrypted local copy | Screens read locally; the cloud is touched only on sync |
+| Server | No Cloud Functions, Scheduler or FCM sends | No compute bill; Spark plan is enough until Firestore/Storage quotas |
+| Documents | 2 per clinic + 1 per patient; every list embedded | Fewest documents; opening a patient is 0 cloud reads (local cache) |
+| Sync | Write dirty patients; read `syncedAt > lastPull` | Routine sync reads only changed patients |
+| Listeners | None | No continuous read charges |
+| Indexes | Large fields exempt; 3 queried fields | Lower index storage and write cost |
+| Patient logins | Auth accounts linked by `portal.uid` | No login documents |
+| Images | Lossless WebP ≤ 512 KB, SHA-256 names (deduplicated), private refs | Small storage and egress, no duplicate uploads |
+| Reminders | WorkManager on each phone | No scheduled jobs, no push costs |
+| Subscription | Play purchase acknowledged on the device; entitlement on the clinic doc | No Play API calls or extra documents |
 
 ## 5. Security
 
-- **Firestore rules** deny all direct client access. Only Cloud Functions (Admin SDK) read and write Firestore.
-- **Storage rules** check clinic membership through `firestore.get`. Images are capped at 512 KB, and the type must be PNG or WebP.
-- **Roles:** owner, admin, dentist, assistant, receptionist, cashier, auditor and patient.
-  - Dentists and admins record treatment.
-  - Patients see only their own record, read-only, without internal history or audit.
-- **Patient emails** are synthetic, so no email is ever sent. Password recovery is an admin reset.
+- **App Check** (Play Integrity) blocks requests that don't come from the genuine app once enforced.
+- **Firestore rules:** clinic membership and roles come from the clinic document; writes need the next
+  revision; field groups (clinical, invoices, patient login) need the right role; patients can only
+  read their own record and book/cancel.
+- **Storage rules** check clinic membership through `firestore.get`. Images are capped at 512 KB and
+  must be PNG or WebP.
+- **Patient emails** are synthetic, so no email is ever sent. Password recovery is an admin reset that
+  issues a new Patient ID.
+- See BACKEND_SETUP.md › "Limits of a server-less design" for what rules cannot enforce.

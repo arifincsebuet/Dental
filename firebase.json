@@ -6,22 +6,7 @@
   "storage": {
     "rules": "firebase/storage.rules"
   },
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "dental-care",
-      "runtime": "nodejs22",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "*.log"
-      ]
-    }
-  ],
   "emulators": {
-    "functions": {
-      "port": 5001
-    },
     "firestore": {
       "port": 8080
     },

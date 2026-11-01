@@ -6,6 +6,8 @@ Audit date: 30 October 2026. Baseline: [Android PRD v1.3](Docs/dental_clinic_man
 
 **The application does not yet satisfy every requirement in the updated PRD.** Major workflows exist in source, but several P0 requirements remain partial. Source review is not evidence that the Android app builds, that Godot works on target hardware, or that Firebase rules/functions pass integration tests. Earlier broad implementation summaries should be read with this qualification.
 
+> **Later change:** the Cloud Functions referenced below were removed. The app now uses Firestore directly, secured by `firebase/firestore.rules` and App Check; see [BACKEND_SETUP.md](BACKEND_SETUP.md). Server-side validation mentioned here now runs in the app.
+
 The single-document patient layout and disabled Google login are explicit user decisions, not missing features. Native Firestore maps, embedded patient history, and private Storage references implement that revised direction. A bounded single document cannot hold unlimited history; capacity errors/export planning remain necessary.
 
 ## Coverage by requirement

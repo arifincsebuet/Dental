@@ -40,8 +40,9 @@ import java.util.Locale
  * Admins define availability sessions in clinic settings (config.availability):
  *   {id, doctor, room?, startDate, endDate, weekdays[1..7] (empty = every day), start "HH:mm", end "HH:mm", slotMinutes, active}
  * Slots are computed from sessions; nothing per-slot is stored. A slot is booked when an active
- * appointment of the same doctor overlaps it. Staff compute slots from local data (no cloud reads);
- * patients get them from the getSlots function (one clinic read, no other patients' names).
+ * appointment of the same doctor overlaps it. Staff compute slots from their local patients;
+ * patients compute them from the clinic's public/info document (availability + anonymous busy
+ * times, no other patients' names). Nothing runs on a server.
  */
 
 data class Slot(
@@ -63,7 +64,10 @@ class SlotCalendar(private val config: JSONObject, patients: List<JSONObject>) {
             val start = runCatching { ClinicalRules.appointmentMillis(a, config) }.getOrNull() ?: return@mapNotNull null
             a.optString("doctor").trim().lowercase() to Booking(start, start + a.optInt("durationMinutes", 30) * 60_000L, p.optString("id"), p.optString("name"), a.optString("status"))
         }
-    }.groupBy({ it.first }, { it.second })
+    }.plus(
+        // Anonymous busy times from public/info ({s: start ms, e: end ms, d: doctor}), used by the patient app.
+        config.optJSONArray("busy").objectList().map { it.optString("d").trim().lowercase() to Booking(it.optLong("s"), it.optLong("e"), "", "", "Scheduled") }
+    ).groupBy({ it.first }, { it.second })
 
     fun slots(date: LocalDate, now: Long = System.currentTimeMillis()): List<Slot> = sessions.flatMap { session ->
         val first = runCatching { LocalDate.parse(session.optString("startDate")) }.getOrNull() ?: return@flatMap emptyList()
@@ -84,11 +88,6 @@ class SlotCalendar(private val config: JSONObject, patients: List<JSONObject>) {
     }.sortedWith(compareBy({ it.startAt }, { it.doctor }))
 }
 
-/** Slots returned by the getSlots function (patient app). */
-fun slotsFromServer(items: List<JSONObject>): List<Slot> = items.map {
-    Slot(it.optString("sessionId"), it.optString("doctor"), it.optString("room"), LocalDate.parse(it.optString("date")), it.optString("time"),
-        it.optLong("startAt"), it.optInt("durationMinutes", 30), it.optBoolean("available"))
-}
 
 // ---------------------------------------------------------------------------------------------
 // Month calendar
@@ -363,11 +362,13 @@ fun PatientBookingSection(store: ClinicStore) {
     val selected = LocalDate.parse(selectedText)
     var month by remember { mutableStateOf(YearMonth.from(today)) }
     var confirm by remember { mutableStateOf<Slot?>(null) }
-    LaunchedEffect(month) { store.loadSlots(if (month == YearMonth.from(today)) today else month.atDay(1)) }
-    val slots = remember(store.portalSlots) { slotsFromServer(store.portalSlots) }
-    val byDay = remember(slots) { slots.groupBy { it.date } }
+    LaunchedEffect(Unit) { store.refreshClinicInfo() }
+    val engine = remember(store.portalClinic) { SlotCalendar(store.portalClinic, emptyList()) }
+    val byDay = remember(engine, month) {
+        (1..month.lengthOfMonth()).map { month.atDay(it) }.filterNot { it.isBefore(today) }.associateWith { engine.slots(it) }
+    }
     SectionHeader("Book an appointment")
-    if (!store.portalBookingEnabled) {
+    if (!store.portalClinic.optBoolean("patientBooking", true)) {
         SurfaceCard(background = SurfaceTint) { Text("Online booking is not available. Please call the clinic.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
         return
     }

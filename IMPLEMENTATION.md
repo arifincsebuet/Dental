@@ -1,6 +1,6 @@
 # Dental Care Android implementation
 
-The application contains major Android clinic workflows, an interactive Godot dental chart, and trusted Firebase cloud functions. The [PRD audit](PRD_AUDIT.md) identifies remaining partial requirements; complete MVP or release compliance is not claimed. Google sign-in is implemented and **disabled by default**. The app opens directly and stores records locally before cloud configuration.
+The application contains major Android clinic workflows, an interactive Godot dental chart, and a server-less Firebase backend (direct Firestore access secured by rules, App Check with Play Integrity). The [PRD audit](PRD_AUDIT.md) identifies remaining partial requirements; complete MVP or release compliance is not claimed. Google sign-in is implemented and **disabled by default**. The app opens directly and stores records locally before cloud configuration.
 
 ## Features and source
 
@@ -16,10 +16,10 @@ The application contains major Android clinic workflows, an interactive Godot de
 | Reports | Day/week/month/custom filters, cash received versus billed amounts, refunds, outstanding balances, appointments, clinicians and treatment states, CSV sharing |
 | History/export | Embedded append-only source history and server audit, chart comparison/earlier read-only 3D, clinical amendments, care-summary PDF, JSON backup/import |
 | Synchronization | Encrypted durable local storage, explicit dirty-record sync, revision conflict detection, retained conflict drafts/export, idempotent server receipts, bounded WorkManager retries of already submitted commands |
-| Reminders | Consent-aware local WorkManager notifications with quiet hours, and optional Firebase scheduled FCM clinic reminders; no patient details on lock screens |
-| Cloud security | Callable role-filtered reads/commits, trusted clinical/financial validation, immutable finalized source data and append-only audit/receipts; restrictive Firestore/Storage rules |
+| Reminders | On-device WorkManager notifications for staff (consent-aware, quiet hours) and for patients (from their own appointments); no push server; no patient details on lock screens |
+| Cloud security | Firestore/Storage rules: membership, roles per field group, revision checks, patient self-service limits; App Check (Play Integrity); clinical/financial validation in the app |
 
-Main files: `MainActivity.kt`, `ClinicStore.kt`, `ClinicFeatures.kt`, `ClinicalRules.kt`, `PatientValidation.kt`, `ClinicalWorkspace.kt`, `NativeDentalChart.kt`, `ClinicApplication.kt`, and `functions/index.js`.
+Main files: `MainActivity.kt`, `ClinicStore.kt`, `ClinicFeatures.kt`, `ClinicalRules.kt`, `PatientValidation.kt`, `ClinicalWorkspace.kt`, `NativeDentalChart.kt`, `ClinicApplication.kt`, `ClinicCloud.kt` (Firestore access) and `firebase/firestore.rules`.
 
 ## Open the Android project
 
@@ -27,14 +27,14 @@ Use Android Studio with its installed JDK and SDK. Set your machine's SDK locati
 
 ## Firebase activation
 
-See [BACKEND_SETUP.md](BACKEND_SETUP.md) for function deployment, regions, roles, indexes, configuration and provider setup. No external Firebase project, authentication provider, billing account, rules or cloud functions were deployed from this workspace.
+See [BACKEND_SETUP.md](BACKEND_SETUP.md) for rules/index deployment, App Check, roles and provider setup. Nothing was deployed from this workspace.
 
 1. Copy `firebase/firebase.xml.example` to `app/src/main/res/values/firebase.xml` and provide the Firebase Android app ID, API key, project ID, Storage bucket, sender ID, and Google web client ID. Resources are initialized directly; the google-services Gradle plugin is not required.
 2. Enable Firebase **Anonymous Authentication** initially. There is no interactive login gate. Selecting Sync creates a private authenticated workspace behind the scenes. Anonymous credentials are device-bound until linked to Google; keep exports before uninstalling.
-3. Deploy `functions`, rules and indexes using your chosen Firebase project and region. Android defaults to `us-central1`; optional string resource `firebase_functions_region` overrides this to match the deployed region.
-4. Configure the clinic, staff and services in Settings, then synchronize. Restore uses paginated callable reads without live listeners. To join an existing shared clinic, close the current synchronized device workspace, select its workspace ID, and restore records. An owner must first add the member's exact Firebase UID.
+3. Deploy the Firestore rules, indexes and Storage rules with `deploy.bat`, and set up App Check (BACKEND_SETUP.md).
+4. Configure the clinic, staff and services in Settings, then synchronize. Restore reads the patient collection once, without live listeners. To join an existing shared clinic, close the current synchronized device workspace, select its workspace ID, and restore records. An owner must first add the member's exact Firebase UID.
 5. Google login remains hidden behind `GOOGLE_LOGIN_ENABLED=false` in `app/build.gradle.kts`. To enable later, configure Firebase Google authentication, signing fingerprints and web client ID, then change the flag. Anonymous linking keeps the same workspace UID. Account switching requires closing the prior local workspace.
-6. Enable local reminders in clinic settings and give notification permission. Cloud reminders additionally require device registration in Settings and deployment of the scheduled function. Registering cloud reminders switches this device away from local reminder delivery to reduce duplicates. Notifications are reminders to clinic staff; direct patient SMS/email requires a consent-aware provider integration and provider credentials.
+6. Enable local reminders in clinic settings and give notification permission. Staff reminders and patient reminders are both scheduled on the phone; direct patient SMS/email would need a provider integration.
 
 ## One patient, one document
 

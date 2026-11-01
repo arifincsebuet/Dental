@@ -79,7 +79,7 @@ class BillingManager(private val context: Context, private val onPurchase: (Purc
         restore()
     }
 
-    /** Re-reads active purchases (Restore purchase). Unverified purchases are handed to the clinic server. */
+    /** Re-reads active purchases (Restore purchase) and hands each to the app, which acknowledges and records it. */
     fun restore() {
         client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build()) { result, purchases ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK) return@queryPurchasesAsync
@@ -106,7 +106,7 @@ class BillingManager(private val context: Context, private val onPurchase: (Purc
         val params = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(listOf(BillingFlowParams.ProductDetailsParams.newBuilder()
                 .setProductDetails(option.details).setOfferToken(option.offerToken).build()))
-            // Ties the purchase to this clinic so the server can refuse tokens meant for another clinic.
+            // Ties the purchase to this clinic so another clinic's devices ignore it.
             .setObfuscatedAccountId(accountTag(clinicId))
             .build()
         val result = client.launchBillingFlow(activity, params)
@@ -125,7 +125,7 @@ class BillingManager(private val context: Context, private val onPurchase: (Purc
         }
     }
 
-    /** Offline mode has no server, so acknowledge on the device (required within 3 days). */
+    /** There is no server, so the device acknowledges the purchase (Google refunds it if not acknowledged within 3 days). */
     fun acknowledgeLocally(purchase: Purchase) {
         if (purchase.isAcknowledged) return
         client.acknowledgePurchase(AcknowledgePurchaseParams.newBuilder().setPurchaseToken(purchase.purchaseToken).build()) { }

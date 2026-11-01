@@ -346,10 +346,10 @@ private val GuideArticles = listOf(
             "In Settings, open Clinic management → Reminders. Enable clinic reminders and review their lead time and quiet hours.",
             "For an appointment, enable Schedule appointment reminder and record patient consent. Review the appointment's lead hours before saving.",
             "Choose Allow appointment notifications in Settings and permit notifications when Android asks.",
-            "For shared cloud reminders on this device, use Enable cloud reminders on this device after cloud setup is complete. This device then uses cloud delivery instead of local reminder delivery.",
-            "Use Disable cloud reminders on this device to stop that delivery path. Your Schedule remains available to review appointments directly."
+            "Reminders are scheduled on each phone; nothing is sent from a server. Patients who use the patient app get their own reminders on their phone (the day before and 2 hours before).",
+            "Your Schedule remains available to review appointments directly."
         ),
-        "Notifications contain a general clinic reminder. They are staff reminders, not direct SMS or email messages to patients."
+        "Staff notifications contain a general clinic reminder. Patient reminders appear only on the patient's own phone. No SMS or email is sent."
     ),
     GuideArticle(
         "account", "Settings", "Use an account or switch workspaces",
