@@ -639,6 +639,7 @@ fun Teeth3DView(
     val holder = remember(scene) { AnchorHolder() }
     val tapCallback by rememberUpdatedState(onToothTap)
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val currentSelection by rememberUpdatedState(selectedTeeth)
     // GPU rendering (depth buffer + MSAA); switches to the CPU painter path if GL is unavailable.
     var useGl by remember { mutableStateOf(true) }
     val glHolder = remember { arrayOfNulls<TeethGLView>(1) }
@@ -683,9 +684,11 @@ fun Teeth3DView(
                             if (distance < radius && score < bestScore) { best = i; bestScore = score }
                         }
                         if (best >= 0) {
-                            TapSound.play()
+                            val key = scene.slots[best].key
+                            // Tapping an already-selected tooth deselects it (every caller toggles).
+                            if (key in currentSelection) TapSound.playDeselect() else TapSound.play()
                             haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                            callback(scene.slots[best].key)
+                            callback(key)
                         }
                     },
                 )
