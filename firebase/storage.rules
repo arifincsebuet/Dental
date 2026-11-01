@@ -22,8 +22,8 @@ service firebase.storage {
       allow read: if clinicalRead(clinic);
       allow create: if clinicalWrite(clinic)
         && request.resource.size > 0 && request.resource.size <= 512 * 1024
-        && request.resource.contentType == 'image/png'
-        && image.matches('[a-f0-9]{64}\\.png');
+        && request.resource.contentType in ['image/png', 'image/webp']
+        && image.matches('[a-f0-9]{64}\\.(png|webp)');
       allow update, delete: if false;
     }
   }

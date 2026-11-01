@@ -46,11 +46,22 @@ class ClinicStore(private val context: Context) {
     var pendingExport by mutableStateOf(JSONObject()); private set
     var cloudReminders by mutableStateOf(false); private set
     var reminderRebuildRequired by mutableStateOf(false); private set
+    /** "loading", "login", "staff", "patient" or "local" (Firebase not configured: this device only). */
+    var session by mutableStateOf("loading"); private set
+    var portalRecord by mutableStateOf<JSONObject?>(null); private set
+    var portalClinic by mutableStateOf(JSONObject()); private set
+    var mustChangePassword by mutableStateOf(false); private set
+    /** One-time credentials to hand to a patient (shown once, never stored). */
+    var credentialNotice by mutableStateOf<JSONObject?>(null)
+    private var memberRole = ""
+    private var lastPullAt = 0L
+    private var localMode = false
     val cloudIdentity: String get() = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull().orEmpty()
     val currentRole: String get() {
         if (workspaceId.isBlank()) return "owner"
         val user = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull().orEmpty()
-        return config.optJSONObject("members")?.optJSONObject(user)?.takeIf { it.optBoolean("active", true) }?.optString("role") ?: "unknown"
+        return config.optJSONObject("members")?.optJSONObject(user)?.takeIf { it.optBoolean("active", true) }?.optString("role")
+            ?: memberRole.ifBlank { "unknown" }
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var storageAvailable = false
@@ -81,14 +92,19 @@ class ClinicStore(private val context: Context) {
             pendingExport = state.optJSONObject("pendingExport") ?: JSONObject()
             cloudReminders = state.optBoolean("cloudReminders")
             reminderRebuildRequired = state.optBoolean("reminderRebuildRequired")
+            memberRole = state.optString("memberRole")
+            lastPullAt = state.optLong("lastPullAt")
+            localMode = state.optBoolean("localMode")
             storageAvailable = true
+            resolveSession()
         } catch (e: Exception) { message = "Local records could not be opened. Existing storage is preserved; restore a backup before editing." }
-        finally { busy = false }
+        finally { busy = false; if (session == "loading") session = if (configured()) "login" else "local" }
     } }
 
     private suspend fun persist(records: List<JSONObject>) = withContext(Dispatchers.IO) {
         val state = JSONObject().put("version", 2).put("patients", JSONArray(records)).put("config", config)
             .put("workspaceId", workspaceId).put("conflicts", JSONArray(conflicts)).put("pendingExport", pendingExport).put("cloudReminders", cloudReminders).put("reminderRebuildRequired", reminderRebuildRequired)
+            .put("memberRole", memberRole).put("lastPullAt", lastPullAt).put("localMode", localMode)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
         val bytes = cipher.iv + cipher.doFinal(state.toString().toByteArray(Charsets.UTF_8))
         val out = file.startWrite()
@@ -222,7 +238,7 @@ class ClinicStore(private val context: Context) {
     private suspend fun account(): String {
         check(configured()) { "Configure Firebase resources before using cloud synchronization." }
         val auth = FirebaseAuth.getInstance()
-        return (auth.currentUser ?: auth.signInAnonymously().await().user!!).uid
+        return (auth.currentUser ?: error("Sign in with Google to use the clinic cloud")).uid
     }
     fun sync(retryOnly: Boolean = false) = operation {
         val clinicId = clinic()
@@ -264,6 +280,7 @@ class ClinicStore(private val context: Context) {
                 throw e
             }
         }
+        if (!retryOnly) runCatching { pullChanges() }
         message = if (retryOnly) "Pending cloud submissions confirmed" else "Cloud synchronization complete"
     }
     fun restore() = operation {
@@ -280,6 +297,7 @@ class ClinicStore(private val context: Context) {
             records += page.map { entry -> val doc = JSONObject(entry as Map<*, *>); doc.put("remoteVersion", doc.optLong("revision")).put("cloudOwner", clinicId).put("dirty", false) }
             cursor = (response["nextCursor"] as? String)?.takeIf { it.isNotBlank() }
         } while (cursor != null)
+        lastPullAt = System.currentTimeMillis() - 60_000
         persist(records); patients = records; ClinicReminders.schedule(context, this@ClinicStore); message = "Cloud records restored"
     }
     fun resolveConflict(patientId: String) = operation {
@@ -309,26 +327,20 @@ class ClinicStore(private val context: Context) {
         val patient = patients.first { it.optString("id") == patientId }
         check(patient.optString("cloudOwner", owner) == owner) { "Patient belongs to another account" }
         check(!patient.has("operationId")) { "Resolve the pending submission before attaching images" }
-        val bytes = withContext(Dispatchers.IO) {
-            val source = ImageDecoder.createSource(context.contentResolver, uri)
-            val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                check(info.size.width.toLong() * info.size.height <= 20_000_000) { "Image exceeds 20 megapixels" }
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            }
-            try { ByteArrayOutputStream().use { output -> check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "PNG encoding failed" }; output.toByteArray().also { check(it.isNotEmpty()) { "Image encoding produced no data" } } } } finally { bitmap.recycle() }
-        }
-        check(bytes.size <= 512 * 1024) { "Lossless image exceeds 512 KB. Choose a smaller image; no image detail was discarded." }
+        val encoded = withContext(Dispatchers.IO) { ImageCompressor.encode(context, uri) }
+        val bytes = encoded.bytes
         val hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-        val path = "workspaces/$owner/patients/$patientId/$hash.png"
+        val path = "workspaces/$owner/patients/$patientId/$hash.${encoded.extension}"
         if (patient.array("images").objects().none { it.optString("path") == path }) {
             val reference = FirebaseStorage.getInstance().reference.child(path)
             try { reference.metadata.await() } catch (e: com.google.firebase.storage.StorageException) {
                 if (e.errorCode != com.google.firebase.storage.StorageException.ERROR_OBJECT_NOT_FOUND) throw e
-                reference.putBytes(bytes, com.google.firebase.storage.StorageMetadata.Builder().setContentType("image/png").build()).await()
+                reference.putBytes(bytes, com.google.firebase.storage.StorageMetadata.Builder().setContentType(encoded.mimeType).build()).await()
             }
             // Store private gs:// reference, not a permanent public download token.
             val copy = JSONObject(patient.toString())
-            copy.array("images").put(JSONObject().put("path", path).put("reference", reference.toString()).put("bytes", bytes.size).put("at", System.currentTimeMillis()))
+            copy.array("images").put(JSONObject().put("path", path).put("reference", reference.toString()).put("bytes", bytes.size)
+                .put("width", encoded.width).put("height", encoded.height).put("format", encoded.extension).put("at", System.currentTimeMillis()))
             copy.put("dirty", true)
             copy.remove("operationId")
             copy.array("history").put(JSONObject().put("id", uid()).put("at", System.currentTimeMillis()).put("text", "Clinical image attached"))
@@ -336,7 +348,7 @@ class ClinicStore(private val context: Context) {
             check(copy.toString().toByteArray().size <= 650_000) { "Patient document is full; export/archive before attaching more images." }
             persist(next); patients = next
         }
-        message = "Image uploaded; synchronize to save its reference in the patient document"
+        message = "Image uploaded (${bytes.size / 1024} KB, lossless ${encoded.extension.uppercase()}${if (encoded.resized) ", resized to ${encoded.width}×${encoded.height} to fit 512 KB" else ""}). Sync to save it to the patient record."
     }
     fun registerCloudReminders(enabled: Boolean) = operation {
         val clinicId = clinic()
@@ -363,9 +375,169 @@ class ClinicStore(private val context: Context) {
             functions().getHttpsCallable("registerDevice").call(mapOf("clinicId" to clinic(), "token" to token, "enabled" to false)).await()
         }
         patients = emptyList(); config = ClinicalRules.defaults(); workspaceId = ""; pendingExport = JSONObject(); cloudReminders = false
+        memberRole = ""; lastPullAt = 0L
         persist(patients); ClinicReminders.schedule(context, this@ClinicStore)
-        FirebaseAuth.getInstance().signOut(); message = "Signed out; cloud records are preserved"
+        FirebaseAuth.getInstance().signOut(); session = "login"; message = "Signed out; cloud records are preserved"
     }
+    // ------------------------------------------------------------------------------------------
+    // Sessions: clinic staff sign in with Google; patients with their Patient ID + password.
+    // ------------------------------------------------------------------------------------------
+
+    val cloudConfigured: Boolean get() = configured()
+
+    private suspend fun resolveSession() {
+        if (!configured()) { session = if (localMode) "local" else "login"; return }
+        val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
+        session = when {
+            user == null -> "login"
+            user.isAnonymous -> "staff" // legacy device workspaces keep working until linked to Google
+            else -> runCatching {
+                val claims = user.getIdToken(false).await().claims
+                if (claims["role"] == "patient") { mustChangePassword = claims["mustChange"] == true; "patient" } else "staff"
+            }.getOrDefault("staff")
+        }
+        if (session == "patient") scope.launch { runCatching { loadMyRecord() } }
+    }
+
+    /** Offline use on this device only, when no Firebase project is configured. */
+    fun useLocally() = operation {
+        check(!configured()) { "This app is connected to the clinic cloud. Sign in with Google." }
+        localMode = true; persist(patients); session = "local"
+    }
+
+    fun staffGoogleSignIn(activity: Context, clientId: String) = operation {
+        google(activity, clientId)
+        val result = functions().getHttpsCallable("resolveWorkspace").call(emptyMap<String, Any>()).await().data as Map<*, *>
+        val clinicId = result["clinicId"] as String
+        memberRole = result["role"] as? String ?: ""
+        if (clinicId != cloudIdentity) {
+            check(patients.none { it.optBoolean("dirty") }) { "Sync or export this device's changes before joining a clinic" }
+            workspaceId = clinicId
+        }
+        persist(patients); session = "staff"
+        pullAll(); message = "Signed in · clinic records loaded"
+    }
+
+    private fun patientEmail(loginId: String) = "${loginId.trim().lowercase()}@patient.dentalcare.local"
+
+    fun patientSignIn(loginId: String, password: String, done: (String?) -> Unit) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val error = runCatching {
+                check(configured()) { "The clinic cloud is not configured on this device" }
+                require(loginId.trim().matches(Regex("[A-Za-z0-9]{6,12}"))) { "Enter the Patient ID given by your clinic" }
+                require(password.isNotBlank()) { "Enter your password" }
+                val auth = FirebaseAuth.getInstance()
+                auth.signInWithEmailAndPassword(patientEmail(loginId), password).await()
+                val claims = auth.currentUser!!.getIdToken(true).await().claims
+                if (claims["role"] != "patient") { auth.signOut(); error("This account is not a patient login") }
+                mustChangePassword = claims["mustChange"] == true
+                session = "patient"
+                loadMyRecord()
+            }.exceptionOrNull()?.let { e ->
+                if (e is com.google.firebase.auth.FirebaseAuthException) "Patient ID or password is incorrect" else e.localizedMessage ?: "Sign-in failed"
+            }
+            busy = false
+            done(error)
+        }
+    }
+
+    private suspend fun loadMyRecord() {
+        val result = functions().getHttpsCallable("getMyRecord").call(emptyMap<String, Any>()).await().data as Map<*, *>
+        portalRecord = JSONObject(result["patient"] as Map<*, *>)
+        portalClinic = JSONObject(result["clinic"] as? Map<*, *> ?: emptyMap<String, Any>())
+    }
+
+    fun refreshMyRecord() = operation { loadMyRecord(); message = "Your record is up to date" }
+
+    /** Patient changes the temporary (or current) password; Firebase requires recent authentication. */
+    fun changePatientPassword(current: String, next: String, done: (String?) -> Unit) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val error = runCatching {
+                require(next.length >= 8) { "Use at least 8 characters" }
+                require(next.any { it.isDigit() } && next.any { it.isLetter() }) { "Use letters and numbers" }
+                val user = FirebaseAuth.getInstance().currentUser ?: error("Sign in again")
+                user.reauthenticate(com.google.firebase.auth.EmailAuthProvider.getCredential(user.email!!, current)).await()
+                user.updatePassword(next).await()
+                functions().getHttpsCallable("completePasswordChange").call(emptyMap<String, Any>()).await()
+                user.getIdToken(true).await()
+                mustChangePassword = false
+            }.exceptionOrNull()?.let { e ->
+                if (e is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException) "Current password is incorrect" else e.localizedMessage ?: "Password change failed"
+            }
+            busy = false
+            done(error)
+        }
+    }
+
+    fun patientSignOut() {
+        runCatching { FirebaseAuth.getInstance().signOut() }
+        portalRecord = null; mustChangePassword = false; session = "login"
+    }
+
+    /** Admin: create the patient's app login. The temporary password is returned once for sharing. */
+    fun createPatientLogin(patientId: String) = portalCall("createPatientLogin", patientId)
+    fun resetPatientPassword(patientId: String) = portalCall("resetPatientPassword", patientId)
+    private fun portalCall(name: String, patientId: String) = operation {
+        val patient = patients.first { it.optString("id") == patientId }
+        check(!patient.optBoolean("dirty") && patient.optLong("remoteVersion") > 0) { "Sync this patient to the cloud first, then create the login" }
+        val result = functions().getHttpsCallable(name).call(mapOf("clinicId" to clinic(), "patientId" to patientId)).await().data as Map<*, *>
+        val portal = JSONObject(result["portal"] as Map<*, *>)
+        val next = patients.map { if (it.optString("id") == patientId) JSONObject(it.toString()).put("portal", portal) else it }
+        persist(next); patients = next
+        credentialNotice = JSONObject().put("name", patient.optString("name")).put("loginId", result["loginId"]).put("password", result["password"])
+            .put("reset", name == "resetPatientPassword")
+    }
+
+    /** Incremental pull: only patient documents changed since the last pull are read. */
+    private suspend fun pullChanges() {
+        if (lastPullAt == 0L) { pullAll(); return }
+        val clinicId = clinic()
+        var cursor: String? = null; var cursorAt: Any? = null; var serverTime = lastPullAt
+        val next = patients.toMutableList()
+        do {
+            val response = functions().getHttpsCallable("listPatients").call(mapOf("clinicId" to clinicId, "pageSize" to 100,
+                "updatedAfter" to lastPullAt, "afterId" to cursor, "afterAt" to cursorAt)).await().data as Map<*, *>
+            (response["serverTime"] as? Number)?.let { serverTime = it.toLong() }
+            for (entry in response["patients"] as? List<*> ?: emptyList<Any>()) {
+                val doc = JSONObject(entry as Map<*, *>)
+                val fresh = doc.put("remoteVersion", doc.optLong("revision")).put("cloudOwner", clinicId).put("dirty", false)
+                val index = next.indexOfFirst { it.optString("id") == fresh.optString("id") }
+                when {
+                    index < 0 -> next += fresh
+                    !next[index].optBoolean("dirty") && !next[index].has("operationId") -> next[index] = fresh
+                }
+            }
+            cursor = (response["nextCursor"] as? String)?.takeIf { it.isNotBlank() }
+            cursorAt = response["nextAt"]
+        } while (cursor != null)
+        lastPullAt = serverTime - 60_000 // small overlap tolerates clock skew between instances
+        persist(next); patients = next
+    }
+
+    private suspend fun pullAll() {
+        val clinicId = clinic()
+        val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinicId)).await().data as Map<*, *>
+        reminderRebuildRequired = result["reminderRebuildRequired"] == true
+        if (!config.optBoolean("dirty")) config = JSONObject(result["config"] as? Map<*, *> ?: emptyMap<String, Any>()).put("revision", (result["revision"] as? Number)?.toLong() ?: 0)
+        val dirty = patients.filter { it.optBoolean("dirty") || it.has("operationId") }
+        val records = mutableListOf<JSONObject>()
+        var cursor: String? = null; var serverTime = System.currentTimeMillis()
+        do {
+            val response = functions().getHttpsCallable("listPatients").call(mapOf("clinicId" to clinicId, "pageSize" to 100, "afterId" to cursor)).await().data as Map<*, *>
+            (response["serverTime"] as? Number)?.let { serverTime = it.toLong() }
+            records += (response["patients"] as? List<*> ?: emptyList<Any>()).map { entry -> val doc = JSONObject(entry as Map<*, *>); doc.put("remoteVersion", doc.optLong("revision")).put("cloudOwner", clinicId).put("dirty", false) }
+            cursor = (response["nextCursor"] as? String)?.takeIf { it.isNotBlank() }
+        } while (cursor != null)
+        // Unsynchronized local edits are never overwritten by a pull.
+        val merged = records.filterNot { r -> dirty.any { it.optString("id") == r.optString("id") } } + dirty
+        lastPullAt = serverTime - 60_000
+        persist(merged); patients = merged; ClinicReminders.schedule(context, this@ClinicStore)
+    }
+
     private fun operation(block: suspend () -> Unit) {
         if (!storageAvailable) { message = "Local storage is unavailable; cloud operations are paused."; return }
         if (busy) return

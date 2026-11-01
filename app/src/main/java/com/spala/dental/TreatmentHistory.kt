@@ -324,6 +324,11 @@ fun RecordTreatmentDialog(
                     val option = procedureOptions.firstOrNull { it.label.equals(name, true) }
                     val group = uid()
                     for (key in teeth) {
+                        // Every treatment must point at a recorded chart slot (validated locally and on the server).
+                        val slot = copy.obj("chart").obj("teeth").optJSONObject(key)
+                            ?: JSONObject().put("assessment", "assessed").put("presence", "present").also { copy.obj("chart").obj("teeth").put(key, it) }
+                        if (slot.optString("assessment") == "not_assessed") slot.put("assessment", "assessed")
+                        if (slot.optString("presence", "unknown") == "unknown") slot.put("presence", "present")
                         val top = if (key[1].digitToInt() <= 3) "I" else "O"
                         val codes = surfaces.map { if (it == "Top") top else it }.distinct()
                         val surfaceText = if (codes.isEmpty()) "Whole tooth" else codes.joinToString("")
@@ -334,7 +339,8 @@ fun RecordTreatmentDialog(
                         if (status == "Completed") {
                             item.put("performedAt", at)
                             copy.array("performedProcedures").put(JSONObject().put("id", uid()).put("treatmentId", id).put("tooth", key)
-                                .put("surface", surfaceText).put("procedure", name).put("doctor", doctor.trim()).put("outcome", notes.trim()).put("at", at))
+                                .put("surface", surfaceText).put("procedure", name).put("doctor", doctor.trim())
+                                .put("outcome", notes.trim().ifBlank { "$name completed" }).put("at", at))
                             applyOutcome(copy, key, name, option, codes, top)
                         }
                         copy.array("treatments").put(item)

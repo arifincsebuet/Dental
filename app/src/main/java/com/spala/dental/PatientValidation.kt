@@ -70,7 +70,7 @@ object PatientValidation {
         if (patient.has("images")) boundedObjects(patient, "images", 500).forEach { image ->
             integer(image, "bytes", 1, 512L * 1024)
             val path = image.optString("path")
-            require(path.matches(Regex("workspaces/[A-Za-z0-9_-]{1,128}/patients/${Regex.escape(patient.optString("id"))}/[a-f0-9]{64}\\.png"))) { "Image path does not belong to this patient" }
+            require(path.matches(Regex("workspaces/[A-Za-z0-9_-]{1,128}/patients/${Regex.escape(patient.optString("id"))}/[a-f0-9]{64}\\.(png|webp)"))) { "Image path does not belong to this patient" }
             require(image.optString("reference").startsWith("gs://") && image.optString("reference").endsWith("/$path")) { "Use a private Firebase Storage reference" }
         }
         if (patient.has("history")) {
@@ -119,7 +119,12 @@ object PatientValidation {
         treatments.forEach { item ->
             val tooth = item.optString("tooth"); toothKey(tooth)
             if (patient.has("chart")) require(patient.getJSONObject("chart").getJSONObject("teeth").has(tooth)) { "Treatment must target a recorded chart slot" }
-            if (item.has("surface") && item.optString("surface") !in setOf("", "Whole tooth")) validSurface(tooth, item.optString("surface"))
+            // A treatment may target several surfaces of one tooth, e.g. "MO" or "MOD".
+            if (item.has("surface") && item.optString("surface") !in setOf("", "Whole tooth")) {
+                val surfaces = item.optString("surface").map { it.toString() }
+                require(surfaces.distinct().size == surfaces.size) { "Repeated surface in ${item.optString("surface")}" }
+                surfaces.forEach { validSurface(tooth, it) }
+            }
             text(item, "procedure", 500, true)
             val state = normalized(item.optString("status"))
             require(state in transitions.keys) { "Invalid treatment state" }

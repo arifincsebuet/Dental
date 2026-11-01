@@ -103,12 +103,12 @@ fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
             }
         }
         "Staff" -> {
-            Text("Staff directory is separate from cloud account membership.", color = Color(0xFF64748B))
+            Text("Staff with a Google account email can sign in to this clinic after you Sync. Deactivating a staff member removes their access.", color = Color(0xFF64748B))
             fun editStaff(staff: JSONObject?) {
                 form = FeatureForm(if (staff == null) "Add staff member" else "Edit staff member", listOf(
                     FeatureField("name", "Full name", staff?.optString("name").orEmpty()),
                     FeatureField("role", "Role: ${ClinicalRules.roles.joinToString()}", staff?.optString("role") ?: "dentist"),
-                    FeatureField("email", "Email", staff?.optString("email").orEmpty(), false),
+                    FeatureField("email", "Google account email (grants app sign-in)", staff?.optString("email").orEmpty(), false),
                     FeatureField("phone", "Phone", staff?.optString("phone").orEmpty(), false),
                     FeatureField("registration", "Professional registration", staff?.optString("registration").orEmpty(), false),
                     FeatureField("hours", "Working hours / availability", staff?.optString("hours").orEmpty(), false)
@@ -298,10 +298,10 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
     FeatureHeading("Appointments", "Clinic time zone · ${config.optString("timeZone", "Asia/Dhaka")}")
     FeatureChoices(listOf("Day", "Week", "Month", "All"), period) { period = it }
     OutlinedTextField(reference, { reference = it }, label = { Text("Calendar date YYYY-MM-DD") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).minusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }) { Text("← Previous") }
-        OutlinedButton(onClick = { reference = LocalDate.now(ClinicalRules.zone(config)).toString() }) { Text("Today") }
-        OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).plusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }) { Text("Next →") }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).minusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("‹ Previous", maxLines = 1) }
+        OutlinedButton(onClick = { reference = LocalDate.now(ClinicalRules.zone(config)).toString() }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Today", maxLines = 1) }
+        OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).plusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Next ›", maxLines = 1) }
     }
     Button(enabled = patients.isNotEmpty(), onClick = { booking = true }) { Text("+ Book appointment") }
     val range = runCatching {
