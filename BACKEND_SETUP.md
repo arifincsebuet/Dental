@@ -128,5 +128,11 @@ How it works:
 
 - **Token storage:** after sign-in, the patient app writes its FCM token to `workspaces/{clinic}/patients/{patient}.patientDevices.{deviceId}`, one entry per phone and at most 5. This is a direct Firestore update allowed by `firestore.rules`: only the signed-in patient, only that field, only their own document. Sign-out deletes the entry. `commitPatient` preserves the field, and staff responses never include tokens.
 - **Delivery:** sending a push through FCM requires server credentials, which must never ship in the app. So reminders are scheduled on the patient's phone with WorkManager (24 h and 2 h before each upcoming appointment). They survive reboots and are re-planned whenever the patient opens the app, books or cancels. Patients can turn them off in the app.
-- **Limitation:** an appointment changed by the clinic reaches the phone the next time the patient opens the app. Instant remote pushes need a sender. If you add one later, send a data message `{kind: "patient_reminder", title, body}` to the tokens in `patientDevices`; the app already displays it.
+- **Admin pushes (Cloud Functions):** use drawer › **Notify patients**, or a patient's Overview › **Send notification**. Choose the recipients: patients with appointments on a day, all patients with app access, a hand-picked list, or one patient. Pick a template or write a message, then send now or schedule it.
+  - `queuePatientPush` delivers "send now" immediately.
+  - Scheduled messages are kept in the clinic document (`patientPushJobs`, last 100) and delivered by **`dispatchPatientPushes`**, which runs every 5 minutes and queries only clinics with a due job (`nextPatientPushAt`).
+  - `cancelPatientPush` cancels a scheduled message.
+  - Invalid tokens are removed from the patient document after each send.
+- **Automatic reminders to patients:** turn on the switch in the Notify patients dialog (`config.patientPushReminders`). The existing `dispatchClinicReminders` then also pushes each due appointment reminder to that patient's phones.
+- Only patients who signed in to the patient app and allowed notifications receive pushes. The on-device reminders above still work as a fallback.
 - Deploy the updated rules: `firebase deploy --only firestore:rules`.

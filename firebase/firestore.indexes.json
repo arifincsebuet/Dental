@@ -110,6 +110,16 @@
       "collectionGroup": "workspaces",
       "fieldPath": "receipts",
       "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "patientPushJobs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "patients",
+      "fieldPath": "patientDevices",
+      "indexes": []
     }
   ]
 }

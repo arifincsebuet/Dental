@@ -23,7 +23,7 @@ const modules = {
   "node:crypto": require("node:crypto")
 };
 const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, scheduling, isSuperAdmin, slotsFor, validateAvailability, entitlement, publicSubscription, staffInvites, applyStaffInvites, patientEmail, randomText};", {
+vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, scheduling, isSuperAdmin, nextPatientPush, slotsFor, validateAvailability, entitlement, publicSubscription, staffInvites, applyStaffInvites, patientEmail, randomText};", {
   exports: registered, module: { exports: registered }, Buffer, process: { env: {} },
   require(name) { assert.ok(modules[name], `Unexpected dependency ${name}`); return modules[name]; }
 });
@@ -154,4 +154,10 @@ test("super admin emails are free only when verified", () => {
   assert.equal(publicSubscription({ complimentary: true }).active, true);
   assert.equal(publicSubscription(null, true).active, true);
   assert.equal(publicSubscription(null, false).active, false);
+});
+
+test("next patient push time considers only scheduled jobs", () => {
+  const { nextPatientPush } = registered.audit;
+  assert.equal(nextPatientPush([{ status: "sent", sendAt: 5 }, { status: "scheduled", sendAt: 50 }, { status: "scheduled", sendAt: 20 }, { status: "cancelled", sendAt: 1 }]), 20);
+  assert.equal(nextPatientPush([]), Number.MAX_SAFE_INTEGER);
 });
