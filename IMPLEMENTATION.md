@@ -87,6 +87,18 @@ Only `owner`, `admin`, `administrator` and `dentist` roles can record treatment,
 
 Other roles get a read-only model and history, and the Godot chart opens read-only for them.
 
+### One model in both views (geometry spec v2)
+
+The profile preview (`Teeth3DView.kt`) is a line-for-line port of the Godot generator (`chart.gd`). Both use the same values for:
+- arch constants, tooth dimensions, collar height and crown functions
+- vertex-colour enamel: dentin-warm neck, translucent incisal edges and gumline occlusion
+- incisor/canine lingual shovel shape
+- per-surface finding and restoration colours, and the treated tint
+- the alveolar-ridge gingiva, with papillae between the teeth, and the domed upper palate
+- the camera: 40° FOV, raised by 0.30 × distance, distance 12, intro swing from −0.6 rad
+
+Changes to one must be made in the other.
+
 ### Inline 3D on profiles
 
 `Teeth3DView.kt` is a small Compose software renderer. It uses smooth-shaded triangles, a painter's sort and `Canvas.drawVertices`. It draws the same schema-2 chart snapshot directly inside the patient profile, as the first clinical card, and inside the doctor profile, using a neutral reference dentition. Only one Godot engine may run per process, so Godot cannot be embedded in scrolling screens. The inline model supports rotate, pinch zoom, double-tap reset, optional tooth numbers and tap-to-select, and selection opens the native tooth editor. Status colours match the Godot chart: amber for findings, blue for restorations, a teal "+" for planned care and a slate cross for recorded loss.

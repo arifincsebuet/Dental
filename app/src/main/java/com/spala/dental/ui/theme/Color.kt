@@ -29,6 +29,6 @@ val Hairline = Color(0xFFE3E9EE)
 val Outline = Color(0xFFCBD5DF)
 
 // Hero gradient behind the 3D model.
-val HeroTop = Color(0xFFEFFCF9)
-val HeroBottom = Color(0xFFDCEFF5)
+val HeroTop = Color(0xFFE3F2F5)  // matches the Godot chart sky (top → horizon)
+val HeroBottom = Color(0xFFF2F8FA)
 val HeroDeep = Color(0xFF0B4F4A)
