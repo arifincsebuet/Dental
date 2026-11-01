@@ -258,6 +258,7 @@ fun PatientPortalScreen(store: ClinicStore) {
 @Composable
 fun PatientAccessCard(patient: JSONObject, store: ClinicStore) {
     val portal = patient.optJSONObject("portal")
+    var loginDialog by remember { mutableStateOf<Boolean?>(null) } // false = create, true = reset
     SurfaceCard {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(Teal50), contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Person, Teal700, 20.dp) }
@@ -269,16 +270,65 @@ fun PatientAccessCard(patient: JSONObject, store: ClinicStore) {
             }
         }
         if (!store.cloudConfigured) Text("Available when the app is connected to the clinic cloud.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
-        else if (portal == null) Button(onClick = { store.createPatientLogin(patient.optString("id")) }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        else if (portal == null) Button(onClick = { loginDialog = false }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Text("Create patient login")
         } else {
-            OutlinedButton(onClick = { store.resetPatientPassword(patient.optString("id")) }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { loginDialog = true }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Text("Reset password (issues a new Patient ID)")
             }
         }
         if (store.cloudConfigured && (patient.optBoolean("dirty") || patient.optLong("remoteVersion") == 0L))
-            Text("Sync this patient first so the cloud record exists.", style = MaterialTheme.typography.bodySmall, color = Amber600)
+            Text("Unsynced changes to this patient are saved to the cloud when you create the login.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
     }
+    loginDialog?.let { reset -> PatientLoginDialog(patient, store, reset) { loginDialog = null } }
+}
+
+/** Admin chooses the Patient ID and password (suggestions are prefilled and can be changed). */
+@Composable
+fun PatientLoginDialog(patient: JSONObject, store: ClinicStore, reset: Boolean, onClose: () -> Unit) {
+    var loginId by remember { mutableStateOf(ClinicCloud.suggestLoginId()) }
+    var password by remember { mutableStateOf(ClinicCloud.suggestPassword()) }
+    var showPassword by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf("") }
+    val idProblem = if (loginId.isNotEmpty() && !ClinicCloud.validLoginId(loginId)) "6–12 letters or numbers" else null
+    val passwordProblem = password.takeIf { it.isNotEmpty() }?.let { ClinicCloud.passwordProblem(it) }
+    AlertDialog(
+        onDismissRequest = { if (!store.busy) onClose() }, shape = RoundedCornerShape(28.dp),
+        title = { Column {
+            Text(if (reset) "New patient login" else "Create patient login")
+            Text(patient.optString("name"), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+        } },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (reset) "Set a new Patient ID and password. The current Patient ID ${patient.optJSONObject("portal")?.optString("loginId").orEmpty()} will stop working."
+                    else "Choose the Patient ID and password the patient will use in the app. Suggestions are filled in; you can change them.",
+                    style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                OutlinedTextField(loginId, { loginId = it.filter { c -> c.isLetterOrDigit() }.take(12).uppercase(); error = "" },
+                    label = { Text("Patient ID") }, singleLine = true, isError = idProblem != null,
+                    supportingText = { Text(idProblem ?: "6–12 letters or numbers") },
+                    trailingIcon = { TextButton(onClick = { loginId = ClinicCloud.suggestLoginId() }) { Text("New") } },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+                OutlinedTextField(password, { password = it.take(64); error = "" },
+                    label = { Text("Password") }, singleLine = true, isError = passwordProblem != null,
+                    visualTransformation = if (showPassword) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    supportingText = { Text(passwordProblem ?: "At least 8 characters with letters and numbers. The patient changes it at first sign-in.") },
+                    trailingIcon = { TextButton(onClick = { showPassword = !showPassword }) { Text(if (showPassword) "Hide" else "Show") } },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+                TextButton(onClick = { password = ClinicCloud.suggestPassword() }) { Text("Suggest another password") }
+                if (store.busy) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Text("Creating login…", style = MaterialTheme.typography.bodySmall)
+                }
+                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            Button(enabled = !store.busy && ClinicCloud.validLoginId(loginId) && ClinicCloud.passwordProblem(password) == null, onClick = {
+                error = ""
+                store.createPatientLogin(patient.optString("id"), loginId, password, reset) { problem -> if (problem == null) onClose() else error = problem }
+            }) { Text(if (reset) "Issue login" else "Create login") }
+        },
+        dismissButton = { TextButton(enabled = !store.busy, onClick = onClose) { Text("Cancel") } },
+    )
 }
 
 /** Shows the one-time credentials so the admin can hand them to the patient. Never stored on the device. */

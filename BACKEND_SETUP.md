@@ -19,7 +19,8 @@ See [Docs/firebase_architecture.md](Docs/firebase_architecture.md) for diagrams.
    - **Google**: clinic staff. Register the app's SHA-1 and SHA-256 fingerprints (debug, upload and
      Play app-signing keys) in Project settings › Your apps.
    - **Email/Password**: patient logins. Patients use synthetic `<PatientID>@patient.dentalcare.local`
-     addresses that never receive mail. The admin's phone creates these accounts.
+     addresses that never receive mail. The admin's phone creates these accounts (keep "Enable create
+     (sign-up)" on under Authentication › Settings › User actions).
 3. **Deploy rules and indexes:** double-click `deploy.bat` (or `.\deploy.bat` in PowerShell). It
    deploys `firestore:rules`, `firestore:indexes` and `storage`. Partial: `.\deploy.bat rules` or
    `.\deploy.bat indexes`. Equivalent: `firebase deploy --project dental-sm --only firestore:rules,firestore:indexes,storage`.
@@ -86,14 +87,20 @@ Storage: workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png   (≤ 512
   in with Google the app finds the invitation (`inviteEmails`) and adds them to `config.members` with
   the role from the staff list. The rules allow only that exact self-entry. Removing or deactivating
   the staff entry deactivates them at the next settings sync.
-- **Patient logins:** an admin or dentist opens a synced patient › Overview › **Patient app access** ›
-  **Create patient login**. The admin's phone creates the Email/Password account through a second
-  Firebase instance (so the admin stays signed in) and stores `portal {loginId, uid, mustChange}` in the
-  patient document. The patient app finds its record with
-  `collectionGroup('patients').where('portal.uid', '==', uid)`.
-- **Reset password:** changing another user's password needs a server, so **Reset** issues a *new
-  Patient ID and temporary password*. The old Patient ID can no longer open the record because the
-  record now names the new account.
+- **Patient logins:** an admin or dentist opens a patient › Overview › **Patient app access** ›
+  **Create patient login**, and types the **Patient ID** (6–12 letters/numbers) and **password**
+  (8+ characters, letters and numbers). Suggestions are prefilled and can be changed. An unsynced
+  patient is saved to the cloud first. The app creates the Email/Password account through Firebase
+  Auth's sign-up endpoint (this signs nobody in on the admin's phone and carries the App Check token),
+  then stores `portal {loginId, uid, mustChange}` in the patient document. The patient app finds its
+  record with `collectionGroup('patients').where('portal.uid', '==', uid)`.
+  - Needs Authentication › Sign-in method › **Email/Password** enabled, and under Settings › User
+    actions, **Enable create (sign-up)** left on.
+  - If the API key has *API restrictions*, allow **Identity Toolkit API**; if it has an *Android app*
+    restriction, list package `com.spala.dental` with the SHA-1 of every signing key you use.
+- **Reset password:** changing another user's password needs a server, so **Reset** sets a *new
+  Patient ID and password* chosen by the admin. The old Patient ID can no longer open the record
+  because the record now names the new account.
 - **First sign-in:** the patient must choose a new password; the app then clears `portal.mustChange`.
 
 ## What the rules enforce

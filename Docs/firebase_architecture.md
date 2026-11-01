@@ -116,18 +116,18 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant Ad as Admin app
-  participant Auth2 as Firebase Auth (2nd app instance)
+  participant Auth2 as Firebase Auth (sign-up endpoint)
   participant DB as Firestore (rules)
   participant P as Patient app
-  Ad->>Auth2: createUser(ID@patient.dentalcare.local, temp password)
-  Ad->>Auth2: signOut (admin stays signed in on the main instance)
+  Ad->>Auth2: accounts:signUp(ID@patient.dentalcare.local, password chosen by admin) + App Check token
+  Note over Ad,Auth2: nobody is signed in on the admin's phone; the admin stays signed in
   Ad->>DB: transaction: patient.portal = {loginId, uid, mustChange: true}
-  Ad-->>Ad: Patient ID + temporary password shown once → share
+  Ad-->>Ad: Patient ID + password shown once → share
   P->>DB: signIn, then collectionGroup('patients').where('portal.uid','==',uid) (1 read)
   P->>P: forced "Choose your password" (reauthenticate + updatePassword)
   P->>DB: portal.mustChange = false
   P->>DB: read own record + public/info (2 reads), schedule reminders on the phone
-  Note over Ad,DB: Reset = new Patient ID + temporary password; the old ID loses access
+  Note over Ad,DB: Reset = new Patient ID + password chosen by the admin; the old ID loses access
 ```
 
 ### Save and sync (offline-first, incremental)
