@@ -23,7 +23,7 @@ const modules = {
   "node:crypto": require("node:crypto")
 };
 const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, entitlement, publicSubscription, staffInvites, applyStaffInvites, patientEmail, randomText};", {
+vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, slotsFor, validateAvailability, entitlement, publicSubscription, staffInvites, applyStaffInvites, patientEmail, randomText};", {
   exports: registered, module: { exports: registered }, Buffer, process: { env: {} },
   require(name) { assert.ok(modules[name], `Unexpected dependency ${name}`); return modules[name]; }
 });
@@ -119,4 +119,17 @@ test("Play subscription state maps to a clinic entitlement", () => {
   assert.equal(lapsed.active, false);
   assert.equal(publicSubscription({ subscription: { ...active, expiresAt: Date.now() - 1 } }).active, false);
   assert.equal(publicSubscription(null).active, false);
+});
+
+test("availability sessions expand into slots; booked doctor times are unavailable", () => {
+  const { slotsFor, validateAvailability } = registered.audit;
+  const session = { id: "s1", doctor: "Dr Rahman", startDate: "2030-01-01", endDate: "2030-01-31", weekdays: [2], start: "09:00", end: "10:30", slotMinutes: 30 };
+  validateAvailability([session]);
+  const clinic = { config: { timeZone: "UTC", availability: [session] }, scheduleIndex: [
+    { clinician: "dr rahman", startAt: Date.UTC(2030, 0, 1, 9, 30), endAt: Date.UTC(2030, 0, 1, 10, 0), patientId: "p", appointmentId: "a" }] };
+  const tuesday = slotsFor(clinic, "2030-01-01", 0); // 2030-01-01 is a Tuesday
+  assert.equal(tuesday.length, 3);
+  assert.equal(JSON.stringify(tuesday.map(s => [s.time, s.available])), JSON.stringify([["09:00", true], ["09:30", false], ["10:00", true]]));
+  assert.equal(slotsFor(clinic, "2030-01-02", 0).length, 0); // Wednesday not offered
+  assert.throws(() => validateAvailability([{ ...session, end: "08:00" }]));
 });

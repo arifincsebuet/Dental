@@ -89,6 +89,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     val doctor = doctorId?.let { id -> clinicianRecords(store.config).firstOrNull { it.optString("id") == id } }
     var tab by rememberSaveable { mutableStateOf("Overview") }
     var search by remember { mutableStateOf("") }
+    var scheduleView by rememberSaveable { mutableStateOf("Calendar") }
     var showArchived by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Form?>(null) }
     var tooth by remember { mutableStateOf<String?>(null) }
@@ -417,7 +418,25 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     store.patients.filter { (showArchived || !it.optBoolean("archived")) && "${it.optString("name")} ${it.optString("phone")} ${it.optString("id")}".contains(search, true) }.forEach { p -> PatientCard(p) { openPatient(p.optString("id")) } }
                     if (store.patients.isEmpty()) SurfaceCard(background = SurfaceTint) { Text("Your patient list starts here", style = MaterialTheme.typography.titleSmall); Text("Register a patient to create their profile and dental chart.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
                 }
-                "Schedule" -> SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action) }, { id -> openPatient(id) })
+                "Schedule" -> {
+                    Heading("Appointments", "Pick a date to see and book its slots")
+                    SegmentedPills(listOf("Calendar", "List"), scheduleView, Modifier.fillMaxWidth()) { scheduleView = it }
+                    if (scheduleView == "Calendar") SlotCalendarScreen(
+                        store.patients, store.config, canManage = store.currentRole in listOf("owner", "admin", "administrator"),
+                        onBook = { patient, slot, reason ->
+                            val consent = patient.optBoolean("communicationConsent")
+                            val copy = JSONObject(patient.toString())
+                            copy.array("appointments").put(JSONObject().put("id", uid()).put("date", "${slot.date} ${slot.time}").put("startAt", slot.startAt)
+                                .put("durationMinutes", slot.durationMinutes).put("doctor", slot.doctor).put("room", slot.room).put("reason", reason.trim())
+                                .put("status", "Scheduled").put("bookedBy", "staff").put("consent", consent)
+                                .put("reminderEnabled", consent && store.config.optBoolean("remindersEnabled")))
+                            store.save(copy, "Appointment booked: ${slot.date} ${slot.time} with ${slot.doctor}")
+                            store.saveError
+                        },
+                        onSaveConfig = { updated -> store.saveConfig(updated) },
+                        onOpenPatient = { id -> openPatient(id) },
+                    ) else SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action) }, { id -> openPatient(id) })
+                }
                 "Reports" -> AdvancedReportsScreen(store.patients, store.config)
                 "Settings" -> {
                     Heading("Settings", "Storage and account preferences")
