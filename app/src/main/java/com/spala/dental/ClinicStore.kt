@@ -486,6 +486,9 @@ class ClinicStore(private val context: Context) {
         val result = functions().getHttpsCallable("getMyRecord").call(emptyMap<String, Any>()).await().data as Map<*, *>
         portalRecord = JSONObject(result["patient"] as Map<*, *>)
         portalClinic = JSONObject(result["clinic"] as? Map<*, *> ?: emptyMap<String, Any>())
+        // Reminders are scheduled on this phone; the FCM token is kept in the patient's own document.
+        PatientReminders.schedule(context, portalRecord!!, portalClinic)
+        runCatching { registerPatientDevice() }
     }
 
     /** Free/booked slots for the patient app (getSlots: one clinic read, no other patients' names). */
@@ -541,9 +544,24 @@ class ClinicStore(private val context: Context) {
         }
     }
 
+    /** Writes this device's FCM token into the signed-in patient's Firestore document (no Cloud Function). */
+    suspend fun registerPatientDevice(token: String? = null) {
+        val claims = FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.await()?.claims ?: return
+        if (claims["role"] != "patient") return
+        PatientPush.register(context, claims["clinicId"] as String, claims["patientId"] as String, token)
+    }
+
     fun patientSignOut() {
-        runCatching { FirebaseAuth.getInstance().signOut() }
-        portalRecord = null; mustChangePassword = false; session = "login"
+        PatientReminders.cancelAll(context)
+        scope.launch {
+            // Remove this phone's token first (needs the patient's sign-in), then sign out.
+            runCatching {
+                val claims = FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.await()?.claims
+                if (claims?.get("role") == "patient") PatientPush.unregister(context, claims["clinicId"] as String, claims["patientId"] as String)
+            }
+            runCatching { FirebaseAuth.getInstance().signOut() }
+            portalRecord = null; mustChangePassword = false; session = "login"
+        }
     }
 
     /** Admin: create the patient's app login. The temporary password is returned once for sharing. */

@@ -16,6 +16,12 @@ import kotlinx.coroutines.flow.first
 
 class ClinicMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
+        // Patient reminder sent to the token stored in the patient's document (by any future sender).
+        if (message.data["kind"] == "patient_reminder") {
+            PatientReminders.notify(this, message.messageId ?: "push", message.data["title"] ?: "Dental appointment reminder",
+                message.data["body"] ?: "Open Dental Care to see your appointment.")
+            return
+        }
         if (message.data["kind"] != "appointment_reminder") return
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val intent = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -29,7 +35,8 @@ class ClinicMessagingService : FirebaseMessagingService() {
         val store = (application as ClinicApplication).store
         CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
             snapshotFlow { store.busy }.first { !it }
-            if (store.cloudReminders) store.registerCloudReminders(true)
+            if (store.session == "patient") runCatching { store.registerPatientDevice(token) }
+            else if (store.cloudReminders) store.registerCloudReminders(true)
         }
     }
 }

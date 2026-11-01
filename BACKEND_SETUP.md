@@ -123,3 +123,10 @@ How it works:
 - Clinics they own are marked `complimentary`, so their doctors and staff aren't asked to pay either.
 - The server accepts only verified Google emails from the Firebase ID token.
 - To change the list, set `SUPER_ADMINS` (comma-separated) in the Functions environment and `SUPER_ADMIN_EMAILS` in `app/build.gradle.kts`.
+
+## Patient appointment reminders (no Cloud Function)
+
+- **Token storage:** after sign-in, the patient app writes its FCM token to `workspaces/{clinic}/patients/{patient}.patientDevices.{deviceId}`, one entry per phone and at most 5. This is a direct Firestore update allowed by `firestore.rules`: only the signed-in patient, only that field, only their own document. Sign-out deletes the entry. `commitPatient` preserves the field, and staff responses never include tokens.
+- **Delivery:** sending a push through FCM requires server credentials, which must never ship in the app. So reminders are scheduled on the patient's phone with WorkManager (24 h and 2 h before each upcoming appointment). They survive reboots and are re-planned whenever the patient opens the app, books or cancels. Patients can turn them off in the app.
+- **Limitation:** an appointment changed by the clinic reaches the phone the next time the patient opens the app. Instant remote pushes need a sender. If you add one later, send a data message `{kind: "patient_reminder", title, body}` to the tokens in `patientDevices`; the app already displays it.
+- Deploy the updated rules: `firebase deploy --only firestore:rules`.

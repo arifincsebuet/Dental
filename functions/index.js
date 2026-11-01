@@ -89,6 +89,8 @@ function without(value, keys) { const next = clone(value); for (const key of key
 function clinicSetting(clinic, key, fallback) { return clinic.config[key] ?? clinic.config.settings?.[key] ?? fallback; }
 function readsClinical(member) { return ["owner", "admin", "dentist", "auditor"].includes(member.role) || (member.role === "assistant" && member.permissions && (member.permissions.clinicalRead === true || member.permissions.clinicalWrite === true)); }
 function projectPatient(patient, member) {
+  // Push tokens never leave the server towards staff devices.
+  if (patient && patient.patientDevices) { patient = { ...patient }; delete patient.patientDevices; }
   if (readsClinical(member)) return patient;
   const allowed = ["id", "schemaVersion", "name", "phone", "dob", "address", "gender", "emergencyContact", "communicationConsent", "revision", "updatedAt", "updatedBy", "clinicId", "archived"];
   if (["receptionist", "assistant"].includes(member.role)) allowed.push("appointments");
@@ -436,7 +438,7 @@ exports.commitPatient = onCall(callOptions, async request => {
   assert(Number.isSafeInteger(data.expectedRevision) && data.expectedRevision >= 0, "Invalid expected revision");
   const input = clone(object(data.patient, "patient"));
   // `portal` (patient login metadata) is server-owned: accepted in the payload but always taken from the stored doc.
-  keysOnly(input, [...ROOT_FIELDS, "dirty", "remoteVersion", "cloudOwner", "revision", "updatedAt", "updatedBy", "clinicId", "operationId", "audit", "receipts", "redacted", "portal"], "patient");
+  keysOnly(input, [...ROOT_FIELDS, "dirty", "remoteVersion", "cloudOwner", "revision", "updatedAt", "updatedBy", "clinicId", "operationId", "audit", "receipts", "redacted", "portal", "patientDevices"], "patient");
   const patient = {};
   for (const key of Object.keys(input)) if (ROOT_FIELDS.has(key)) patient[key] = input[key];
   assert(patient.id === patientId && patient.schemaVersion === 3, "Patient identity or schema mismatch");
@@ -491,6 +493,8 @@ exports.commitPatient = onCall(callOptions, async request => {
     patient.audit = audit;
     patient.receipts = [...(old && old.receipts || []).slice(-(MAX_RECEIPTS - 1)), { id: operationId, actor: uid, hash, revision, at: now }];
     if (old && old.portal) patient.portal = old.portal;
+    // Patient device tokens are written by the patient app directly (Firestore rules); keep them.
+    if (old && old.patientDevices) patient.patientDevices = old.patientDevices;
     patient.revision = revision; patient.operationId = operationId; patient.clinicId = clinicId; patient.updatedAt = now; patient.updatedBy = uid;
     patient.chart.clinicId = clinicId; patient.chart.updatedBy = uid; patient.chart.updatedAt = new Date(now).toISOString(); patient.chart.chartVersion = (old && old.chart && old.chart.chartVersion || 0) + (changed.some(key => CLINICAL.includes(key)) ? 1 : 0);
     assert(Buffer.byteLength(JSON.stringify(patient.chart), "utf8") <= 32 * 1024, "Current chart exceeds the 32 KiB budget", "resource-exhausted");
