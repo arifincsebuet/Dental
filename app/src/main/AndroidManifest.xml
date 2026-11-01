@@ -14,10 +14,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Dental">
-        <service android:name=".ClinicMessagingService" android:exported="false">
-            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
-        </service>
-        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="clinic-reminders" />
         <!-- Health app: no advertising ID or ad personalisation signals from Analytics. -->
         <meta-data android:name="google_analytics_adid_collection_enabled" android:value="false" />
         <meta-data android:name="google_analytics_default_allow_ad_personalization_signals" android:value="false" />

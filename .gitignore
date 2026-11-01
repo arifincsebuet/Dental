@@ -18,3 +18,5 @@ local.properties
 .preview-tools/
 **/.godot/
 previews/*.log
+firebase/tests/node_modules/
+firebase/tests/*.log

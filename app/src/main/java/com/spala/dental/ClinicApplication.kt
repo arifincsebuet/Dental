@@ -25,6 +25,8 @@ class ClinicApplication : Application() {
     val store by lazy { ClinicStore(this) }
     override fun onCreate() {
         super.onCreate()
+        // App Check before any Firestore/Storage/Auth call, so every request carries a token.
+        com.google.firebase.FirebaseApp.getApps(this).firstOrNull { it.name == com.google.firebase.FirebaseApp.DEFAULT_APP_NAME }?.let { AppCheckSetup.install(it) }
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("clinic-reminders", "Clinic reminders", NotificationManager.IMPORTANCE_DEFAULT))
     }
 }
@@ -33,7 +35,7 @@ object ClinicReminders {
     fun schedule(context: Context, store: ClinicStore) {
         val manager = WorkManager.getInstance(context)
         manager.cancelAllWorkByTag("clinic-reminder")
-        if (!store.config.optBoolean("remindersEnabled") || store.cloudReminders) return
+        if (!store.config.optBoolean("remindersEnabled")) return
         val zone = runCatching { ZoneId.of(store.config.optString("timeZone", "Asia/Dhaka")) }.getOrDefault(ZoneId.systemDefault())
         val now = System.currentTimeMillis()
         for (patient in store.patients.filter { !it.optBoolean("archived") && it.optBoolean("communicationConsent", it.optBoolean("reminderConsent")) }) {
@@ -57,7 +59,7 @@ class ClinicReminderWorker(context: Context, parameters: WorkerParameters) : Cor
     override suspend fun doWork(): Result {
         val store = (applicationContext as ClinicApplication).store
         withContext(Dispatchers.Main) { snapshotFlow { store.busy }.first { !it } }
-        if (!store.config.optBoolean("remindersEnabled") || store.cloudReminders) return Result.success()
+        if (!store.config.optBoolean("remindersEnabled")) return Result.success()
         val patient = store.patients.firstOrNull { it.optString("id") == inputData.getString("patient") && it.optBoolean("communicationConsent", it.optBoolean("reminderConsent")) } ?: return Result.success()
         val appointment = patient.optJSONArray("appointments")?.objects().orEmpty().firstOrNull { it.optString("id") == inputData.getString("appointment") } ?: return Result.success()
         if (appointment.optString("status") !in listOf("Scheduled", "Confirmed") || !appointment.optBoolean("reminderEnabled") || !appointment.optBoolean("consent")) return Result.success()

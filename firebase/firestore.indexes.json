@@ -1,20 +1,5 @@
 {
-  "indexes": [
-    {
-      "collectionGroup": "workspaces",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "remindersEnabled",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "nextReminderAt",
-          "order": "ASCENDING"
-        }
-      ]
-    }
-  ],
+  "indexes": [],
   "fieldOverrides": [
     {
       "collectionGroup": "patients",
@@ -88,21 +73,6 @@
     },
     {
       "collectionGroup": "workspaces",
-      "fieldPath": "devices",
-      "indexes": []
-    },
-    {
-      "collectionGroup": "workspaces",
-      "fieldPath": "scheduleIndex",
-      "indexes": []
-    },
-    {
-      "collectionGroup": "workspaces",
-      "fieldPath": "reminderJobs",
-      "indexes": []
-    },
-    {
-      "collectionGroup": "workspaces",
       "fieldPath": "audit",
       "indexes": []
     },
@@ -113,13 +83,37 @@
     },
     {
       "collectionGroup": "workspaces",
-      "fieldPath": "patientPushJobs",
+      "fieldPath": "invites",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "workspaces",
+      "fieldPath": "subscription",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "public",
+      "fieldPath": "availability",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "public",
+      "fieldPath": "busy",
       "indexes": []
     },
     {
       "collectionGroup": "patients",
-      "fieldPath": "patientDevices",
-      "indexes": []
+      "fieldPath": "portal.uid",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
     }
   ]
 }

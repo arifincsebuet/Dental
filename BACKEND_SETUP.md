@@ -1,136 +1,155 @@
-# Trusted Firebase backend
+# Firebase backend (no Cloud Functions)
 
-This directory contains deployable Cloud Functions source and restrictive Firestore/Storage rules. No Firebase project, billing configuration, cloud resources, service credentials, rules, or functions were deployed during implementation. No npm installation, build, emulator run, or device test was performed, per the request to implement without verification.
+Dental Care has **no server code**. The Android app reads and writes Firestore and Storage directly,
+and `firebase/firestore.rules` + `firebase/storage.rules` are the security boundary. App Check with
+Play Integrity makes sure only the genuine app from Google Play can call Firebase.
 
-## Cloud setup
+That keeps the bill to Firestore reads/writes/storage and Storage only: no Functions, Cloud
+Scheduler, Cloud Build, Artifact Registry or FCM sending costs, and the project can stay on the
+free Spark plan until the free Firestore/Storage quotas are exceeded.
 
-1. The Android app is registered in the Firebase project **`dental-sm`**. Its `app/google-services.json` is committed, and the Google services Gradle plugin (4.5.0) turns it into the Firebase resources at build time, including `default_web_client_id` for Google sign-in. Don't also add a `res/values/firebase.xml`, because duplicate resources break the build. `firebase/firebase.xml.example` is only kept for builds without the plugin.
-   - The API key in `google-services.json` is an identifier, not a secret. Restrict it to this Android app (package plus SHA-1) in Google Cloud Console › APIs & Services › Credentials.
-   - Analytics (BoM 35.1.0) is included without the advertising ID or ad personalisation. The app logs no clinical data as events.
-   - **Google** sign-in provider: required for clinic staff. Register the app's SHA-1/SHA-256 signing fingerprints and put the web OAuth client ID in `default_web_client_id`.
-   - **Email/Password** provider: required for patient logins. Patients use synthetic `<PatientID>@patient.dentalcare.local` addresses, which never receive mail.
-   - Anonymous auth is only needed for older device-only workspaces.
+See [Docs/firebase_architecture.md](Docs/firebase_architecture.md) for diagrams.
 
-   See [Docs/firebase_architecture.md](Docs/firebase_architecture.md) for the full design and cost controls.
-2. Set up Firestore and Cloud Storage in appropriate regions. Cloud Functions and Cloud Scheduler deployment require a billing-enabled project and the relevant Google Cloud APIs. Storage/Firestore/Functions/Scheduler/FCM delivery consume their respective service quotas; using one patient document does not make requests free.
-3. On Windows, double-click **`deploy.bat`** in the project root, or run `.\deploy.bat` from PowerShell. It installs the Firebase CLI if missing, signs you in once, installs function dependencies, runs the checks and tests, and then deploys to `dental-sm`. Use `.\deploy.bat functions`, `rules` or `indexes` for a partial deploy. Otherwise: install Node.js 22 and Firebase CLI on your development/deployment machine. In `functions`, run `npm install`. Deploy from the project root with your explicitly selected project: `firebase deploy --project YOUR_PROJECT_ID --only functions,firestore:rules,firestore:indexes,storage`.
-4. Default function region is `us-central1`. To choose another supported region, set `FUNCTION_REGION` in the Functions environment before deployment and use the same value in the Android `firebase_functions_region` resource. Place compute close to Firestore where practical.
-5. All callable functions require Firebase Authentication. Anonymous Firebase users are allowed to own their personal workspace. Optional App Check enforcement is enabled by `ENFORCE_APP_CHECK=true` after configuring the Android provider; do not turn it on before the Android app is registered for it. The backend does not need service-account keys in the Android app.
-6. Cloud Storage rules use `firestore.get` to check clinic membership; grant the cross-service rules access when prompted by Firebase deployment. Direct patient/config document reads/writes are denied. The app uses callable endpoints for role-filtered reads and commits.
+## One-time setup
 
-The supplied Firebase emulator configuration provides Auth, Functions, Firestore, and Storage ports for later local verification. These services are not started by this implementation.
+1. **Project:** `dental-sm`. `app/google-services.json` is committed and the Google services Gradle
+   plugin turns it into resources. Restrict the API key to this Android app (package + SHA-1) in
+   Google Cloud Console › APIs & Services › Credentials.
+2. **Authentication providers** (Firebase console › Authentication › Sign-in method):
+   - **Google**: clinic staff. Register the app's SHA-1 and SHA-256 fingerprints (debug, upload and
+     Play app-signing keys) in Project settings › Your apps.
+   - **Email/Password**: patient logins. Patients use synthetic `<PatientID>@patient.dentalcare.local`
+     addresses that never receive mail. The admin's phone creates these accounts.
+3. **Deploy rules and indexes:** double-click `deploy.bat` (or `.\deploy.bat` in PowerShell). It
+   deploys `firestore:rules`, `firestore:indexes` and `storage`. Partial: `.\deploy.bat rules` or
+   `.\deploy.bat indexes`. Equivalent: `firebase deploy --project dental-sm --only firestore:rules,firestore:indexes,storage`.
+   - The `portal.uid` collection-group index must finish building (Firestore › Indexes ›
+     Single field) before patients can sign in.
+   - Storage rules read Firestore to check membership; accept the cross-service access prompt.
+4. **Delete the old Cloud Functions** if an earlier version deployed them (they are no longer used):
+   ```
+   firebase functions:list --project dental-sm
+   firebase functions:delete getClinic updateClinic listPatients getPatient commitPatient registerDevice resolveWorkspace createPatientLogin resetPatientPassword completePasswordChange getMyRecord verifySubscription getSlots bookSlot cancelMyAppointment queuePatientPush cancelPatientPush dispatchClinicReminders dispatchPatientPushes --project dental-sm
+   ```
+   Also delete the matching Cloud Scheduler jobs if any remain (Google Cloud console › Cloud Scheduler).
 
-## Storage layout and costs
+## App Check with Play Integrity
+
+The app installs the provider in `ClinicApplication.onCreate`, before any Firebase call:
+release builds use **Play Integrity** (`app/src/release/.../AppCheckSetup.kt`), debug builds use the
+**debug provider** (`app/src/debug/.../AppCheckSetup.kt`).
+
+1. Firebase console › **App Check** › Apps › Android app `com.spala.dental` › **Play Integrity** ›
+   enter the **SHA-256** of the *app signing key* (Play Console › Test and release › App integrity ›
+   App signing). Save.
+2. Play Console › App integrity › **Play Integrity API** › link the same Google Cloud project
+   (`dental-sm`).
+3. Debug builds: run the app once, find `Enter this debug secret into the allow list…` in Logcat,
+   and add it under App Check › Apps › ⋮ › **Manage debug tokens**.
+4. Watch App Check › **APIs** metrics for a few days. When almost all requests are *verified*, press
+   **Enforce** for **Cloud Firestore**, **Cloud Storage** and **Authentication**. Older app versions
+   without App Check stop working once enforced, so update testers first.
+
+The "No AppCheckProvider installed" log line from earlier versions disappears with this change.
+
+## Data layout and cost
 
 ```text
-workspaces/{ownerFirebaseUid}                       # one shared clinic config
-workspaces/{clinicId}/patients/{patientId}          # exactly one doc per patient
-Storage: workspaces/{clinicId}/patients/{id}/{sha256}.png
+workspaces/{clinicId}                       clinic: config (staff, members, services, availability,
+                                            reminder settings…), revision, invites, subscription
+workspaces/{clinicId}/public/info           patient-visible: name, time zone, currency, availability,
+                                            busy times {s,e,d} (no names)
+workspaces/{clinicId}/patients/{patientId}  one per patient: profile, chart, treatments, appointments,
+                                            invoices, history, image refs, portal login
+Storage: workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png   (≤ 512 KB, lossless, deduplicated)
 ```
 
-The clinic ID is its owner's Firebase UID. Other users join that workspace by their exact Firebase UIDs in `config.members`; knowledge of a clinic ID alone grants no access. A personal workspace requires no bootstrap: the UID owner has owner rights, and the first patient commit or clinic update creates its config document. One shared clinic document holds configuration, members, staff/services, the active scheduling index, reminder queue, device registrations, and configuration audit. No tooth, event, receipt, invoice, or reminder subcollection is created.
+- **Two documents per clinic plus one per patient.** Every list lives inside one of these documents:
+  staff, doctors, services, availability, members, invitations and busy times in the clinic documents;
+  appointments, treatments, invoices, payments, history and images inside the patient document.
+  There are no per-appointment, per-login, per-device, per-job or per-slot documents.
+- **Why not all patients in one document?** Firestore rules protect whole documents. A patient who can
+  read a shared document can read everyone in it, so each patient needs their own document for the
+  patient app. A single document is also capped at 1 MiB.
+- **Reads:** the staff app keeps an encrypted local copy and syncs on demand. A sync writes only
+  changed patients and reads only patients changed since the last sync (`syncedAt` query). No live
+  listeners. The patient app reads 2 documents when it opens.
+- **Writes:** saving a patient is 1 write. Clinic settings are 2 writes (clinic + public/info). Busy
+  times are rewritten only when appointments change.
+- **Indexes:** large fields are exempt; only `inviteEmails`, `syncedAt` and `portal.uid` are queried.
+- **Size guard:** the app refuses to save a patient document above ~750 KB.
 
-Each patient document contains its profile, chart, clinical story, source records, history, invoices/payments/refunds, image references, revision, embedded immutable audit, and recent command receipts. App-local `dirty`, `remoteVersion`, and `cloudOwner` fields are not accepted as clinical source data. The server controls revisions, author/recording metadata, current treatment-state projection, audit entries, and operation receipts. Server audit stores changed prior fields/items and after-value hashes rather than copying every full patient snapshot.
+## Accounts
 
-The server reads the clinic and patient in a transaction for authorization/concurrency, then writes only the changed patient document in the usual case. It writes the clinic document only for first initialization or changed scheduling/reminder metadata. There are no real-time listeners or background full-patient scans. Explicit listing uses document-ID cursor pagination (maximum 100 records per page). Large maps/arrays and non-query fields have index exemptions. Reminder polling queries only due clinics through one compound index; it does not poll every patient.
+- **Clinic owner:** the first Google account to sign in owns a new clinic (clinic ID = their uid).
+- **Staff:** add them in Settings › Clinic › Staff with their Google email, then Sync. When they sign
+  in with Google the app finds the invitation (`inviteEmails`) and adds them to `config.members` with
+  the role from the staff list. The rules allow only that exact self-entry. Removing or deactivating
+  the staff entry deactivates them at the next settings sync.
+- **Patient logins:** an admin or dentist opens a synced patient › Overview › **Patient app access** ›
+  **Create patient login**. The admin's phone creates the Email/Password account through a second
+  Firebase instance (so the admin stays signed in) and stores `portal {loginId, uid, mustChange}` in the
+  patient document. The patient app finds its record with
+  `collectionGroup('patients').where('portal.uid', '==', uid)`.
+- **Reset password:** changing another user's password needs a server, so **Reset** issues a *new
+  Patient ID and temporary password*. The old Patient ID can no longer open the record because the
+  record now names the new account.
+- **First sign-in:** the patient must choose a new password; the app then clears `portal.mustChange`.
 
-Single documents remain bounded: the server stops writes at a conservative 750,000 UTF-8 JSON bytes before Firestore's separate 1 MiB encoded document limit. It also caps histories, source arrays, active scheduling index, reminder queue, memberships and devices. It never silently truncates clinical history or audit. Export and an operator-approved archive/migration plan are necessary when a patient/clinic reaches the limit. Unlimited lifetime history and an invariant single bounded Firestore document cannot both be guaranteed.
+## What the rules enforce
 
-## Callable contracts
+- Clinic document: owner/admins update settings only with `revision + 1`; only the owner can change the
+  owner's member entry; subscription is a separate admin-only field; `complimentary` only by a super
+  admin owner; invited staff can add only their own member entry with the invited role.
+- Patient documents: any active staff member reads; non-auditor staff write with `revision + 1` and a
+  server timestamp. Clinical fields need owner/admin/dentist (or an assistant with `clinicalWrite`),
+  invoices need owner/admin/cashier, the portal login needs owner/admin/dentist. No deletes.
+- Patients: read only their own record; may only clear `portal.mustChange`, or book/cancel (change
+  `appointments`, append one history line, `revision + 1`).
+- public/info: any signed-in account reads it; staff write it; a patient may add or remove exactly one
+  busy time.
 
-All return JSON-compatible fields with integer UTC epoch milliseconds for recording times; chart `updatedAt` is UTC RFC 3339.
+Limits of a server-less design (accepted to save cost):
+- Rules cannot hide fields inside a document. Every active staff role can read full patient records;
+  the app still hides clinical fields from front-desk roles in its screens. A patient can read their
+  whole own record (their own data).
+- Clinical and accounting validation (FDI codes, invoice arithmetic, append-only history) runs in the
+  app, not on a server. Rules enforce who may write which fields, but not every value.
+- Patient booking checks for a free slot in a transaction on the public busy list. Staff sync rebuilds
+  that list from the real appointments, so a tampered entry is corrected at the next sync.
 
-- `getClinic({clinicId})` returns `{clinicId, revision, config, reminderSummary}`. Missing personal config returns defaults at revision 0 without a write. Reminder summary aggregates queue statuses and contains no FCM tokens.
-- `updateClinic({clinicId, expectedRevision, operationId, config})` returns the same shape. Only owner/admin can edit config; only owner can change exact-UID memberships. Config includes `name`, `currency`, `timeZone`, `members` UID map, `staff`, `services`, and optional flat `taxBps`, `bufferMinutes`, `reminderHours`, `remindersEnabled`, `quietStart`, `quietEnd`; nested legacy `settings` is supported.
-- `listPatients({clinicId,pageSize,afterId?})` returns `{patients,nextCursor}`. Omit `afterId` initially; continue with `nextCursor` until null. Page size is 1–100.
-- `getPatient({clinicId,patientId})` returns `{patient}` or `not-found`.
-- `commitPatient({clinicId,patientId,expectedRevision,operationId,patient})` returns `{revision,updatedAt,patient}` with the canonical committed patient filtered for the caller's role. Use that returned patient for future edits. The same operation ID/fingerprint returns an accepted current canonical state without duplicating the mutation; `operationRevision` identifies the original revision on a retried older accepted command. Reusing an ID with changed content is rejected. A stale expected revision produces `aborted` and no clinical changes. An unresolved operation must retain its immutable payload/ID until its receipt is resolved. Embedded receipts retain the latest 128 accepted operations; an older unknown retry conflicts safely on its stale revision rather than replaying against newer data.
-- `registerDevice({clinicId,token,enabled})` registers/removes the current user's private FCM token. At most eight recent tokens per member are retained. Tokens never appear in `getClinic` results.
+## Reminders (on the device)
 
-## Authorization and records
-
-Roles: `owner`, `admin`/`administrator`, `dentist`, `assistant`, `receptionist`, `cashier`, `auditor`. Personal owners have all permissions. Dentist roles can write clinical fields; assistants require explicit `permissions.clinicalWrite`, and clinical read requires `clinicalRead` or `clinicalWrite`. Receptionists can maintain demographic/scheduling fields and basic billing visibility; cashiers can change invoices/payments/refunds. Auditors have read-only clinical access. Only authorized clinical readers can access Storage images. Nonclinical patient responses omit chart/story/medical history/images/clinical source records/audit; hidden fields are preserved server-side during partial updates. Client-side hidden controls are only a convenience; endpoints enforce authorization independently.
-
-The backend validates standard FDI inventories, tooth-specific I/O surfaces, controlled findings/restorations/presence codes, treatment transitions, immutable source events, finalized encounter base fields, append-only amendments, and performed-care references. Completing a procedure does not itself resolve all findings. Recorded history cannot be rewritten by a clinical reader. Server audit remains authoritative even if a client submits a misleading free-text annotation.
-
-Invoices use integer minor units. New line items have historical `unitPrice`, integer `quantity`, fixed discount and basis-point tax with HALF_UP rounding. Issued invoice amounts/currency/lines/discount/tax remain immutable. Payments/refunds are append-only; refunds reference the original payment and cannot exceed its unrefunded receipts. Voiding requires a reason and all receipts refunded. Currency totals must not be mixed. Cloud sync validates these accounting records but does not process a payment gateway charge.
-
-Active appointment reservations are checked transactionally against a bounded clinic scheduling index, including duration, clinician, room and clinic buffer. Clinic-local `YYYY-MM-DD HH:mm` dates are converted with the configured IANA time zone; explicit ISO instants are preferred around daylight-saving transitions. Two clients cannot silently reserve an overlapping active slot through separate patient transactions.
-
-## Reminders and images
-
-`dispatchClinicReminders` runs every 15 minutes after deployment. Appointment reminder jobs are embedded in the clinic document and created only when clinic reminders are enabled, the appointment enables its reminder, and patient/appointment communication consent exists. Explicit global patient consent revocation overrides an older appointment opt-in. Lead hours and clinic quiet hours apply. Notifications are generic and contain no patient names, clinical details, or balances. Delivery is to explicitly registered staff devices, not SMS/email/WhatsApp. Those channels require separately selected provider credentials and consent/template integration.
-
-The dispatcher atomically claims jobs before sending to avoid concurrent repeated sends. Statuses include `pending`, `claimed`, `sent`, `delivery_partial_or_failed`, `delivery_failed`, and `no_registered_device`; counts are exposed by `getClinic`. FCM does not guarantee exactly-once delivery. A process failure after claiming and before recording a send result leaves `claimed` as an uncertain outcome; it is intentionally not blindly resent. Operator review and the app's local appointment view remain necessary. Completed queue entries are retained for 30 days and queue capacity is 256 jobs. The scheduler handles at most 50 due clinics/30 jobs per clinic per run; higher volume needs explicit capacity review.
-
-Images remain in Storage as immutable SHA-256 PNG objects up to 512 KiB. New references are validated against the authorized clinic/patient prefix and actual Storage metadata before a patient commit. Private `gs://` references are canonicalized by the server; no public download tokens are generated. Pixels are losslessly encoded by Android; images that cannot fit without discarding detail are rejected. Storage upload and Firestore commit cannot be one transaction. An interrupted upload may leave an unreferenced object; no automatic deletion job is enabled because it could delete an unsynchronized clinical image. An operator-approved orphan cleanup/retention policy is required before bulk cleanup.
-
-Official references: [callable functions](https://firebase.google.com/docs/functions/callable), [scheduled functions](https://firebase.google.com/docs/functions/schedule-functions), [Admin SDK FCM delivery](https://firebase.google.com/docs/cloud-messaging/send/admin-sdk).
-
-## Audit regression checks
-
-The PRD audit added `test/audit-regressions.test.js`. From `functions`, `npm test` runs nine pure-helper regression tests without installing Firebase SDKs or contacting services. They passed during the audit, along with `npm run check`'s equivalent `node --check index.js`. This is limited source-level coverage, not callable transaction, Firestore Rules, Storage, FCM, or deployed integration verification. See [PRD_AUDIT.md](PRD_AUDIT.md) for remaining requirements.
-
-## Accounts and patient logins
-
-- The first Google account to sign in creates a clinic and becomes its owner.
-- Other doctors and staff are added in Settings › Clinic › Staff with their Google email. After the owner syncs, they can sign in with Google and join automatically (`resolveWorkspace`).
-- Deactivating a staff entry removes that person's access.
-- An admin or dentist opens a synced patient → Overview → **Patient app access** → **Create patient login**. The Patient ID and temporary password are shown once, ready to share. The patient must choose a new password at first sign-in. **Reset password** issues a new temporary password and signs out the patient's devices.
-- New callables: `resolveWorkspace`, `createPatientLogin`, `resetPatientPassword`, `completePasswordChange` and `getMyRecord`. `listPatients` also accepts `updatedAfter` for incremental sync.
+- **Patients:** the patient app schedules its own reminders (WorkManager) from its appointments each
+  time it opens: one at the clinic's reminder lead time (default 24 h) and one 2 h before. No push
+  server, no tokens stored.
+- **Staff:** consent-aware local reminders with quiet hours, as before.
+- **Removed:** admin "Notify patients" pushes and server-sent reminders. Sending a push to another phone
+  needs a server holding the FCM credentials, which cannot safely ship inside an app.
 
 ## Subscription (Google Play Billing)
 
-One subscription covers a whole clinic: the owner, every doctor and every staff member. Patients are never charged. **Prices live in Play Console, not in the app**, which reads them at runtime. Ending or changing an offer therefore needs no app update.
+Prices live in Play Console (product `dental_care_pro`, base plan `monthly` USD 10, offer `launch`
+USD 5); see the paywall comments in `Subscription.kt`.
 
-1. Play Console › Monetize › Products › Subscriptions → create product **`dental_care_pro`**. The ID is `SUBSCRIPTION_PRODUCT_ID` in `app/build.gradle.kts`.
-2. Add a base plan **`monthly`**: auto-renewing, billing period 1 month, price **USD 10.00**. Let Play convert local prices, or set them per country.
-3. Add an offer **`launch`** on that base plan:
-   - Eligibility: *New customer acquisition* ("Never had this subscription").
-   - Phase: *Single payment* or *Discounted recurring payment* of **USD 5.00 per month** for the number of months you choose, e.g. 12.
-   - Tag: `launch`.
+Without a server the purchase is handled on the device:
+1. The admin buys in the app. Checkout carries an obfuscated account ID derived from the clinic ID.
+2. The app **acknowledges** the purchase with the Play Billing library (required within 3 days).
+3. The admin's device writes `subscription {active, expiresAt ≈ 34 days, productId, orderId}` to the
+   clinic document, so every staff device of that clinic unlocks.
+4. Each app start on the purchasing device re-reads Play's purchase and extends `expiresAt` (at most
+   once a day). If the subscription is cancelled, it stops being extended and expires.
 
-   The app picks the eligible offer with the cheapest first payment. It shows "$5 / month for the first N months, then $10 / month", with $10 struck through.
-4. When the promotion ends, **deactivate the `launch` offer**. New subscribers then see and pay $10/month. Existing subscribers keep the terms they signed up with until their offer phase ends.
-5. Server verification:
-   - Enable the *Google Play Android Developer API* in the Google Cloud project used by Firebase.
-   - Play Console › Users and permissions → invite the Cloud Functions service account (`PROJECT_ID@appspot.gserviceaccount.com`, or the account your functions run as). Grant *View financial data* and *Manage orders and subscriptions*.
-   - Optional environment overrides: `ANDROID_PACKAGE` (default `com.spala.dental`) and `SUBSCRIPTION_PRODUCTS` (default `dental_care_pro`).
-6. Test with license testers (Play Console › Settings › License testing). Their renewals happen within minutes.
-
-How it works:
-- **Purchase:** the app starts Google Play checkout with an obfuscated account ID derived from the clinic ID. It sends the purchase token to `verifySubscription`, which:
-  - checks the token with the Play Developer API
-  - refuses tokens bought for another clinic
-  - acknowledges the purchase (Google refunds unacknowledged purchases after 3 days)
-  - stores `subscription` (active, expiry, offer, auto-renew) on the clinic document
-- **Renewals:** checked lazily. `getClinic` re-verifies only after the stored period has ended. That needs no Pub/Sub topic, no polling and no extra documents.
-- **Without an active subscription:** staff see the paywall. Only the owner or an admin can subscribe. Patient logins are never blocked.
-- **Debug builds** skip the paywall so you can test features.
-- **Offline mode** (no Firebase): the purchase is acknowledged on the device and checked from the device's Play purchases.
+Super admins (`dev.spala@gmail.com`, `spalatechnologies@gmail.com`) never pay; clinics they own are
+marked `complimentary` for all their staff. The list is in `SUPER_ADMIN_EMAILS` (app/build.gradle.kts)
+and in `firebase/firestore.rules` (`superAdmin()`); change both together.
 
 ## Appointment slots
 
-- **Creating availability (admins):** Schedule › Calendar › **Manage slots**. Each availability entry sets a doctor, a date range, weekdays, start and end time, slot length and an optional room. It's stored in the clinic document as `config.availability` (at most 300 entries). Slots are computed from it and never stored individually, so there are no per-slot documents.
-- **The calendar:** a month calendar marks days with free slots (green) and fully booked days (grey). Picking a day lists its slots by doctor. Staff see who booked each slot and can tap a free slot to book any patient, searching by name, phone or Patient ID.
-- **Patient booking:** patients book from the patient app (`getSlots` makes 1 read; `bookSlot` is one transaction on the clinic and patient documents). The server re-checks the slot is still free, so two people can't take the same time. Patients may hold up to 3 upcoming bookings and can cancel up to 2 hours before (`cancelMyAppointment`). Online booking can be turned off in Manage slots (`config.patientBooking`).
-- **After changing availability,** Sync so patients see it.
-
-## Super admins
-
-`dev.spala@gmail.com` and `spalatechnologies@gmail.com` are platform super admins:
-- They use the app without a subscription.
-- Clinics they own are marked `complimentary`, so their doctors and staff aren't asked to pay either.
-- The server accepts only verified Google emails from the Firebase ID token.
-- To change the list, set `SUPER_ADMINS` (comma-separated) in the Functions environment and `SUPER_ADMIN_EMAILS` in `app/build.gradle.kts`.
-
-## Patient appointment reminders (server pushes)
-
-- **Token storage:** after sign-in, the patient app writes its FCM token to `workspaces/{clinic}/patients/{patient}.patientDevices.{deviceId}`, one entry per phone and at most 5. Firestore rules allow only the signed-in patient to update only that field of only their own document. Sign-out deletes the entry. `commitPatient` preserves the field, and staff responses never include tokens.
-- **Admin pushes:** use drawer › **Notify patients**, or a patient's Overview › **Send notification**. Choose the recipients: patients with appointments on a day, all patients with app access, a hand-picked list, or one patient. Pick a template or write a message, then send now or schedule it.
-  - `queuePatientPush` delivers "send now" immediately.
-  - Scheduled messages are kept in the clinic document (`patientPushJobs`, last 100) and delivered by **`dispatchPatientPushes`**, which runs every 5 minutes and queries only clinics with a due job.
-  - `cancelPatientPush` cancels a scheduled message.
-  - Invalid tokens are removed after each send.
-- **Automatic reminders:** turn on the switch in the Notify patients dialog (`config.patientPushReminders`). `dispatchClinicReminders` then also pushes each due appointment reminder to that patient's phones.
-- Patients receive reminders only as pushes. There are no reminders scheduled on the phone, and older app versions' on-device reminders are cleared on sign-in. Only patients who signed in to the patient app and allowed notifications receive them.
+- Admins define availability in Schedule › Calendar › **Manage slots** (`config.availability`, copied to
+  public/info on sync). Slots are computed, never stored.
+- Staff see bookings from their local patients. Patients see free slots computed from public/info
+  (availability + anonymous busy times).
+- A patient booking is one transaction: it re-checks the slot is free, appends the appointment to the
+  patient's document and the busy time to public/info. Up to 3 upcoming bookings; cancel up to 2 h
+  before.

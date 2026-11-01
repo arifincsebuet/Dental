@@ -48,8 +48,9 @@ dependencies {
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
-    implementation("com.google.firebase:firebase-functions")
-    implementation("com.google.firebase:firebase-messaging")
+    // App Check: Play Integrity in release builds, the debug provider in debug builds (src/debug, src/release).
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
     implementation("androidx.credentials:credentials:1.5.0")

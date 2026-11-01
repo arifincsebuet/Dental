@@ -86,7 +86,7 @@ private fun DrawerEntry(label: String, glyph: Glyph, selected: Boolean = false, 
     )
 }
 
-/** Clinic team drawer. [onAction] receives: register, book, sync, notify, howto, signout. */
+/** Clinic team drawer. [onAction] receives: register, book, sync, howto, signout. */
 @Composable
 fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (String) -> Unit, onAction: (String) -> Unit) {
     val email = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email }.getOrNull()
@@ -112,7 +112,6 @@ fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (Str
             DrawerEntry("Sync now", Glyph.Sync, badge = if (pending > 0) "$pending pending" else null) { onAction("sync") }
             if (admin) {
                 DrawerSection("Administration")
-                DrawerEntry("Notify patients", Glyph.Alert, tint = Amber600) { onAction("notify") }
                 DrawerEntry("Clinic settings & staff", Glyph.Shield) { onNavigate("Settings") }
                 DrawerEntry("Subscription", Glyph.Card, badge = if (store.isSuperAdmin) "Free" else if (store.subscriptionActive) "Active" else null) { onNavigate("Settings") }
             }

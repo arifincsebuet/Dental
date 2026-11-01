@@ -52,9 +52,9 @@ class MainActivity : ComponentActivity() {
         ToothNotation.load(this)
         TapSound.load(this)
         billing = BillingManager(this) { purchase ->
-            if (store.session == "local") { billing.acknowledgeLocally(purchase); store.markDeviceEntitled() }
-            // Only call the server when the clinic is not already known to be active (saves calls on every launch).
-            else if (!store.subscriptionActive) store.verifyPurchase(purchase.purchaseToken)
+            // No server: the device acknowledges the purchase and records the clinic subscription.
+            billing.acknowledgeLocally(purchase)
+            store.recordPurchase(purchase)
         }
         billing.connect()
         setContent {
@@ -92,7 +92,6 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     var search by remember { mutableStateOf("") }
     var scheduleView by rememberSaveable { mutableStateOf("Calendar") }
     // Patient notification dialog: an empty object = choose recipients; a patient = that patient only.
-    var pushFor by remember { mutableStateOf<JSONObject?>(null) }
     var showArchived by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Form?>(null) }
     var tooth by remember { mutableStateOf<String?>(null) }
@@ -177,7 +176,6 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     "register" -> addPatient()
                     "book" -> { go("Schedule"); scheduleView = "Calendar" }
                     "sync" -> store.sync()
-                    "notify" -> pushFor = JSONObject()
                     "howto" -> showHowTo = true
                     "signout" -> if (store.session == "local") store.leaveLocalMode() else store.signOut()
                 }
@@ -296,7 +294,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                 when (tab.takeIf { it in patientTabs } ?: "Overview") {
                     "Overview" -> {
                         if (p.has("chart")) PatientHeader(p, showAlert = false)
-                        if (canEdit || store.currentRole in listOf("owner", "admin", "administrator")) PatientAccessCard(p, store) { pushFor = p }
+                        if (canEdit || store.currentRole in listOf("owner", "admin", "administrator")) PatientAccessCard(p, store)
                         SectionHeader("Profile")
                         SurfaceCard {
                             InfoRow(Glyph.Calendar, "Date of birth", p.optString("dob").ifBlank { "Not recorded" } + (ageText(p.optString("dob"))?.let { " · $it" } ?: ""))
@@ -480,7 +478,6 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     }
                     OutlinedButton(onClick = { showHowTo = true }, modifier = Modifier.fillMaxWidth()) { Text("How to use") }
                     if (store.cloudIdentity.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text("Cloud UID: ${store.cloudIdentity}\nWorkspace: ${store.workspaceId.ifBlank { store.cloudIdentity }}") }
-                    if (store.reminderRebuildRequired) CardBlock("Refresh older appointment reminders", "Some saved appointments need their reminder settings refreshed. Review and save those appointments in Schedule, then synchronize.", Color(0xFFFFF7ED))
                     CardBlock("Device storage", "Patient records are encrypted on this device. Synchronize when you want to save changes to your cloud workspace.")
                     Button(onClick = { store.sync() }, enabled = !store.busy) { Text("Synchronize changes") }
                     OutlinedButton(onClick = { store.restore() }, enabled = !store.busy) { Text("Restore cloud records") }
@@ -499,8 +496,6 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                         }
                     }
                     OutlinedButton(onClick = { store.refreshClinicConfig() }, enabled = !store.busy) { Text("Load cloud clinic settings (retain local draft)") }
-                    OutlinedButton(onClick = { store.registerCloudReminders(true) }, enabled = !store.busy) { Text("Enable cloud reminders on this device") }
-                    OutlinedButton(onClick = { store.registerCloudReminders(false) }, enabled = !store.busy) { Text("Disable cloud reminders on this device") }
                     CardBlock("Image uploads", "Lossless PNG, maximum 512 KB. Larger images are rejected to preserve image detail.")
                     if (runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.isAnonymous == true }.getOrDefault(false)) Button(onClick = { scope.launch { runCatching { val resource = context.resources.getIdentifier("default_web_client_id", "string", context.packageName); store.google(context, if (resource == 0) "" else context.getString(resource)) }.onFailure { error = it.localizedMessage ?: "Sign-in failed" } } }) { Text("Link this device workspace to Google") }
                     if (store.cloudIdentity.isNotBlank()) OutlinedButton(onClick = { store.signOut() }, enabled = !store.busy) { Text("Sign out after synchronizing") }
@@ -513,7 +508,6 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     if (explanation && patient != null) PatientExplanationDialog(patient, { explanation = false }) { chart -> open3D(patient, chart) }
     preview?.let { bitmap -> AlertDialog(onDismissRequest = { preview = null }, title = { Text("Clinical image") }, text = { androidx.compose.foundation.Image(bitmap.asImageBitmap(), "Clinical attachment", Modifier.fillMaxWidth().heightIn(max = 480.dp)) }, confirmButton = { TextButton(onClick = { preview = null }) { Text("Close") } }) }
     store.credentialNotice?.let { notice -> CredentialDialog(notice) { store.credentialNotice = null } }
-    pushFor?.let { target -> PatientPushDialog(store, target.takeIf { it.has("id") }) { pushFor = null } }
     if (error.isNotBlank()) AlertDialog(onDismissRequest = { error = "" }, title = { Text("Please review") }, text = { Text(error) }, confirmButton = { TextButton(onClick = { error = "" }) { Text("OK") } })
     form?.let { active -> key(active) {
         val values = remember { mutableStateMapOf<String, String>().apply { active.fields.forEach { put(it.key, it.value) } } }
