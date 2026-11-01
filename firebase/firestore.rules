@@ -6,5 +6,18 @@ service cloud.firestore {
     match /{document=**} {
       allow read, write: if false;
     }
+
+    // The one direct client write: a signed-in patient stores their own devices' FCM tokens in
+    // their own patient document (patientDevices.{deviceId}). Nothing else can change, and the
+    // patient still cannot read the document directly.
+    match /workspaces/{clinic}/patients/{patient} {
+      allow update: if request.auth != null
+        && request.auth.token.role == 'patient'
+        && request.auth.token.clinicId == clinic
+        && request.auth.token.patientId == patient
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['patientDevices'])
+        && request.resource.data.patientDevices is map
+        && request.resource.data.patientDevices.size() <= 5;
+    }
   }
 }

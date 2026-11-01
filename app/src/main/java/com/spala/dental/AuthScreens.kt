@@ -142,6 +142,17 @@ fun PatientPortalScreen(store: ClinicStore) {
     val sections = remember { mutableStateMapOf<String, Int>() }
     fun mark(key: String) = Modifier.onGloballyPositioned { sections[key] = it.positionInParent().y.toInt() }
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    // Ask once for notification permission so appointment reminders can appear (Android 13+).
+    val context = LocalContext.current
+    val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(record != null) {
+        val prefs = context.getSharedPreferences("display", android.content.Context.MODE_PRIVATE)
+        if (record != null && android.os.Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedNotifications", false)) {
+            prefs.edit().putBoolean("askedNotifications", true).apply()
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    var remindersOn by remember { mutableStateOf(PatientReminders.enabled(context)) }
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen,
@@ -212,6 +223,15 @@ fun PatientPortalScreen(store: ClinicStore) {
                         }
                         if (startAt - now >= 2 * 3_600_000L) TextButton(onClick = { cancelling = a }, enabled = !store.busy) { Text("Cancel", color = Rose600) }
                     }
+                }
+            }
+            SurfaceCard(padding = 12.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Appointment reminders", style = MaterialTheme.typography.titleSmall, color = Ink)
+                        Text("A notification 1 day and 2 hours before each visit.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                    }
+                    Switch(remindersOn, { on -> remindersOn = on; PatientReminders.setEnabled(context, on); if (on) PatientReminders.schedule(context, record, store.portalClinic) })
                 }
             }
             Spacer(mark("book"))
