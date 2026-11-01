@@ -12,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.produceState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Text
@@ -429,7 +431,7 @@ private fun buildJaw(builder: SceneBuilder, slots: MutableList<SlotInfo>, teeth:
                 return mottle(fissureStain(enamel(top, 1f, kind), kind, ex * radius * tw / hx, ez * radius * td / hz), p)
             }
             val inside = world(0f, signY * sy * 0.45f, 0f)
-            val segments = 20; val levels = 8
+            val segments = 28; val levels = 10
             val step = (2.0 * Math.PI / segments).toFloat()
             for (segment in 0 until segments) {
                 val a = step * segment; val b = step * (segment + 1)
@@ -448,7 +450,7 @@ private fun buildJaw(builder: SceneBuilder, slots: MutableList<SlotInfo>, teeth:
                 }
             }
             val capInside = world(0f, signY * sy * 0.2f, 0f)
-            val rings = 4
+            val rings = 5
             for (ring in 0 until rings) {
                 val r0 = ring.toFloat() / rings; val r1 = (ring + 1).toFloat() / rings
                 for (segment in 0 until segments) {
@@ -636,9 +638,26 @@ fun Teeth3DView(
         if (onToothTap != null) ", tap a tooth to open it." else "."
     val holder = remember(scene) { AnchorHolder() }
     val tapCallback by rememberUpdatedState(onToothTap)
+    // GPU rendering (depth buffer + MSAA); switches to the CPU painter path if GL is unavailable.
+    var useGl by remember { mutableStateOf(true) }
+    val glHolder = remember { arrayOfNulls<TeethGLView>(1) }
 
+    Box(modifier) {
+    // Soft contact shadow under the model (behind the 3D layer).
+    Canvas(Modifier.matchParentSize()) {
+        val w = size.width; val h = size.height; val cx = w * 0.5f; val cy = h * 0.5f
+        drawOval(
+            Brush.radialGradient(listOf(Color(0x260F3D3A), Color.Transparent), center = Offset(cx, cy + h * 0.33f), radius = w * 0.40f),
+            topLeft = Offset(cx - w * 0.40f, cy + h * 0.28f), size = androidx.compose.ui.geometry.Size(w * 0.80f, h * 0.10f),
+        )
+    }
+    if (useGl) AndroidView(
+        factory = { context -> TeethGLView(context) { useGl = false }.also { glHolder[0] = it } },
+        modifier = Modifier.matchParentSize(),
+        onRelease = { view -> view.dispose(); if (glHolder[0] === view) glHolder[0] = null },
+    )
     Canvas(
-        modifier
+        Modifier.matchParentSize()
             .semantics { contentDescription = description }
             .pointerInput(scene) {
                 detectTransformGestures { _, pan, gestureZoom, _ ->
@@ -683,12 +702,10 @@ fun Teeth3DView(
         val r20 = sinE * a10 + cosE * a20; val r21 = sinE * a11 + cosE * a21; val r22 = sinE * a12 + cosE * a22
         val selectedIndices = scene.slots.indices.filter { scene.slots[it].key in selectedTeeth }.toHashSet()
 
-        // Soft contact shadow under the model.
-        drawOval(
-            Brush.radialGradient(listOf(Color(0x260F3D3A), Color.Transparent), center = Offset(cx, cy + h * 0.33f), radius = w * 0.40f),
-            topLeft = Offset(cx - w * 0.40f, cy + h * 0.28f), size = androidx.compose.ui.geometry.Size(w * 0.80f, h * 0.10f),
-        )
-
+        val gl = glHolder[0]
+        if (useGl && gl != null && !gl.failed) {
+            gl.submit(scene, GlFrame(floatArrayOf(r00, r01, r02, r10, r11, r12, r20, r21, r22), distance, focal, w.toInt(), h.toInt(), selectedIndices, showRoots))
+        } else {
         val v = scene.vertices; val n = scene.normals; val vn = scene.vertexNormals
         var visible = 0
         for (t in 0 until scene.triangles) {
@@ -742,6 +759,7 @@ fun Teeth3DView(
                 null, 0, buffers.outColors, 0, null, 0, 0, buffers.paint,
             )
         }
+        } // end CPU fallback
 
         fun project(p: Vec): Triple<Float, Float, Float> {
             val x = r00 * p.x + r01 * p.y + r02 * p.z
@@ -781,9 +799,17 @@ fun Teeth3DView(
         holder.anchors = anchors
 
         // Tooth numbers at the same 3D anchor as the Godot labels (beyond the biting edge).
+        // Front-most labels win; a label too close to one already placed is skipped so numbers never pile up.
+        val placed = ArrayList<Offset>()
+        val minGap = 20f * density.density
+        val labelOrder = scene.slots.indices.filter { anchors[it * 3 + 2] > 0f && (showLabels || it in selectedIndices) }
+            .sortedWith(compareBy({ it !in selectedIndices }, { anchors[it * 3 + 2] }))
         drawIntoCanvas { canvas ->
-            scene.slots.forEachIndexed { index, slot ->
-                if (!(showLabels || index in selectedIndices) || anchors[index * 3 + 2] <= 0f) return@forEachIndexed
+            labelOrder.forEach { index ->
+                val slot = scene.slots[index]
+                val at = Offset(labels[index * 2], labels[index * 2 + 1])
+                if (index !in selectedIndices && placed.any { (it - at).getDistance() < minGap }) return@forEach
+                placed += at
                 val selected = index in selectedIndices
                 val text = ToothNotation.short(slot.key)
                 val x = labels[index * 2]; val y = labels[index * 2 + 1]
@@ -797,7 +823,283 @@ fun Teeth3DView(
             }
         }
     }
+    } // Box
 }
 
 /** Screen anchors from the last frame, shared between drawing and tap handling. */
 private class AnchorHolder { var anchors = FloatArray(0) }
+
+// ---------------------------------------------------------------------------------------------
+// GPU renderer (OpenGL ES 2.0 on a TextureView)
+//
+// The painter's-algorithm path above sorts whole triangles, which cannot resolve the places where
+// the crown neck and the gingiva interpenetrate (jagged, saw-tooth gum line) and has no
+// anti-aliasing. This renderer draws the same scene with a depth buffer, 4× MSAA and per-pixel
+// lighting (a direct port of shade()). It falls back to the painter path if EGL/GL setup fails.
+// ---------------------------------------------------------------------------------------------
+
+/** Camera and display state for one frame (rotation matrix row-major, same maths as the overlays). */
+private class GlFrame(
+    val r: FloatArray, val distance: Float, val focal: Float, val width: Int, val height: Int,
+    val selected: Set<Int>, val showRoots: Boolean,
+)
+
+private const val VERTEX_SHADER = """
+uniform mat3 uR;
+uniform vec4 uCam; // distance, focal/(w/2), focal/(h/2), unused
+uniform vec2 uDepth; // a, b for clip z = a * depth + b
+attribute vec3 aPos;
+attribute vec3 aNormal;
+attribute vec4 aColor;
+attribute float aMat;
+varying vec3 vNormal;
+varying vec4 vColor;
+varying float vMat;
+void main() {
+    vec3 p = uR * aPos;
+    float depth = uCam.x - p.z;
+    gl_Position = vec4(p.x * uCam.y, p.y * uCam.z, uDepth.x * depth + uDepth.y, depth);
+    vNormal = uR * aNormal;
+    vColor = aColor;
+    vMat = aMat;
+}
+"""
+
+private const val FRAGMENT_SHADER = """
+precision mediump float;
+varying vec3 vNormal;
+varying vec4 vColor;
+varying float vMat;
+uniform float uRoots;
+uniform float uAlpha;
+const vec3 KEY = vec3(-0.4508, 0.6211, 0.6411);
+const vec3 FILL = vec3(0.7217, 0.1203, 0.6816);
+const vec3 BACK = vec3(0.0, 0.3489, -0.9372);
+const vec3 BOUNCE = vec3(0.0, -0.7507, 0.6606);
+float diffuse(vec3 n, vec3 l, float wrap) { return max(0.0, (dot(n, l) + wrap) / (1.0 + wrap)); }
+void main() {
+    if (vMat > 1.5 && uRoots < 0.5) discard;
+    vec3 n = normalize(vNormal);
+    if (!gl_FrontFacing) n = -n;
+    bool enamel = vMat < 0.5;
+    bool gum = vMat > 0.5 && vMat < 1.5;
+    float wrap = enamel ? 0.35 : 0.2;
+    float light = 0.40 + 0.62 * diffuse(n, KEY, wrap) + 0.22 * diffuse(n, FILL, wrap) + 0.10 * diffuse(n, BOUNCE, wrap);
+    float hk = max(0.0, dot(n, normalize(KEY + vec3(0.0, 0.0, 1.0))));
+    float hf = max(0.0, dot(n, normalize(FILL + vec3(0.0, 0.0, 1.0))));
+    float gloss = vColor.a;
+    float spec;
+    if (enamel) spec = pow(hk, 64.0) * 0.55 + pow(hf, 32.0) * 0.12;
+    else if (gum) spec = pow(hk, 32.0) * (0.06 + 0.34 * gloss) + pow(hk, 8.0) * 0.05 * (1.0 - gloss);
+    else spec = pow(hk, 16.0) * 0.14;
+    float edge = 1.0 - abs(n.z);
+    float rim = edge * edge * edge * (enamel ? 0.20 : 0.12) + max(0.0, dot(n, BACK)) * 0.10;
+    vec3 color = vColor.rgb * light + vec3(spec) + rim * vec3(0.85, 0.95, 1.0);
+    gl_FragColor = vec4(min(color, vec3(1.0)), gum ? uAlpha : 1.0);
+}
+"""
+
+private class TeethGLView(context: android.content.Context, private val onFailure: () -> Unit) :
+    android.view.TextureView(context), android.view.TextureView.SurfaceTextureListener {
+
+    private val thread = android.os.HandlerThread("teeth-gl").apply { start() }
+    private val handler = android.os.Handler(thread.looper)
+    private var display: android.opengl.EGLDisplay = android.opengl.EGL14.EGL_NO_DISPLAY
+    private var eglContext: android.opengl.EGLContext = android.opengl.EGL14.EGL_NO_CONTEXT
+    private var eglSurface: android.opengl.EGLSurface = android.opengl.EGL14.EGL_NO_SURFACE
+    private var program = 0
+    private val buffers = IntArray(4) // position, normal, colour, material
+    private var uploadedScene: DentalScene? = null
+    private var uploadedSelection: Set<Int>? = null
+    private var gumStart = 0
+    private var vertexCount = 0
+    private var order = IntArray(0) // triangle upload order: enamel/roots first, gingiva last
+    @Volatile private var pendingScene: DentalScene? = null
+    @Volatile private var pendingFrame: GlFrame? = null
+    @Volatile var failed = false; private set
+    private val drawTask = Runnable { draw() }
+
+    init {
+        isOpaque = false
+        surfaceTextureListener = this
+    }
+
+    fun submit(scene: DentalScene, frame: GlFrame) {
+        pendingScene = scene; pendingFrame = frame
+        handler.removeCallbacks(drawTask); handler.post(drawTask)
+    }
+
+    fun dispose() {
+        handler.post { release(); thread.quitSafely() }
+    }
+
+    override fun onSurfaceTextureAvailable(texture: android.graphics.SurfaceTexture, width: Int, height: Int) {
+        handler.post {
+            if (!setup(texture)) fail() else draw()
+        }
+    }
+    override fun onSurfaceTextureSizeChanged(texture: android.graphics.SurfaceTexture, width: Int, height: Int) { handler.post(drawTask) }
+    override fun onSurfaceTextureDestroyed(texture: android.graphics.SurfaceTexture): Boolean {
+        handler.post { release(); texture.release() }
+        return false // released on the GL thread after the EGL surface is gone
+    }
+    override fun onSurfaceTextureUpdated(texture: android.graphics.SurfaceTexture) = Unit
+
+    private fun fail() {
+        failed = true
+        release()
+        post { onFailure() }
+    }
+
+    private fun setup(texture: android.graphics.SurfaceTexture): Boolean = runCatching {
+        display = android.opengl.EGL14.eglGetDisplay(android.opengl.EGL14.EGL_DEFAULT_DISPLAY)
+        check(android.opengl.EGL14.eglInitialize(display, IntArray(2), 0, IntArray(2), 1))
+        val configs = arrayOfNulls<android.opengl.EGLConfig>(1); val count = IntArray(1)
+        fun attributes(samples: Int) = intArrayOf(
+            android.opengl.EGL14.EGL_RED_SIZE, 8, android.opengl.EGL14.EGL_GREEN_SIZE, 8, android.opengl.EGL14.EGL_BLUE_SIZE, 8,
+            android.opengl.EGL14.EGL_ALPHA_SIZE, 8, android.opengl.EGL14.EGL_DEPTH_SIZE, 16,
+            android.opengl.EGL14.EGL_RENDERABLE_TYPE, android.opengl.EGL14.EGL_OPENGL_ES2_BIT,
+            android.opengl.EGL14.EGL_SAMPLE_BUFFERS, if (samples > 0) 1 else 0, android.opengl.EGL14.EGL_SAMPLES, samples,
+            android.opengl.EGL14.EGL_NONE)
+        // 4× MSAA for smooth tooth and gum edges; fall back to no MSAA on devices without it.
+        if (!android.opengl.EGL14.eglChooseConfig(display, attributes(4), 0, configs, 0, 1, count, 0) || count[0] == 0)
+            check(android.opengl.EGL14.eglChooseConfig(display, attributes(0), 0, configs, 0, 1, count, 0) && count[0] > 0)
+        val config = configs[0]!!
+        eglContext = android.opengl.EGL14.eglCreateContext(display, config, android.opengl.EGL14.EGL_NO_CONTEXT,
+            intArrayOf(android.opengl.EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, android.opengl.EGL14.EGL_NONE), 0)
+        check(eglContext != android.opengl.EGL14.EGL_NO_CONTEXT)
+        eglSurface = android.opengl.EGL14.eglCreateWindowSurface(display, config, texture, intArrayOf(android.opengl.EGL14.EGL_NONE), 0)
+        check(eglSurface != android.opengl.EGL14.EGL_NO_SURFACE)
+        check(android.opengl.EGL14.eglMakeCurrent(display, eglSurface, eglSurface, eglContext))
+        program = linkProgram()
+        android.opengl.GLES20.glGenBuffers(4, buffers, 0)
+        true
+    }.getOrDefault(false)
+
+    private fun compile(type: Int, source: String): Int {
+        val shader = android.opengl.GLES20.glCreateShader(type)
+        android.opengl.GLES20.glShaderSource(shader, source)
+        android.opengl.GLES20.glCompileShader(shader)
+        val ok = IntArray(1); android.opengl.GLES20.glGetShaderiv(shader, android.opengl.GLES20.GL_COMPILE_STATUS, ok, 0)
+        check(ok[0] != 0) { android.opengl.GLES20.glGetShaderInfoLog(shader) }
+        return shader
+    }
+
+    private fun linkProgram(): Int {
+        val program = android.opengl.GLES20.glCreateProgram()
+        android.opengl.GLES20.glAttachShader(program, compile(android.opengl.GLES20.GL_VERTEX_SHADER, VERTEX_SHADER))
+        android.opengl.GLES20.glAttachShader(program, compile(android.opengl.GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER))
+        android.opengl.GLES20.glBindAttribLocation(program, 0, "aPos")
+        android.opengl.GLES20.glBindAttribLocation(program, 1, "aNormal")
+        android.opengl.GLES20.glBindAttribLocation(program, 2, "aColor")
+        android.opengl.GLES20.glBindAttribLocation(program, 3, "aMat")
+        android.opengl.GLES20.glLinkProgram(program)
+        val ok = IntArray(1); android.opengl.GLES20.glGetProgramiv(program, android.opengl.GLES20.GL_LINK_STATUS, ok, 0)
+        check(ok[0] != 0) { android.opengl.GLES20.glGetProgramInfoLog(program) }
+        return program
+    }
+
+    private fun directFloats(size: Int) = java.nio.ByteBuffer.allocateDirect(size * 4).order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer()
+
+    private fun upload(scene: DentalScene) {
+        // Gingiva last, so X-ray mode can blend it over the opaque teeth and roots.
+        order = (0 until scene.triangles).sortedBy { if (scene.materials[it] == MAT_GUM) 1 else 0 }.toIntArray()
+        gumStart = order.indexOfFirst { scene.materials[it] == MAT_GUM }.let { if (it < 0) scene.triangles else it } * 3
+        vertexCount = scene.triangles * 3
+        val positions = directFloats(vertexCount * 3); val normals = directFloats(vertexCount * 3); val materials = directFloats(vertexCount)
+        for (t in order) {
+            positions.put(scene.vertices, t * 9, 9)
+            normals.put(scene.vertexNormals, t * 9, 9)
+            val m = scene.materials[t].toFloat(); materials.put(m); materials.put(m); materials.put(m)
+        }
+        positions.position(0); normals.position(0); materials.position(0)
+        bufferData(buffers[0], positions, vertexCount * 3 * 4)
+        bufferData(buffers[1], normals, vertexCount * 3 * 4)
+        bufferData(buffers[3], materials, vertexCount * 4)
+        uploadedScene = scene
+        uploadedSelection = null
+    }
+
+    private fun uploadColors(scene: DentalScene, selected: Set<Int>) {
+        val colors = java.nio.ByteBuffer.allocateDirect(vertexCount * 4).order(java.nio.ByteOrder.nativeOrder())
+        for (t in order) {
+            val highlight = scene.owners[t] >= 0 && scene.owners[t] in selected
+            for (k in 0 until 3) {
+                val raw = scene.vertexColors[t * 3 + k]
+                val rgb = if (highlight) mix(raw, Palette.SELECT, 0.45f) else raw
+                colors.put(((rgb shr 16) and 0xFF).toByte()); colors.put(((rgb shr 8) and 0xFF).toByte()); colors.put((rgb and 0xFF).toByte())
+                colors.put(((raw ushr 24) and 0xFF).toByte()) // alpha = gloss (gingiva)
+            }
+        }
+        colors.position(0)
+        bufferData(buffers[2], colors, vertexCount * 4)
+        uploadedSelection = selected
+    }
+
+    private fun bufferData(id: Int, data: java.nio.Buffer, bytes: Int) {
+        android.opengl.GLES20.glBindBuffer(android.opengl.GLES20.GL_ARRAY_BUFFER, id)
+        android.opengl.GLES20.glBufferData(android.opengl.GLES20.GL_ARRAY_BUFFER, bytes, data, android.opengl.GLES20.GL_STATIC_DRAW)
+    }
+
+    private fun attribute(index: Int, buffer: Int, size: Int, type: Int, normalized: Boolean) {
+        android.opengl.GLES20.glBindBuffer(android.opengl.GLES20.GL_ARRAY_BUFFER, buffer)
+        android.opengl.GLES20.glEnableVertexAttribArray(index)
+        android.opengl.GLES20.glVertexAttribPointer(index, size, type, normalized, 0, 0)
+    }
+
+    private fun draw() {
+        if (failed || eglSurface == android.opengl.EGL14.EGL_NO_SURFACE) return
+        val scene = pendingScene ?: return
+        val frame = pendingFrame ?: return
+        val result = runCatching {
+            if (scene !== uploadedScene) upload(scene)
+            if (uploadedSelection != frame.selected) uploadColors(scene, frame.selected)
+            android.opengl.GLES20.glViewport(0, 0, frame.width, frame.height)
+            android.opengl.GLES20.glClearColor(0f, 0f, 0f, 0f)
+            android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT or android.opengl.GLES20.GL_DEPTH_BUFFER_BIT)
+            android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_DEPTH_TEST)
+            android.opengl.GLES20.glDepthFunc(android.opengl.GLES20.GL_LEQUAL)
+            android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_CULL_FACE)
+            android.opengl.GLES20.glUseProgram(program)
+            val r = frame.r
+            // GLSL mat3 is column-major.
+            val columnMajor = floatArrayOf(r[0], r[3], r[6], r[1], r[4], r[7], r[2], r[5], r[8])
+            android.opengl.GLES20.glUniformMatrix3fv(android.opengl.GLES20.glGetUniformLocation(program, "uR"), 1, false, columnMajor, 0)
+            android.opengl.GLES20.glUniform4f(android.opengl.GLES20.glGetUniformLocation(program, "uCam"), frame.distance,
+                frame.focal / (frame.width * 0.5f), frame.focal / (frame.height * 0.5f), 0f)
+            val near = (frame.distance - 7f).coerceAtLeast(0.5f); val far = frame.distance + 7f
+            android.opengl.GLES20.glUniform2f(android.opengl.GLES20.glGetUniformLocation(program, "uDepth"), (far + near) / (far - near), -2f * far * near / (far - near))
+            android.opengl.GLES20.glUniform1f(android.opengl.GLES20.glGetUniformLocation(program, "uRoots"), if (frame.showRoots) 1f else 0f)
+            attribute(0, buffers[0], 3, android.opengl.GLES20.GL_FLOAT, false)
+            attribute(1, buffers[1], 3, android.opengl.GLES20.GL_FLOAT, false)
+            attribute(2, buffers[2], 4, android.opengl.GLES20.GL_UNSIGNED_BYTE, true)
+            attribute(3, buffers[3], 1, android.opengl.GLES20.GL_FLOAT, false)
+            val alpha = android.opengl.GLES20.glGetUniformLocation(program, "uAlpha")
+            // Opaque pass: enamel and roots.
+            android.opengl.GLES20.glUniform1f(alpha, 1f)
+            android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
+            if (gumStart > 0) android.opengl.GLES20.glDrawArrays(android.opengl.GLES20.GL_TRIANGLES, 0, gumStart)
+            // Gingiva: opaque normally; translucent in X-ray mode so the roots show through.
+            if (frame.showRoots) {
+                android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_BLEND)
+                android.opengl.GLES20.glBlendFunc(android.opengl.GLES20.GL_SRC_ALPHA, android.opengl.GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                android.opengl.GLES20.glDepthMask(false)
+                android.opengl.GLES20.glUniform1f(alpha, 0.36f)
+            }
+            if (vertexCount > gumStart) android.opengl.GLES20.glDrawArrays(android.opengl.GLES20.GL_TRIANGLES, gumStart, vertexCount - gumStart)
+            android.opengl.GLES20.glDepthMask(true)
+            check(android.opengl.EGL14.eglSwapBuffers(display, eglSurface))
+        }
+        if (result.isFailure) fail()
+    }
+
+    private fun release() {
+        if (display == android.opengl.EGL14.EGL_NO_DISPLAY) return
+        android.opengl.EGL14.eglMakeCurrent(display, android.opengl.EGL14.EGL_NO_SURFACE, android.opengl.EGL14.EGL_NO_SURFACE, android.opengl.EGL14.EGL_NO_CONTEXT)
+        if (eglSurface != android.opengl.EGL14.EGL_NO_SURFACE) android.opengl.EGL14.eglDestroySurface(display, eglSurface)
+        if (eglContext != android.opengl.EGL14.EGL_NO_CONTEXT) android.opengl.EGL14.eglDestroyContext(display, eglContext)
+        // No eglTerminate: the default display is shared with the app's own UI renderer.
+        display = android.opengl.EGL14.EGL_NO_DISPLAY; eglContext = android.opengl.EGL14.EGL_NO_CONTEXT; eglSurface = android.opengl.EGL14.EGL_NO_SURFACE
+        uploadedScene = null; uploadedSelection = null
+    }
+}

@@ -104,6 +104,10 @@ The profile preview (`Teeth3DView.kt`) is a line-for-line port of the Godot gene
 
 Changes to one must be made in the other.
 
+### Profile renderer: GPU first
+
+The profile model draws with OpenGL ES 2.0 (`TeethGLView`, a TextureView with its own EGL thread). It uses a depth buffer, 4× MSAA and per-pixel lighting ported from the CPU shader. That removes the saw-tooth edges where crowns meet the gingiva, which the painter's-algorithm path could not resolve. If EGL or GL setup fails, the view falls back to the CPU `drawVertices` path automatically. Overlays (labels, badges, selection) stay in Compose. Labels are decluttered so overlapping numbers are skipped.
+
 ### Inline 3D on profiles
 
 `Teeth3DView.kt` is a small Compose software renderer. It uses smooth-shaded triangles, a painter's sort and `Canvas.drawVertices`. It draws the same schema-2 chart snapshot directly inside the patient profile, as the first clinical card, and inside the doctor profile, using a neutral reference dentition. Only one Godot engine may run per process, so Godot cannot be embedded in scrolling screens. The inline model supports rotate, pinch zoom, double-tap reset, optional tooth numbers and tap-to-select, and selection opens the native tooth editor. Status colours match the Godot chart: amber for findings, blue for restorations, a teal "+" for planned care and a slate cross for recorded loss.
