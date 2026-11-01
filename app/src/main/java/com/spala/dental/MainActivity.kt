@@ -182,7 +182,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
         },
     ) {
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
-        TopAppBar(navigationIcon = { MenuButton { scope.launch { drawerState.open() } } }, title = {
+        TopAppBar(navigationIcon = { MenuButton(upcomingAppointments(store.patients, store.config)) { scope.launch { drawerState.open() } } }, title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DentalAppLogo(Modifier.size(38.dp))
                 Column {

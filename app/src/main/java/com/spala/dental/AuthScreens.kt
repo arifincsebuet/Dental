@@ -159,7 +159,7 @@ fun PatientPortalScreen(store: ClinicStore) {
         },
     ) {
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
-        TopAppBar(navigationIcon = { MenuButton { scope.launch { drawerState.open() } } }, title = {
+        TopAppBar(navigationIcon = { MenuButton(store.portalRecord?.let { upcomingAppointments(listOf(it), store.portalClinic, days = 365) } ?: 0) { scope.launch { drawerState.open() } } }, title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DentalAppLogo(Modifier.size(36.dp))
                 Column {
