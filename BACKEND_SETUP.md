@@ -76,3 +76,33 @@ The PRD audit added `test/audit-regressions.test.js`. From `functions`, `npm tes
 - Deactivating a staff entry removes that person's access.
 - An admin or dentist opens a synced patient → Overview → **Patient app access** → **Create patient login**. The Patient ID and temporary password are shown once, ready to share. The patient must choose a new password at first sign-in. **Reset password** issues a new temporary password and signs out the patient's devices.
 - New callables: `resolveWorkspace`, `createPatientLogin`, `resetPatientPassword`, `completePasswordChange` and `getMyRecord`. `listPatients` also accepts `updatedAfter` for incremental sync.
+
+## Subscription (Google Play Billing)
+
+One subscription covers a whole clinic: the owner, every doctor and every staff member. Patients are never charged. **Prices live in Play Console, not in the app**, which reads them at runtime. Ending or changing an offer therefore needs no app update.
+
+1. Play Console › Monetize › Products › Subscriptions → create product **`dental_care_pro`**. The ID is `SUBSCRIPTION_PRODUCT_ID` in `app/build.gradle.kts`.
+2. Add a base plan **`monthly`**: auto-renewing, billing period 1 month, price **USD 10.00**. Let Play convert local prices, or set them per country.
+3. Add an offer **`launch`** on that base plan:
+   - Eligibility: *New customer acquisition* ("Never had this subscription").
+   - Phase: *Single payment* or *Discounted recurring payment* of **USD 5.00 per month** for the number of months you choose, e.g. 12.
+   - Tag: `launch`.
+
+   The app picks the eligible offer with the cheapest first payment. It shows "$5 / month for the first N months, then $10 / month", with $10 struck through.
+4. When the promotion ends, **deactivate the `launch` offer**. New subscribers then see and pay $10/month. Existing subscribers keep the terms they signed up with until their offer phase ends.
+5. Server verification:
+   - Enable the *Google Play Android Developer API* in the Google Cloud project used by Firebase.
+   - Play Console › Users and permissions → invite the Cloud Functions service account (`PROJECT_ID@appspot.gserviceaccount.com`, or the account your functions run as). Grant *View financial data* and *Manage orders and subscriptions*.
+   - Optional environment overrides: `ANDROID_PACKAGE` (default `com.spala.dental`) and `SUBSCRIPTION_PRODUCTS` (default `dental_care_pro`).
+6. Test with license testers (Play Console › Settings › License testing). Their renewals happen within minutes.
+
+How it works:
+- **Purchase:** the app starts Google Play checkout with an obfuscated account ID derived from the clinic ID. It sends the purchase token to `verifySubscription`, which:
+  - checks the token with the Play Developer API
+  - refuses tokens bought for another clinic
+  - acknowledges the purchase (Google refunds unacknowledged purchases after 3 days)
+  - stores `subscription` (active, expiry, offer, auto-renew) on the clinic document
+- **Renewals:** checked lazily. `getClinic` re-verifies only after the stored period has ended. That needs no Pub/Sub topic, no polling and no extra documents.
+- **Without an active subscription:** staff see the paywall. Only the owner or an admin can subscribe. Patient logins are never blocked.
+- **Debug builds** skip the paywall so you can test features.
+- **Offline mode** (no Firebase): the purchase is acknowledged on the device and checked from the device's Play purchases.

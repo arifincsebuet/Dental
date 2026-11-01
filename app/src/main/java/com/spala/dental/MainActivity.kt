@@ -46,9 +46,16 @@ private fun ageText(dob: String): String? = runCatching {
 
 class MainActivity : ComponentActivity() {
     private val store by lazy { (application as ClinicApplication).store }
+    private lateinit var billing: BillingManager
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ToothNotation.load(this)
+        billing = BillingManager(this) { purchase ->
+            if (store.session == "local") { billing.acknowledgeLocally(purchase); store.markDeviceEntitled() }
+            // Only call the server when the clinic is not already known to be active (saves calls on every launch).
+            else if (!store.subscriptionActive) store.verifyPurchase(purchase.purchaseToken)
+        }
+        billing.connect()
         setContent {
             DentalTheme {
                 CompositionLocalProvider(LocalEditorSaveStatus provides { EditorSaveStatus(store.saveSequence, store.saveError) }) {
@@ -56,7 +63,8 @@ class MainActivity : ComponentActivity() {
                         "loading" -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                         "login" -> LoginScreen(store)
                         "patient" -> PatientPortalScreen(store)
-                        else -> ClinicApp(store)
+                        // The clinic subscription unlocks the staff app; debug builds skip it for testing.
+                        else -> if (store.subscriptionActive || BuildConfig.DEBUG) ClinicApp(store, billing) else PaywallScreen(store, billing)
                     }
                 }
             }
@@ -69,7 +77,7 @@ private data class Form(val title: String, val fields: List<Field>, val save: (M
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ClinicApp(store: ClinicStore) {
+private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val saveStatus = LocalEditorSaveStatus.current
@@ -413,6 +421,7 @@ private fun ClinicApp(store: ClinicStore) {
                 "Reports" -> AdvancedReportsScreen(store.patients, store.config)
                 "Settings" -> {
                     Heading("Settings", "Storage and account preferences")
+                    SubscriptionCard(store, billing)
                     SurfaceCard {
                         Text("Tooth numbering", style = MaterialTheme.typography.titleSmall, color = Ink)
                         Text("How teeth are labelled on the 3D model, charts and history. Records are always stored in FDI.", style = MaterialTheme.typography.bodySmall, color = InkMuted)

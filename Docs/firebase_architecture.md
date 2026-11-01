@@ -28,9 +28,10 @@ flowchart LR
 
   subgraph Firebase["Firebase project"]
     Auth["Authentication<br/>Google (staff) · Email/Password (patients, synthetic email)<br/>custom claims: role=patient, clinicId, patientId"]
-    Fn["Cloud Functions (callable, us-central1)<br/>resolveWorkspace · getClinic · updateClinic<br/>listPatients · getPatient · commitPatient<br/>createPatientLogin · resetPatientPassword<br/>completePasswordChange · getMyRecord · registerDevice"]
+    Fn["Cloud Functions (callable, us-central1)<br/>resolveWorkspace · getClinic · updateClinic<br/>listPatients · getPatient · commitPatient<br/>createPatientLogin · resetPatientPassword<br/>completePasswordChange · getMyRecord · registerDevice<br/>verifySubscription"]
     FS[("Firestore<br/>workspaces/{clinicId}<br/>workspaces/{clinicId}/patients/{patientId}")]
     ST[("Cloud Storage<br/>workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png")]
+    Play["Google Play Billing<br/>dental_care_pro: $10/month base plan, $5 launch offer"]
     Sch["Scheduled function<br/>dispatchClinicReminders (15 min)"]
     FCM["Cloud Messaging"]
   end
@@ -40,6 +41,8 @@ flowchart LR
   Fn --> FS
   Fn -- "verify image metadata" --> ST
   Img -- "putBytes (rules: member + ≤512 KB + png/webp)" --> ST
+  Android -- "checkout" --> Play
+  Fn -- "Play Developer API: verify + acknowledge" --> Play
   Sch --> FS
   Sch --> FCM --> Android
   Fn -- "createUser / setCustomUserClaims / updateUser" --> Auth
@@ -171,6 +174,7 @@ sequenceDiagram
 | Images | Lossless WebP ≤ 512 KB, SHA-256 names (deduplicated), private `gs://` refs | Small storage and egress, no duplicate uploads |
 | Functions | `maxInstances: 4`, 60 s timeout, no min instances | No idle compute cost |
 | Reminders | One due-clinic query every 15 min; jobs embedded in the clinic doc | No per-patient polling |
+| Subscription | Play Billing token verified once by `verifySubscription`; entitlement stored on the clinic doc; renewals re-checked only when the period ends | No extra documents, no Pub/Sub, about one Play API call per month per clinic |
 | Offline cache | Encrypted local copy | Screens read locally; the cloud is touched only on sync |
 
 ## 5. Security
