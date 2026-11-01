@@ -511,7 +511,7 @@ class ClinicStore(private val context: Context) {
                 session = "patient"
                 loadMyRecord()
             }.exceptionOrNull()?.let { e ->
-                if (e is com.google.firebase.auth.FirebaseAuthException) "Patient ID or password is incorrect" else e.localizedMessage ?: "Sign-in failed"
+                if (e is com.google.firebase.auth.FirebaseAuthException) "Patient ID or password is incorrect" else friendlyError(e)
             }
             busy = false
             done(error)
@@ -662,13 +662,28 @@ class ClinicStore(private val context: Context) {
         persist(merged); patients = merged; ClinicReminders.schedule(context, this@ClinicStore)
     }
 
+    /** Turns raw Firebase error codes (e.g. "NOT_FOUND") into actionable messages. */
+    private fun friendlyError(e: Throwable): String {
+        val code = (e as? com.google.firebase.functions.FirebaseFunctionsException)?.code
+        return when (code) {
+            com.google.firebase.functions.FirebaseFunctionsException.Code.NOT_FOUND ->
+                if (e.message.orEmpty().equals("NOT_FOUND", true) || e.message.isNullOrBlank())
+                    "The clinic cloud is not set up yet: its Cloud Functions are not deployed (or are in a different region). Run deploy.bat, then try again."
+                else e.message!!
+            com.google.firebase.functions.FirebaseFunctionsException.Code.UNAUTHENTICATED -> "Your sign-in expired. Sign in again."
+            com.google.firebase.functions.FirebaseFunctionsException.Code.UNAVAILABLE -> "The clinic cloud is unreachable. Check the internet connection and try again."
+            com.google.firebase.functions.FirebaseFunctionsException.Code.INTERNAL -> "The clinic cloud reported an internal error. Check the Cloud Functions logs in the Firebase console."
+            else -> e.localizedMessage ?: "Operation failed"
+        }
+    }
+
     private fun operation(block: suspend () -> Unit) {
         if (!storageAvailable) { message = "Local storage is unavailable; cloud operations are paused."; return }
         if (busy) return
         retryableFailure = false
         busy = true
         scope.launch { try { block() } catch (e: Exception) {
-            message = e.localizedMessage ?: "Operation failed"
+            message = friendlyError(e)
             val transient = e is java.io.IOException || e is com.google.firebase.FirebaseNetworkException ||
                 (e is com.google.firebase.functions.FirebaseFunctionsException && e.code in listOf(
                     com.google.firebase.functions.FirebaseFunctionsException.Code.UNAVAILABLE,
