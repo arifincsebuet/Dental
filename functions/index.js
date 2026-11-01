@@ -81,6 +81,8 @@ function visibleClinic(clinicId, clinic, uid, superAdmin = false) {
   for (const job of clinic && clinic.reminderJobs || []) summary[job.status] = (summary[job.status] || 0) + 1;
   return { clinicId, revision: clinic ? clinic.revision || 0 : 0, config: clinic ? clinic.config : defaultConfig(uid), reminderSummary: summary,
     subscription: publicSubscription(clinic, superAdmin),
+    patientPushes: (clinic && clinic.patientPushJobs || []).slice(-30).map(job => ({ id: job.id, title: job.title, body: job.body, sendAt: job.sendAt,
+      status: job.status, recipients: job.patientIds.length, delivered: job.delivered || 0, failed: job.failed || 0, createdBy: job.createdBy })),
     reminderRebuildRequired: Boolean(clinic && clinic.reminderRebuildRequired) };
 }
 function normalized(value) { return String(value || "").toLowerCase().replace(/[ -]+/g, "_"); }
@@ -386,7 +388,7 @@ exports.updateClinic = onCall(callOptions, async request => {
   const clinicId = identifier(data.clinicId || uid, "clinic ID"); const operationId = identifier(data.operationId, "operation ID");
   assert(Number.isSafeInteger(data.expectedRevision) && data.expectedRevision >= 0, "Invalid expected revision");
   const config = clone(object(data.config, "clinic config"));
-  keysOnly(config, ["name", "timeZone", "currency", "members", "staff", "services", "settings", "taxBps", "bufferMinutes", "reminderHours", "remindersEnabled", "quietStart", "quietEnd", "phone", "address", "numberingSystem", "availability", "patientBooking"], "clinic config");
+  keysOnly(config, ["name", "timeZone", "currency", "members", "staff", "services", "settings", "taxBps", "bufferMinutes", "reminderHours", "remindersEnabled", "quietStart", "quietEnd", "phone", "address", "numberingSystem", "availability", "patientBooking", "patientPushReminders"], "clinic config");
   validateAvailability(config.availability || []);
   text(config.name, "clinic name", 200); assert(config.name.trim(), "Clinic name is required");
   assert(typeof config.currency === "string" && /^[A-Z]{3}$/.test(config.currency), "Invalid clinic currency");
@@ -619,7 +621,9 @@ exports.dispatchClinicReminders = onSchedule({ schedule: "every 15 minutes", tim
         if (!member || member.active === false) continue;
         for (const device of devices) if (device.at > now - 90 * 86400000) tokens.push(device.token);
       }
-      return { ids: claimed.map(job => job.id), tokens: [...new Set(tokens)].slice(0, 500) };
+      return { ids: claimed.map(job => job.id), tokens: [...new Set(tokens)].slice(0, 500),
+        patientJobs: clinic.config.patientPushReminders === true ? claimed.map(job => ({ patientId: job.patientId, appointmentId: job.appointmentId })) : [],
+        zone: clinic.config.timeZone || "UTC", clinicName: clinic.config.name || "Dental Care" };
     });
     if (!claim) continue;
     let status = "no_registered_device"; let delivered = 0;
@@ -629,6 +633,8 @@ exports.dispatchClinicReminders = onSchedule({ schedule: "every 15 minutes", tim
         delivered = result.successCount; status = result.failureCount ? "delivery_partial_or_failed" : "sent";
       } catch (_) { status = "delivery_failed"; }
     }
+    // Patients' own phones (tokens stored in their documents), when the clinic enables it.
+    if (claim.patientJobs.length) await sendAppointmentPushes(snapshot.id, claim.patientJobs, claim.zone, claim.clinicName).catch(() => null);
     await db.runTransaction(async tx => {
       const fresh = await tx.get(snapshot.ref); if (!fresh.exists) return;
       const clinic = fresh.data(); const jobs = clinic.reminderJobs || [];
@@ -970,3 +976,151 @@ function commitSelfService(tx, clinicRef, patientRef, clinic, patient, caller, n
   tx.set(patientRef, patient); tx.set(clinicRef, nextClinic);
   return { ...result, revision };
 }
+
+
+// ---------------------------------------------------------------------------------------------
+// Patient pushes. Tokens live in each patient document (patientDevices.{deviceId}, written by the
+// patient app). Admins queue messages from the app; jobs live in the clinic document
+// (patientPushJobs, bounded). "Send now" is delivered by the callable; scheduled ones by
+// dispatchPatientPushes. Invalid tokens are removed after each send.
+// ---------------------------------------------------------------------------------------------
+
+const PUSH_JOB_LIMIT = 100;
+function nextPatientPush(jobs) { return Math.min(Number.MAX_SAFE_INTEGER, ...jobs.filter(job => job.status === "scheduled").map(job => job.sendAt)); }
+
+/** Sends one title/body to the given patients' devices. Returns {delivered, failed}. */
+async function sendToPatients(clinicId, patientIds, title, body, extra = {}) {
+  let delivered = 0; let failed = 0;
+  for (let start = 0; start < patientIds.length; start += 100) {
+    const refs = patientIds.slice(start, start + 100).map(id => db.doc(`workspaces/${clinicId}/patients/${id}`));
+    const snapshots = refs.length ? await db.getAll(...refs) : [];
+    const targets = []; // {ref, deviceId, token}
+    for (const snapshot of snapshots) {
+      if (!snapshot.exists) continue;
+      for (const [deviceId, device] of Object.entries(snapshot.data().patientDevices || {})) {
+        if (device && typeof device.token === "string" && device.token.length >= 20) targets.push({ ref: snapshot.ref, deviceId, token: device.token });
+      }
+    }
+    for (let i = 0; i < targets.length; i += 500) {
+      const batch = targets.slice(i, i + 500);
+      const result = await getMessaging().sendEachForMulticast({
+        tokens: batch.map(target => target.token),
+        // Data message: the app shows it on its own "Appointment reminders" channel, hidden on the lock screen.
+        data: { kind: "patient_reminder", title: String(title), body: String(body), clinicId, ...extra },
+        android: { priority: "high" },
+      });
+      delivered += result.successCount; failed += result.failureCount;
+      const stale = [];
+      result.responses.forEach((response, index) => {
+        const code = response.error && response.error.code;
+        if (code === "messaging/registration-token-not-registered" || code === "messaging/invalid-registration-token") stale.push(batch[index]);
+      });
+      const { FieldPath, FieldValue } = require("firebase-admin/firestore");
+      await Promise.all(stale.map(target => target.ref.update(new FieldPath("patientDevices", target.deviceId), FieldValue.delete()).catch(() => null)));
+    }
+  }
+  return { delivered, failed };
+}
+
+/** Automatic appointment reminders to patients (called by dispatchClinicReminders). */
+async function sendAppointmentPushes(clinicId, jobs, zone, clinicName) {
+  const byPatient = new Map();
+  for (const job of jobs) byPatient.set(job.patientId, [...(byPatient.get(job.patientId) || []), job.appointmentId]);
+  const snapshots = await db.getAll(...[...byPatient.keys()].map(id => db.doc(`workspaces/${clinicId}/patients/${id}`)));
+  const format = new Intl.DateTimeFormat("en-GB", { timeZone: zone, weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  for (const snapshot of snapshots) {
+    if (!snapshot.exists) continue;
+    const patient = snapshot.data();
+    for (const appointmentId of byPatient.get(snapshot.id) || []) {
+      const appointment = (patient.appointments || []).find(item => item.id === appointmentId);
+      if (!appointment || !["scheduled", "confirmed"].includes(normalized(appointment.status))) continue;
+      const when = appointment.startAt ? format.format(new Date(appointment.startAt)) : appointment.date;
+      await sendToPatients(clinicId, [snapshot.id], "Dental appointment reminder", [when, appointment.doctor, clinicName].filter(Boolean).join(" · "), { appointmentId });
+    }
+  }
+}
+
+function pushAdmin(request) {
+  const uid = actor(request);
+  const clinicId = identifier(request.data.clinicId || uid, "clinic ID");
+  return { uid, clinicId };
+}
+
+/** Admin queues a notification to patients: now (delivered immediately) or at sendAt. */
+exports.queuePatientPush = onCall(callOptions, async request => {
+  const { uid, clinicId } = pushAdmin(request);
+  const title = text(request.data.title, "title", 65).trim(); assert(title, "Enter a title");
+  const body = text(request.data.body, "message", 240).trim(); assert(body, "Enter a message");
+  const patientIds = [...new Set(array(request.data.patientIds, "patients", 500).map(id => identifier(id, "patient ID")))];
+  assert(patientIds.length > 0, "Choose at least one patient");
+  const now = Date.now();
+  const sendAt = request.data.sendAt === undefined || request.data.sendAt === null ? now : request.data.sendAt;
+  assert(Number.isSafeInteger(sendAt) && sendAt >= now - 60000 && sendAt <= now + 60 * 86400000, "Choose a time within the next 60 days");
+  const ref = db.doc(`workspaces/${clinicId}`);
+  const job = await db.runTransaction(async tx => {
+    const snapshot = await tx.get(ref); const clinic = snapshot.exists ? snapshot.data() : null;
+    const member = roleFor(clinicId, uid, clinic);
+    assert(["owner", "admin"].includes(member.role) || isSuperAdmin(request.auth.token), "Only clinic administrators send patient notifications", "permission-denied");
+    const immediate = sendAt <= now + 60000;
+    const entry = { id: `push-${fingerprint({ uid, now, title, patientIds }).slice(0, 20)}`, title, body, patientIds, sendAt, createdBy: uid, createdAt: now,
+      status: immediate ? "sending" : "scheduled" };
+    const jobs = [...(clinic && clinic.patientPushJobs || []), entry].slice(-PUSH_JOB_LIMIT);
+    const update = { patientPushJobs: jobs, nextPatientPushAt: nextPatientPush(jobs) };
+    if (snapshot.exists) tx.update(ref, update); else tx.set(ref, { config: defaultConfig(clinicId), revision: 0, ...update });
+    return entry;
+  });
+  if (job.status === "sending") {
+    const result = await sendToPatients(clinicId, job.patientIds, job.title, job.body);
+    await finishPushJob(ref, job.id, result);
+    return { id: job.id, status: "sent", ...result };
+  }
+  return { id: job.id, status: "scheduled", sendAt: job.sendAt };
+});
+
+exports.cancelPatientPush = onCall(callOptions, async request => {
+  const { uid, clinicId } = pushAdmin(request);
+  const jobId = identifier(request.data.jobId, "notification ID");
+  const ref = db.doc(`workspaces/${clinicId}`);
+  return db.runTransaction(async tx => {
+    const snapshot = await tx.get(ref); const clinic = snapshot.exists ? snapshot.data() : null;
+    const member = roleFor(clinicId, uid, clinic);
+    assert(["owner", "admin"].includes(member.role) || isSuperAdmin(request.auth.token), "Only clinic administrators manage patient notifications", "permission-denied");
+    const jobs = (clinic.patientPushJobs || []).map(job => ({ ...job }));
+    const job = jobs.find(item => item.id === jobId);
+    assert(job && job.status === "scheduled", "Only scheduled notifications can be cancelled", "failed-precondition");
+    job.status = "cancelled"; job.cancelledBy = uid; job.cancelledAt = Date.now();
+    tx.update(ref, { patientPushJobs: jobs, nextPatientPushAt: nextPatientPush(jobs) });
+    return { id: jobId, status: "cancelled" };
+  });
+});
+
+async function finishPushJob(ref, jobId, result) {
+  await db.runTransaction(async tx => {
+    const snapshot = await tx.get(ref); if (!snapshot.exists) return;
+    const jobs = (snapshot.data().patientPushJobs || []).map(job => ({ ...job }));
+    const job = jobs.find(item => item.id === jobId); if (!job) return;
+    job.status = result.delivered > 0 ? (result.failed ? "partly_sent" : "sent") : "no_devices";
+    job.delivered = result.delivered; job.failed = result.failed; job.finishedAt = Date.now();
+    tx.update(ref, { patientPushJobs: jobs, nextPatientPushAt: nextPatientPush(jobs) });
+  });
+}
+
+/** Every 5 minutes: one query for clinics with a due patient notification; claim, send, record. */
+exports.dispatchPatientPushes = onSchedule({ schedule: "every 5 minutes", timeZone: "UTC", timeoutSeconds: 300 }, async () => {
+  const due = await db.collection("workspaces").where("nextPatientPushAt", "<=", Date.now()).limit(50).get();
+  for (const snapshot of due.docs) {
+    const claimed = await db.runTransaction(async tx => {
+      const fresh = await tx.get(snapshot.ref); if (!fresh.exists) return [];
+      const now = Date.now();
+      const jobs = (fresh.data().patientPushJobs || []).map(job => ({ ...job }));
+      const ready = jobs.filter(job => job.status === "scheduled" && job.sendAt <= now).slice(0, 10);
+      for (const job of ready) { job.status = "sending"; job.claimedAt = now; }
+      tx.update(snapshot.ref, { patientPushJobs: jobs, nextPatientPushAt: nextPatientPush(jobs) });
+      return ready;
+    });
+    for (const job of claimed) {
+      const result = await sendToPatients(snapshot.id, job.patientIds, job.title, job.body).catch(() => ({ delivered: 0, failed: job.patientIds.length }));
+      await finishPushJob(snapshot.ref, job.id, result);
+    }
+  }
+});

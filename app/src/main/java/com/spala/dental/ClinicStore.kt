@@ -56,6 +56,8 @@ class ClinicStore(private val context: Context) {
     private var memberRole = ""
     /** Clinic subscription as last verified by the server ({active, expiresAt, ...}). */
     var subscription by mutableStateOf(JSONObject()); private set
+    /** Recent and scheduled patient notifications (from the clinic document). */
+    var patientPushes by mutableStateOf<List<JSONObject>>(emptyList()); private set
     /** Offline (no Firebase) mode: entitlement comes straight from this device's Play purchases. */
     var deviceEntitled by mutableStateOf(false); private set
     /** Signed in with one of the platform super-admin Google accounts (free, no paywall). */
@@ -137,6 +139,7 @@ class ClinicStore(private val context: Context) {
         if (config.optBoolean("dirty")) conflicts = conflicts + JSONObject().put("id", uid()).put("name", "Clinic settings draft").put("config", config).put("retainedAt", System.currentTimeMillis())
         reminderRebuildRequired = result["reminderRebuildRequired"] == true
         (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
+        (result["patientPushes"] as? List<*>)?.let { list -> patientPushes = list.mapNotNull { (it as? Map<*, *>)?.let(::JSONObject) } }
         config = JSONObject(result["config"] as Map<*, *>).put("revision", (result["revision"] as? Number)?.toLong() ?: 0)
         persist(patients); message = "Clinic settings refreshed; any local draft was retained"
     }
@@ -267,6 +270,7 @@ class ClinicStore(private val context: Context) {
                 "expectedRevision" to config.optLong("revision"), "operationId" to operationId, "config" to toMap(cloudConfig))).await().data as Map<*, *>
             reminderRebuildRequired = result["reminderRebuildRequired"] == true
         (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
+        (result["patientPushes"] as? List<*>)?.let { list -> patientPushes = list.mapNotNull { (it as? Map<*, *>)?.let(::JSONObject) } }
             config = JSONObject(result["config"] as? Map<*, *> ?: toMap(config)).put("revision", (result["revision"] as? Number)?.toLong() ?: config.optLong("revision"))
             config.remove("operationId"); config.remove("dirty"); persist(patients)
         }
@@ -306,6 +310,7 @@ class ClinicStore(private val context: Context) {
         val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinicId)).await().data as Map<*, *>
         reminderRebuildRequired = result["reminderRebuildRequired"] == true
         (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
+        (result["patientPushes"] as? List<*>)?.let { list -> patientPushes = list.mapNotNull { (it as? Map<*, *>)?.let(::JSONObject) } }
         if (!config.optBoolean("dirty")) config = JSONObject(result["config"] as? Map<*, *> ?: emptyMap<String, Any>()).put("revision", (result["revision"] as? Number)?.toLong() ?: 0)
         val records = mutableListOf<JSONObject>()
         var cursor: String? = null
@@ -431,11 +436,42 @@ class ClinicStore(private val context: Context) {
         operation {
             val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinic())).await().data as Map<*, *>
             (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
+        (result["patientPushes"] as? List<*>)?.let { list -> patientPushes = list.mapNotNull { (it as? Map<*, *>)?.let(::JSONObject) } }
             persist(patients)
         }
     }
 
     fun markDeviceEntitled() { deviceEntitled = true }
+
+    /** Admin: send now (sendAt = null) or schedule a notification to patients' phones. */
+    fun queuePatientPush(patientIds: List<String>, title: String, body: String, sendAt: Long?, done: (String?) -> Unit) {
+        if (busy) { done("Please wait for the current operation"); return }
+        busy = true
+        scope.launch {
+            val error = runCatching {
+                check(configured() && session == "staff") { "Patient notifications need the clinic cloud" }
+                val data = mutableMapOf<String, Any?>("clinicId" to clinic(), "patientIds" to patientIds, "title" to title, "body" to body, "sendAt" to sendAt)
+                val result = functions().getHttpsCallable("queuePatientPush").call(data).await().data as Map<*, *>
+                message = if (result["status"] == "sent") "Notification delivered to ${(result["delivered"] as? Number)?.toInt() ?: 0} device(s)"
+                    else "Notification scheduled"
+                refreshPushes()
+            }.exceptionOrNull()?.localizedMessage
+            busy = false
+            done(error)
+        }
+    }
+
+    fun cancelPatientPush(jobId: String) = operation {
+        functions().getHttpsCallable("cancelPatientPush").call(mapOf("clinicId" to clinic(), "jobId" to jobId)).await()
+        refreshPushes(); message = "Scheduled notification cancelled"
+    }
+
+    fun loadPatientPushes() { if (session == "staff" && configured()) operation { refreshPushes() } }
+
+    private suspend fun refreshPushes() {
+        val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinic())).await().data as Map<*, *>
+        (result["patientPushes"] as? List<*>)?.let { list -> patientPushes = list.mapNotNull { (it as? Map<*, *>)?.let(::JSONObject) } }
+    }
 
     fun leaveLocalMode() = operation { localMode = false; persist(patients); session = "login" }
 
@@ -609,6 +645,7 @@ class ClinicStore(private val context: Context) {
         val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinicId)).await().data as Map<*, *>
         reminderRebuildRequired = result["reminderRebuildRequired"] == true
         (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
+        (result["patientPushes"] as? List<*>)?.let { list -> patientPushes = list.mapNotNull { (it as? Map<*, *>)?.let(::JSONObject) } }
         if (!config.optBoolean("dirty")) config = JSONObject(result["config"] as? Map<*, *> ?: emptyMap<String, Any>()).put("revision", (result["revision"] as? Number)?.toLong() ?: 0)
         val dirty = patients.filter { it.optBoolean("dirty") || it.has("operationId") }
         val records = mutableListOf<JSONObject>()

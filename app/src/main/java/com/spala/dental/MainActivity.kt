@@ -91,6 +91,8 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     var tab by rememberSaveable { mutableStateOf("Overview") }
     var search by remember { mutableStateOf("") }
     var scheduleView by rememberSaveable { mutableStateOf("Calendar") }
+    // Patient notification dialog: an empty object = choose recipients; a patient = that patient only.
+    var pushFor by remember { mutableStateOf<JSONObject?>(null) }
     var showArchived by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Form?>(null) }
     var tooth by remember { mutableStateOf<String?>(null) }
@@ -175,6 +177,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     "register" -> addPatient()
                     "book" -> { go("Schedule"); scheduleView = "Calendar" }
                     "sync" -> store.sync()
+                    "notify" -> pushFor = JSONObject()
                     "howto" -> showHowTo = true
                     "signout" -> if (store.session == "local") store.leaveLocalMode() else store.signOut()
                 }
@@ -293,7 +296,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                 when (tab.takeIf { it in patientTabs } ?: "Overview") {
                     "Overview" -> {
                         if (p.has("chart")) PatientHeader(p, showAlert = false)
-                        if (canEdit || store.currentRole in listOf("owner", "admin", "administrator")) PatientAccessCard(p, store)
+                        if (canEdit || store.currentRole in listOf("owner", "admin", "administrator")) PatientAccessCard(p, store) { pushFor = p }
                         SectionHeader("Profile")
                         SurfaceCard {
                             InfoRow(Glyph.Calendar, "Date of birth", p.optString("dob").ifBlank { "Not recorded" } + (ageText(p.optString("dob"))?.let { " · $it" } ?: ""))
@@ -510,6 +513,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     if (explanation && patient != null) PatientExplanationDialog(patient, { explanation = false }) { chart -> open3D(patient, chart) }
     preview?.let { bitmap -> AlertDialog(onDismissRequest = { preview = null }, title = { Text("Clinical image") }, text = { androidx.compose.foundation.Image(bitmap.asImageBitmap(), "Clinical attachment", Modifier.fillMaxWidth().heightIn(max = 480.dp)) }, confirmButton = { TextButton(onClick = { preview = null }) { Text("Close") } }) }
     store.credentialNotice?.let { notice -> CredentialDialog(notice) { store.credentialNotice = null } }
+    pushFor?.let { target -> PatientPushDialog(store, target.takeIf { it.has("id") }) { pushFor = null } }
     if (error.isNotBlank()) AlertDialog(onDismissRequest = { error = "" }, title = { Text("Please review") }, text = { Text(error) }, confirmButton = { TextButton(onClick = { error = "" }) { Text("OK") } })
     form?.let { active -> key(active) {
         val values = remember { mutableStateMapOf<String, String>().apply { active.fields.forEach { put(it.key, it.value) } } }

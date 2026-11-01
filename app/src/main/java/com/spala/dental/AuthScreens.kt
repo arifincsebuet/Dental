@@ -266,7 +266,7 @@ fun PatientPortalScreen(store: ClinicStore) {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-fun PatientAccessCard(patient: JSONObject, store: ClinicStore) {
+fun PatientAccessCard(patient: JSONObject, store: ClinicStore, onNotify: (() -> Unit)? = null) {
     val portal = patient.optJSONObject("portal")
     SurfaceCard {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -281,8 +281,12 @@ fun PatientAccessCard(patient: JSONObject, store: ClinicStore) {
         if (!store.cloudConfigured) Text("Available when the app is connected to the clinic cloud.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
         else if (portal == null) Button(onClick = { store.createPatientLogin(patient.optString("id")) }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Text("Create patient login")
-        } else OutlinedButton(onClick = { store.resetPatientPassword(patient.optString("id")) }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-            Text("Reset password")
+        } else {
+            OutlinedButton(onClick = { store.resetPatientPassword(patient.optString("id")) }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Text("Reset password")
+            }
+            if (onNotify != null && (store.isSuperAdmin || store.currentRole in listOf("owner", "admin", "administrator")))
+                FilledTonalButton(onClick = onNotify, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) { Text("Send notification") }
         }
         if (store.cloudConfigured && (patient.optBoolean("dirty") || patient.optLong("remoteVersion") == 0L))
             Text("Sync this patient first so the cloud record exists.", style = MaterialTheme.typography.bodySmall, color = Amber600)
