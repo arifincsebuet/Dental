@@ -4,7 +4,12 @@ This directory contains deployable Cloud Functions source and restrictive Firest
 
 ## Cloud setup
 
-1. Create/register the Android app in your Firebase project. Fill Android Firebase resources from the supplied template. Enable Anonymous Authentication for use without a Google login. Enable Google Authentication only when the disabled app login flag is enabled; register signing fingerprints and the web OAuth client ID at that time.
+1. Create/register the Android app in your Firebase project and fill in the Android Firebase resources from `firebase/firebase.xml.example`.
+   - **Google** sign-in provider: required for clinic staff. Register the app's SHA-1/SHA-256 signing fingerprints and put the web OAuth client ID in `default_web_client_id`.
+   - **Email/Password** provider: required for patient logins. Patients use synthetic `<PatientID>@patient.dentalcare.local` addresses, which never receive mail.
+   - Anonymous auth is only needed for older device-only workspaces.
+
+   See [Docs/firebase_architecture.md](Docs/firebase_architecture.md) for the full design and cost controls.
 2. Set up Firestore and Cloud Storage in appropriate regions. Cloud Functions and Cloud Scheduler deployment require a billing-enabled project and the relevant Google Cloud APIs. Storage/Firestore/Functions/Scheduler/FCM delivery consume their respective service quotas; using one patient document does not make requests free.
 3. Install Node.js 22 and Firebase CLI on your development/deployment machine. In `functions`, run `npm install`. Deploy from the project root with your explicitly selected project: `firebase deploy --project YOUR_PROJECT_ID --only functions,firestore:rules,firestore:indexes,storage`.
 4. Default function region is `us-central1`. To choose another supported region, set `FUNCTION_REGION` in the Functions environment before deployment and use the same value in the Android `firebase_functions_region` resource. Place compute close to Firestore where practical.
@@ -63,3 +68,11 @@ Official references: [callable functions](https://firebase.google.com/docs/funct
 ## Audit regression checks
 
 The PRD audit added `test/audit-regressions.test.js`. From `functions`, `npm test` runs nine pure-helper regression tests without installing Firebase SDKs or contacting services. They passed during the audit, along with `npm run check`'s equivalent `node --check index.js`. This is limited source-level coverage, not callable transaction, Firestore Rules, Storage, FCM, or deployed integration verification. See [PRD_AUDIT.md](PRD_AUDIT.md) for remaining requirements.
+
+## Accounts and patient logins
+
+- The first Google account to sign in creates a clinic and becomes its owner.
+- Other doctors and staff are added in Settings › Clinic › Staff with their Google email. After the owner syncs, they can sign in with Google and join automatically (`resolveWorkspace`).
+- Deactivating a staff entry removes that person's access.
+- An admin or dentist opens a synced patient → Overview → **Patient app access** → **Create patient login**. The Patient ID and temporary password are shown once, ready to share. The patient must choose a new password at first sign-in. **Reset password** issues a new temporary password and signs out the patient's devices.
+- New callables: `resolveWorkspace`, `createPatientLogin`, `resetPatientPassword`, `completePasswordChange` and `getMyRecord`. `listPatients` also accepts `updatedAfter` for incremental sync.

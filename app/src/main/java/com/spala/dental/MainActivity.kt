@@ -52,7 +52,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             DentalTheme {
                 CompositionLocalProvider(LocalEditorSaveStatus provides { EditorSaveStatus(store.saveSequence, store.saveError) }) {
-                    ClinicApp(store)
+                    when (store.session) {
+                        "loading" -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                        "login" -> LoginScreen(store)
+                        "patient" -> PatientPortalScreen(store)
+                        else -> ClinicApp(store)
+                    }
                 }
             }
         }
@@ -259,6 +264,7 @@ private fun ClinicApp(store: ClinicStore) {
                 when (tab.takeIf { it in patientTabs } ?: "Overview") {
                     "Overview" -> {
                         if (p.has("chart")) PatientHeader(p, showAlert = false)
+                        if (canEdit || store.currentRole in listOf("owner", "admin", "administrator")) PatientAccessCard(p, store)
                         SectionHeader("Profile")
                         SurfaceCard {
                             InfoRow(Glyph.Calendar, "Date of birth", p.optString("dob").ifBlank { "Not recorded" } + (ageText(p.optString("dob"))?.let { " · $it" } ?: ""))
@@ -436,15 +442,16 @@ private fun ClinicApp(store: ClinicStore) {
                     OutlinedButton(onClick = { store.registerCloudReminders(true) }, enabled = !store.busy) { Text("Enable cloud reminders on this device") }
                     OutlinedButton(onClick = { store.registerCloudReminders(false) }, enabled = !store.busy) { Text("Disable cloud reminders on this device") }
                     CardBlock("Image uploads", "Lossless PNG, maximum 512 KB. Larger images are rejected to preserve image detail.")
-                    if (BuildConfig.GOOGLE_LOGIN_ENABLED) Button(onClick = { scope.launch { runCatching { val resource = context.resources.getIdentifier("default_web_client_id", "string", context.packageName); store.google(context, if (resource == 0) "" else context.getString(resource)) }.onFailure { error = it.localizedMessage ?: "Sign-in failed" } } }) { Text("Continue with Google") }
-                    if (BuildConfig.GOOGLE_LOGIN_ENABLED && store.cloudIdentity.isNotBlank()) OutlinedButton(onClick = { store.signOut() }, enabled = !store.busy) { Text("Sign out after synchronizing") }
-                    if (!BuildConfig.GOOGLE_LOGIN_ENABLED) CardBlock("Account", "Google sign-in is currently disabled. Cloud sync uses a private anonymous Firebase workspace when configured.")
+                    if (runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.isAnonymous == true }.getOrDefault(false)) Button(onClick = { scope.launch { runCatching { val resource = context.resources.getIdentifier("default_web_client_id", "string", context.packageName); store.google(context, if (resource == 0) "" else context.getString(resource)) }.onFailure { error = it.localizedMessage ?: "Sign-in failed" } } }) { Text("Link this device workspace to Google") }
+                    if (store.cloudIdentity.isNotBlank()) OutlinedButton(onClick = { store.signOut() }, enabled = !store.busy) { Text("Sign out after synchronizing") }
+                    CardBlock("Account", if (store.session == "local") "Offline mode: records stay encrypted on this device only." else "Signed in as ${runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email }.getOrNull() ?: "this device"} · role ${store.currentRole}")
                 }
             }
         }
     }
     if (explanation && patient != null) PatientExplanationDialog(patient, { explanation = false }) { chart -> open3D(patient, chart) }
     preview?.let { bitmap -> AlertDialog(onDismissRequest = { preview = null }, title = { Text("Clinical image") }, text = { androidx.compose.foundation.Image(bitmap.asImageBitmap(), "Clinical attachment", Modifier.fillMaxWidth().heightIn(max = 480.dp)) }, confirmButton = { TextButton(onClick = { preview = null }) { Text("Close") } }) }
+    store.credentialNotice?.let { notice -> CredentialDialog(notice) { store.credentialNotice = null } }
     if (error.isNotBlank()) AlertDialog(onDismissRequest = { error = "" }, title = { Text("Please review") }, text = { Text(error) }, confirmButton = { TextButton(onClick = { error = "" }) { Text("OK") } })
     form?.let { active -> key(active) {
         val values = remember { mutableStateMapOf<String, String>().apply { active.fields.forEach { put(it.key, it.value) } } }

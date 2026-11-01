@@ -5,10 +5,11 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getStorage } = require("firebase-admin/storage");
+const { getAuth } = require("firebase-admin/auth");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
-const { createHash } = require("node:crypto");
+const { createHash, randomInt } = require("node:crypto");
 initializeApp();
 setGlobalOptions({ region: process.env.FUNCTION_REGION || "us-central1", maxInstances: 4 });
 const db = getFirestore();
@@ -339,10 +340,22 @@ exports.listPatients = onCall(callOptions, async request => {
   const pageSize = request.data.pageSize === undefined ? 50 : request.data.pageSize;
   assert(Number.isInteger(pageSize) && pageSize >= 1 && pageSize <= 100, "Page size must be 1–100");
   const clinic = await db.doc(`workspaces/${clinicId}`).get(); const member = roleFor(clinicId, uid, clinic.exists ? clinic.data() : null);
-  let query = db.collection(`workspaces/${clinicId}/patients`).orderBy(require("firebase-admin/firestore").FieldPath.documentId()).limit(pageSize);
+  const { FieldPath } = require("firebase-admin/firestore");
+  // Incremental mode reads only documents changed since the caller's last pull (cost: changed docs only).
+  if (request.data.updatedAfter !== undefined && request.data.updatedAfter !== null) {
+    assert(Number.isSafeInteger(request.data.updatedAfter) && request.data.updatedAfter >= 0, "Invalid updatedAfter");
+    let query = db.collection(`workspaces/${clinicId}/patients`).where("updatedAt", ">", request.data.updatedAfter)
+      .orderBy("updatedAt").orderBy(FieldPath.documentId()).limit(pageSize);
+    if (request.data.afterId) query = query.startAfter(request.data.afterAt, identifier(request.data.afterId, "patient cursor"));
+    const snapshots = await query.get();
+    const last = snapshots.docs[snapshots.size - 1];
+    return { patients: snapshots.docs.map(snapshot => projectPatient(snapshot.data(), member)),
+      nextCursor: snapshots.size === pageSize ? last.id : null, nextAt: snapshots.size === pageSize ? last.data().updatedAt : null, serverTime: Date.now() };
+  }
+  let query = db.collection(`workspaces/${clinicId}/patients`).orderBy(FieldPath.documentId()).limit(pageSize);
   if (request.data.afterId) query = query.startAfter(identifier(request.data.afterId, "patient cursor"));
   const snapshots = await query.get();
-  return { patients: snapshots.docs.map(snapshot => projectPatient(snapshot.data(), member)), nextCursor: snapshots.size === pageSize ? snapshots.docs[snapshots.size - 1].id : null };
+  return { patients: snapshots.docs.map(snapshot => projectPatient(snapshot.data(), member)), nextCursor: snapshots.size === pageSize ? snapshots.docs[snapshots.size - 1].id : null, serverTime: Date.now() };
 });
 
 exports.updateClinic = onCall(callOptions, async request => {
@@ -371,6 +384,8 @@ exports.updateClinic = onCall(callOptions, async request => {
     const snapshot = await tx.get(ref); const old = snapshot.exists ? snapshot.data() : null;
     const member = roleFor(clinicId, uid, old);
     assert(["owner", "admin"].includes(member.role), "Only clinic administrators can change configuration", "permission-denied");
+    // Staff who joined by Google email after this client last loaded settings are kept, not dropped.
+    for (const [memberId, joined] of Object.entries(old && old.config && old.config.members || {})) if (!config.members[memberId] && joined.email) config.members[memberId] = joined;
     const receipt = (old && old.receipts || []).find(item => item.id === operationId);
     if (receipt) { assert(receipt.hash === hash && receipt.actor === uid, "Operation ID cannot be reused with different content", "already-exists"); return visibleClinic(clinicId, old, uid); }
     assert((old && old.revision || 0) === data.expectedRevision, "Clinic configuration changed; reload and review before retrying", "aborted");
@@ -383,6 +398,7 @@ exports.updateClinic = onCall(callOptions, async request => {
       audit: [...(old && old.audit || []), { id: operationId, actor: uid, at: now, action: "clinic_configuration_updated", revision }]
     };
     // Rebuild from the bounded schedule index; configuration changes need no patient scan.
+    applyStaffInvites(next, clinicId);
     next.reminderJobs = rebuildClinicReminders(next, now);
     next.nextReminderAt = nextReminder(next.reminderJobs);
     next.reminderRebuildRequired = (next.scheduleIndex || []).some(item => item.startAt > now && !hasReminderMetadata(item));
@@ -396,7 +412,8 @@ exports.commitPatient = onCall(callOptions, async request => {
   const clinicId = identifier(data.clinicId || uid, "clinic ID"); const patientId = identifier(data.patientId, "patient ID"); const operationId = identifier(data.operationId, "operation ID");
   assert(Number.isSafeInteger(data.expectedRevision) && data.expectedRevision >= 0, "Invalid expected revision");
   const input = clone(object(data.patient, "patient"));
-  keysOnly(input, [...ROOT_FIELDS, "dirty", "remoteVersion", "cloudOwner", "revision", "updatedAt", "updatedBy", "clinicId", "operationId", "audit", "receipts", "redacted"], "patient");
+  // `portal` (patient login metadata) is server-owned: accepted in the payload but always taken from the stored doc.
+  keysOnly(input, [...ROOT_FIELDS, "dirty", "remoteVersion", "cloudOwner", "revision", "updatedAt", "updatedBy", "clinicId", "operationId", "audit", "receipts", "redacted", "portal"], "patient");
   const patient = {};
   for (const key of Object.keys(input)) if (ROOT_FIELDS.has(key)) patient[key] = input[key];
   assert(patient.id === patientId && patient.schemaVersion === 3, "Patient identity or schema mismatch");
@@ -450,22 +467,23 @@ exports.commitPatient = onCall(callOptions, async request => {
     assert(audit.length <= MAX_HISTORY, "Audit history is full; arrange archive before more changes", "resource-exhausted");
     patient.audit = audit;
     patient.receipts = [...(old && old.receipts || []).slice(-(MAX_RECEIPTS - 1)), { id: operationId, actor: uid, hash, revision, at: now }];
+    if (old && old.portal) patient.portal = old.portal;
     patient.revision = revision; patient.operationId = operationId; patient.clinicId = clinicId; patient.updatedAt = now; patient.updatedBy = uid;
     patient.chart.clinicId = clinicId; patient.chart.updatedBy = uid; patient.chart.updatedAt = new Date(now).toISOString(); patient.chart.chartVersion = (old && old.chart && old.chart.chartVersion || 0) + (changed.some(key => CLINICAL.includes(key)) ? 1 : 0);
     assert(Buffer.byteLength(JSON.stringify(patient.chart), "utf8") <= 32 * 1024, "Current chart exceeds the 32 KiB budget", "resource-exhausted");
     const scheduleIndex = scheduling(patient, clinicId, clinic, now);
-    const images = array(patient.images || [], "images", 500); uniqueIds(images.map(image => ({ id: image.path ? image.path.split("/").pop().replace(".png", "") : "" })), "image hash");
+    const images = array(patient.images || [], "images", 500); uniqueIds(images.map(image => ({ id: image.path ? image.path.split("/").pop().replace(/\.(png|webp)$/, "") : "" })), "image hash");
     const oldImages = old && old.images || [];
     appendOnly(oldImages, images, "Images");
     const prefix = `workspaces/${clinicId}/patients/${patientId}/`;
     for (const image of images) {
-      assert(typeof image.path === "string" && image.path.startsWith(prefix) && /^[a-f0-9]{64}\.png$/.test(image.path.slice(prefix.length)), "Image path does not belong to this clinic/patient");
+      assert(typeof image.path === "string" && image.path.startsWith(prefix) && /^[a-f0-9]{64}\.(png|webp)$/.test(image.path.slice(prefix.length)), "Image path does not belong to this clinic/patient");
       assert(Number.isInteger(image.bytes) && image.bytes > 0 && image.bytes <= 512 * 1024, "Image exceeds 512 KiB");
       if (!oldImages.some(previous => previous.path === image.path)) {
         const file = getStorage().bucket().file(image.path);
         let metadata;
         try { [metadata] = await file.getMetadata(); } catch (_) { fail("Attach the image in Firebase Storage before saving its reference", "failed-precondition"); }
-        assert(metadata.contentType === "image/png" && Number(metadata.size) === image.bytes && Number(metadata.size) <= 512 * 1024, "Stored image metadata is invalid");
+        assert(["image/png", "image/webp"].includes(metadata.contentType) && Number(metadata.size) === image.bytes && Number(metadata.size) <= 512 * 1024, "Stored image metadata is invalid");
         image.reference = `gs://${file.bucket.name}/${image.path}`;
       }
     }
@@ -591,4 +609,140 @@ exports.dispatchClinicReminders = onSchedule({ schedule: "every 15 minutes", tim
       tx.update(snapshot.ref, { reminderJobs: jobs, nextReminderAt: nextReminder(jobs) });
     });
   }
+});
+
+
+// ---------------------------------------------------------------------------------------------
+// Staff access by Google account email (no extra documents: invites live in the clinic doc)
+// ---------------------------------------------------------------------------------------------
+
+const STAFF_ROLE = { owner: "admin", admin: "admin", administrator: "admin", dentist: "dentist", assistant: "assistant", receptionist: "receptionist", cashier: "cashier", auditor: "auditor" };
+function staffInvites(config) {
+  const invites = {};
+  for (const person of config.staff || []) {
+    const email = typeof person.email === "string" ? person.email.trim().toLowerCase() : "";
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || person.active === false) continue;
+    invites[email] = STAFF_ROLE[person.role] || "dentist";
+  }
+  return invites;
+}
+/** Keeps `inviteEmails` (the only indexed lookup field) and member roles in step with the staff list. */
+function applyStaffInvites(clinic, clinicId) {
+  const invites = staffInvites(clinic.config);
+  clinic.inviteEmails = Object.keys(invites).slice(0, 200);
+  for (const [uid, member] of Object.entries(clinic.config.members || {})) {
+    if (uid === clinicId || !member.email) continue;
+    const role = invites[member.email];
+    member.active = Boolean(role);
+    if (role) member.role = role;
+  }
+}
+
+/**
+ * Called after Google sign-in. Owner of an existing clinic → that clinic. Invited email → joins the
+ * inviting clinic once (one write). Otherwise the caller's own UID becomes a new personal clinic.
+ */
+exports.resolveWorkspace = onCall(callOptions, async request => {
+  const uid = actor(request);
+  assert(!request.auth.token.role || request.auth.token.role !== "patient", "Patient accounts cannot open the clinic workspace", "permission-denied");
+  const own = await db.doc(`workspaces/${uid}`).get();
+  if (own.exists) return { clinicId: uid, role: "owner" };
+  const email = String(request.auth.token.email || "").toLowerCase();
+  if (email && request.auth.token.email_verified !== false) {
+    const invited = await db.collection("workspaces").where("inviteEmails", "array-contains", email).limit(1).get();
+    if (!invited.empty) {
+      const ref = invited.docs[0].ref;
+      const role = await db.runTransaction(async tx => {
+        const snap = await tx.get(ref); const clinic = snap.data();
+        const granted = staffInvites(clinic.config)[email];
+        assert(granted, "Your clinic invitation is no longer active", "permission-denied");
+        const members = { ...(clinic.config.members || {}) };
+        if (!members[uid] || members[uid].role !== granted || members[uid].active === false) {
+          members[uid] = { role: granted, active: true, email, joinedAt: Date.now() };
+          tx.update(ref, { "config.members": members, audit: [...(clinic.audit || []), { id: `join-${uid}-${Date.now()}`, actor: uid, at: Date.now(), action: "staff_joined", email, role: granted }] });
+        }
+        return granted;
+      });
+      return { clinicId: ref.id, role };
+    }
+  }
+  return { clinicId: uid, role: "owner" };
+});
+
+// ---------------------------------------------------------------------------------------------
+// Patient portal logins: Firebase Auth email/password accounts with custom claims.
+// The patient enters a short Patient ID; the email is synthetic and never receives mail.
+// No Firestore documents are created; login metadata is one `portal` field on the patient doc.
+// ---------------------------------------------------------------------------------------------
+
+const LOGIN_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function randomText(alphabet, length) { let out = ""; for (let i = 0; i < length; i++) out += alphabet[randomInt(alphabet.length)]; return out; }
+function patientEmail(loginId) { return `${loginId.toLowerCase()}@patient.dentalcare.local`; }
+async function portalAdmin(request) {
+  const uid = actor(request);
+  const clinicId = identifier(request.data.clinicId || uid, "clinic ID"); const patientId = identifier(request.data.patientId, "patient ID");
+  const clinic = await db.doc(`workspaces/${clinicId}`).get();
+  const member = roleFor(clinicId, uid, clinic.exists ? clinic.data() : null);
+  assert(["owner", "admin", "dentist"].includes(member.role), "Only clinic administrators manage patient logins", "permission-denied");
+  const ref = db.doc(`workspaces/${clinicId}/patients/${patientId}`);
+  const snapshot = await ref.get();
+  assert(snapshot.exists, "Synchronize this patient to the cloud before creating a login", "failed-precondition");
+  return { uid, clinicId, patientId, ref, patient: snapshot.data() };
+}
+
+exports.createPatientLogin = onCall(callOptions, async request => {
+  const { uid, clinicId, patientId, ref, patient } = await portalAdmin(request);
+  assert(!patient.portal, "This patient already has a login. Use Reset password.", "already-exists");
+  const password = randomText(PASSWORD_ALPHABET, 10);
+  let loginId; let user;
+  for (let attempt = 0; attempt < 5 && !user; attempt++) {
+    loginId = randomText(LOGIN_ALPHABET, 8);
+    try { user = await getAuth().createUser({ email: patientEmail(loginId), password, displayName: patient.name || "Patient", emailVerified: false }); }
+    catch (error) { if (error.code !== "auth/email-already-exists") throw error; }
+  }
+  assert(user, "Could not allocate a Patient ID; try again", "unavailable");
+  await getAuth().setCustomUserClaims(user.uid, { role: "patient", clinicId, patientId, mustChange: true });
+  const portal = { loginId, uid: user.uid, createdAt: Date.now(), createdBy: uid, passwordResetAt: Date.now() };
+  await ref.update({ portal });
+  return { loginId, password, portal };
+});
+
+exports.resetPatientPassword = onCall(callOptions, async request => {
+  const { uid, ref, patient, clinicId, patientId } = await portalAdmin(request);
+  assert(patient.portal && patient.portal.uid, "Create a login for this patient first", "failed-precondition");
+  const password = randomText(PASSWORD_ALPHABET, 10);
+  await getAuth().updateUser(patient.portal.uid, { password, disabled: false });
+  await getAuth().setCustomUserClaims(patient.portal.uid, { role: "patient", clinicId, patientId, mustChange: true });
+  await getAuth().revokeRefreshTokens(patient.portal.uid);
+  const portal = { ...patient.portal, passwordResetAt: Date.now(), resetBy: uid };
+  await ref.update({ portal });
+  return { loginId: portal.loginId, password, portal };
+});
+
+/** Patient finished changing the temporary password on the device; clear the forced-change flag. */
+exports.completePasswordChange = onCall(callOptions, async request => {
+  actor(request);
+  const token = request.auth.token;
+  assert(token.role === "patient", "Patient login required", "permission-denied");
+  await getAuth().setCustomUserClaims(request.auth.uid, { role: "patient", clinicId: token.clinicId, patientId: token.patientId, mustChange: false });
+  return { ok: true };
+});
+
+/** The signed-in patient's own record, read-only and without internal staff notes or audit. One read. */
+exports.getMyRecord = onCall(callOptions, async request => {
+  actor(request);
+  const token = request.auth.token;
+  assert(token.role === "patient" && token.clinicId && token.patientId, "Patient login required", "permission-denied");
+  const [snapshot, clinic] = await Promise.all([
+    db.doc(`workspaces/${identifier(token.clinicId, "clinic ID")}/patients/${identifier(token.patientId, "patient ID")}`).get(),
+    db.doc(`workspaces/${token.clinicId}`).get(),
+  ]);
+  assert(snapshot.exists, "Your record is not available yet. Contact the clinic.", "not-found");
+  const patient = snapshot.data();
+  const keep = ["id", "name", "dob", "phone", "chart", "treatments", "performedProcedures", "appointments", "invoices", "updatedAt"];
+  const record = {};
+  for (const key of keep) if (patient[key] !== undefined) record[key] = clone(patient[key]);
+  for (const item of record.treatments || []) { delete item.events; delete item.amendments; }
+  return { patient: record, clinic: { name: clinic.exists ? clinic.data().config.name : "Dental Care", currency: clinic.exists ? clinic.data().config.currency : "BDT", timeZone: clinic.exists ? clinic.data().config.timeZone : "Asia/Dhaka" } };
 });

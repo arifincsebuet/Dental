@@ -89,10 +89,10 @@ fun EncountersScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObj
 fun TreatmentWorkspaceScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject, String) -> Unit) {
     var form by remember { mutableStateOf<ClinicalForm?>(null) }
     Text("Treatment plan", style = MaterialTheme.typography.titleLarge)
-    if ((patient.optJSONArray("treatments")?.length() ?: 0) == 0) Text("Choose a tooth in the chart to add a treatment item.")
+    if ((patient.optJSONArray("treatments")?.length() ?: 0) == 0) Text("No treatment yet. Use Record treatment on the 3D model above, or tap a tooth in the Chart tab.")
     patient.optJSONArray("treatments")?.objects().orEmpty().forEach { treatment ->
         val status = treatment.optString("status", "Planned")
-        ClinicalCard("Tooth ${treatment.optString("tooth")} · ${treatment.optString("procedure")}") {
+        ClinicalCard("${ToothNotation.label(treatment.optString("tooth"))} · ${treatment.optString("procedure")}") {
             Text("${treatment.optString("surface", "Whole tooth")} · $status", color = Color(0xFF0F766E))
             Text(treatment.optString("notes"))
             val nextStates = when (status) {
@@ -122,12 +122,16 @@ fun TreatmentWorkspaceScreen(patient: JSONObject, config: JSONObject, onChange: 
                             require(restoration in allowed) { "Use a supported restoration code or none" }
                             val surfaceKey = target.optString("surface")
                             if (restoration != "none") {
-                                require(surfaceKey in listOf("M", "D", "F", "L", "I", "O")) { "Record a specific surface in the tooth editor before adding a restoration outcome" }
+                                // Multi-surface items such as "MO" restore each listed surface.
+                                val keys = surfaceKey.map { it.toString() }
+                                require(keys.isNotEmpty() && keys.all { it in listOf("M", "D", "F", "L", "I", "O") }) { "Record a specific surface in the tooth editor before adding a restoration outcome" }
                                 val tooth = copy.obj("chart").obj("teeth").obj(target.optString("tooth"))
-                                val observation = tooth.obj("surfaces").obj(surfaceKey)
-                                observation.put("assessment", "assessed"); observation.array("findings")
-                                val restorations = observation.array("restorations")
-                                if ((0 until restorations.length()).none { restorations.getString(it) == restoration }) restorations.put(restoration)
+                                for (key in keys) {
+                                    val observation = tooth.obj("surfaces").obj(key)
+                                    observation.put("assessment", "assessed"); observation.array("findings")
+                                    val restorations = observation.array("restorations")
+                                    if ((0 until restorations.length()).none { restorations.getString(it) == restoration }) restorations.put(restoration)
+                                }
                             }
                         }
                         onChange(copy, "Treatment ${target.optString("procedure")}: $status → $next")

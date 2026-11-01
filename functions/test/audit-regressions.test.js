@@ -16,13 +16,14 @@ const modules = {
   "firebase-admin/firestore": { getFirestore: () => ({}) },
   "firebase-admin/messaging": { getMessaging: () => ({}) },
   "firebase-admin/storage": { getStorage: () => ({}) },
+  "firebase-admin/auth": { getAuth: () => ({}) },
   "firebase-functions/v2/https": { HttpsError, onCall: (_, handler) => handler },
   "firebase-functions/v2/scheduler": { onSchedule: (_, handler) => handler },
   "firebase-functions/v2": { setGlobalOptions() {} },
   "node:crypto": require("node:crypto")
 };
 const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata};", {
+vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, staffInvites, applyStaffInvites, patientEmail, randomText};", {
   exports: registered, module: { exports: registered }, Buffer, process: { env: {} },
   require(name) { assert.ok(modules[name], `Unexpected dependency ${name}`); return modules[name]; }
 });
@@ -85,4 +86,26 @@ test("disabled or non-consented reminders are never invented from unknown data",
   assert.equal(rebuildClinicReminders(denied, now).length, 0);
   const legacy = clinic(); delete legacy.scheduleIndex[0].reminderConsent;
   assert.equal(rebuildClinicReminders(legacy, now).length, 0);
+});
+
+test("staff invites follow the active staff list and deactivate removed members", () => {
+  const { applyStaffInvites, staffInvites } = registered.audit;
+  const clinic = { config: { staff: [
+    { name: "Dr A", role: "dentist", email: " DrA@Example.com " },
+    { name: "Rec", role: "receptionist", email: "rec@example.com", active: false },
+    { name: "Bad", role: "dentist", email: "not-an-email" }],
+    members: { owner1: { role: "owner", active: true }, u2: { role: "dentist", active: true, email: "gone@example.com" }, u3: { role: "assistant", active: true, email: "dra@example.com" } } } };
+  assert.equal(JSON.stringify(staffInvites(clinic.config)), JSON.stringify({ "dra@example.com": "dentist" }));
+  applyStaffInvites(clinic, "owner1");
+  assert.equal(JSON.stringify(clinic.inviteEmails), JSON.stringify(["dra@example.com"]));
+  assert.equal(clinic.config.members.u2.active, false);
+  assert.equal(clinic.config.members.u3.role, "dentist");
+  assert.equal(clinic.config.members.owner1.active, true);
+});
+
+test("patient login identifiers are short, unambiguous and map to a synthetic email", () => {
+  const { patientEmail, randomText } = registered.audit;
+  const id = randomText("ABCDEFGHJKMNPQRSTUVWXYZ23456789", 8);
+  assert.match(id, /^[A-HJ-KM-NP-Z2-9]{8}$/);
+  assert.equal(patientEmail("AB23CD45"), "ab23cd45@patient.dentalcare.local");
 });
