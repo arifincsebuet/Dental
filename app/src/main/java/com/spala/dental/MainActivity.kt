@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ToothNotation.load(this)
+        TapSound.load(this)
         billing = BillingManager(this) { purchase ->
             if (store.session == "local") { billing.acknowledgeLocally(purchase); store.markDeviceEntitled() }
             // Only call the server when the clinic is not already known to be active (saves calls on every launch).
@@ -150,7 +151,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     /** Every 3D launch gets a fresh session token so stale results from an earlier chart are ignored. */
     fun open3D(p: JSONObject, chart: JSONObject) {
         chartPatientId = p.optString("id"); chartToken = uid()
-        chart.put("notation", ToothNotation.current)
+        chart.put("notation", ToothNotation.current).put("sounds", TapSound.enabled)
         if (!canEditClinical(store.currentRole)) chart.put("readOnly", true)
         chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
     }
@@ -445,6 +446,15 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                         Text("Tooth numbering", style = MaterialTheme.typography.titleSmall, color = Ink)
                         Text("How teeth are labelled on the 3D model, charts and history. Records are always stored in FDI.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
                         SegmentedPills(ToothNotation.all, ToothNotation.current, Modifier.fillMaxWidth(), label = { ToothNotation.title(it) }) { ToothNotation.set(context, it) }
+                    }
+                    SurfaceCard(padding = 12.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Tooth tap sound", style = MaterialTheme.typography.titleSmall, color = Ink)
+                                Text("Soft click when a tooth is tapped on the 3D model. Follows the phone's touch-sound volume.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                            }
+                            Switch(TapSound.enabled, { TapSound.set(context, it); if (it) TapSound.play() })
+                        }
                     }
                     OutlinedButton(onClick = { showHowTo = true }, modifier = Modifier.fillMaxWidth()) { Text("How to use") }
                     if (store.cloudIdentity.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text("Cloud UID: ${store.cloudIdentity}\nWorkspace: ${store.workspaceId.ifBlank { store.cloudIdentity }}") }

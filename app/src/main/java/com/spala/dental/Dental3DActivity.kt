@@ -91,6 +91,7 @@ class DentalBridge(godot: Godot) : GodotPlugin(godot) {
         JSONObject().put("schemaVersion", 2).put("dentition", dentition).put("teeth", outputTeeth)
             .put("catalogVersion", "fdi-v1").put("chartVersion", version)
             .put("sessionToken", session).put("readOnly", input.optBoolean("readOnly", false))
+            .put("sounds", input.optBoolean("sounds", true))
             .put("notation", input.optString("notation").takeIf { it in setOf("palmer", "fdi", "universal") } ?: "palmer")
     }.getOrElse { JSONObject().put("schemaVersion", 0).put("error", "unsupported_chart") }
 

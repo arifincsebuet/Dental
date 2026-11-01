@@ -88,6 +88,8 @@ var current_view := "Front"
 var input_valid := true
 var read_only := false
 var notation := "palmer"
+var sounds := true
+var tap_player: AudioStreamPlayer
 var loading_overlay: ColorRect
 
 # UI
@@ -129,6 +131,7 @@ func _ready() -> void:
 			chart = parsed
 			read_only = chart.get("readOnly", false)
 			notation = str(chart.get("notation", "palmer"))
+			sounds = chart.get("sounds", true) == true
 		else:
 			input_valid = false
 	add_child(rig)
@@ -1116,9 +1119,37 @@ func clear_selection() -> void:
 	sheet_idle.visible = true
 	animate_sheet()
 
+## Same "porcelain tap" as the app's res/raw/tooth_tap.wav, synthesised once (no imported asset).
+func tap_sound() -> AudioStreamWAV:
+	var rate := 44100
+	var count := int(rate * 0.09)
+	var data := PackedByteArray()
+	data.resize(count * 2)
+	for i in range(count):
+		var t := float(i) / rate
+		var attack: float = min(1.0, t / 0.0015)
+		var v := 0.55 * sin(TAU * 2600.0 * t) * exp(-t / 0.018) + 0.25 * sin(TAU * 4100.0 * t) * exp(-t / 0.010) + 0.35 * sin(TAU * 190.0 * t) * exp(-t / 0.030)
+		data.encode_s16(i * 2, int(clampf(v * 0.42 * attack, -1.0, 1.0) * 32767.0))
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = false
+	stream.data = data
+	return stream
+
+func play_tap() -> void:
+	if not sounds: return
+	if tap_player == null:
+		tap_player = AudioStreamPlayer.new()
+		tap_player.stream = tap_sound()
+		tap_player.volume_db = -4.0
+		add_child(tap_player)
+	tap_player.play()
+
 func select_tooth(body: Node3D) -> void:
 	var key: String = body.get_meta("toothKey")
 	if key == selected: return
+	play_tap()
 	clear_selection()
 	selected = key
 	selected_surface = ""
