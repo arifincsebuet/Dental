@@ -522,8 +522,8 @@ class ClinicStore(private val context: Context) {
         val result = functions().getHttpsCallable("getMyRecord").call(emptyMap<String, Any>()).await().data as Map<*, *>
         portalRecord = JSONObject(result["patient"] as Map<*, *>)
         portalClinic = JSONObject(result["clinic"] as? Map<*, *> ?: emptyMap<String, Any>())
-        // Reminders are scheduled on this phone; the FCM token is kept in the patient's own document.
-        PatientReminders.schedule(context, portalRecord!!, portalClinic)
+        // Reminders come only as server pushes; the FCM token is kept in the patient's own document.
+        PatientReminders.cancelAll(context) // clears reminders scheduled on-device by older app versions
         runCatching { registerPatientDevice() }
     }
 

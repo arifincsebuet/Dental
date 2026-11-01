@@ -13,7 +13,7 @@ This directory contains deployable Cloud Functions source and restrictive Firest
 
    See [Docs/firebase_architecture.md](Docs/firebase_architecture.md) for the full design and cost controls.
 2. Set up Firestore and Cloud Storage in appropriate regions. Cloud Functions and Cloud Scheduler deployment require a billing-enabled project and the relevant Google Cloud APIs. Storage/Firestore/Functions/Scheduler/FCM delivery consume their respective service quotas; using one patient document does not make requests free.
-3. Install Node.js 22 and Firebase CLI on your development/deployment machine. In `functions`, run `npm install`. Deploy from the project root with your explicitly selected project: `firebase deploy --project YOUR_PROJECT_ID --only functions,firestore:rules,firestore:indexes,storage`.
+3. On Windows, double-click **`deploy.bat`** in the project root, or run `.\deploy.bat` from PowerShell. It installs the Firebase CLI if missing, signs you in once, installs function dependencies, runs the checks and tests, and then deploys to `dental-sm`. Use `.\deploy.bat functions`, `rules` or `indexes` for a partial deploy. Otherwise: install Node.js 22 and Firebase CLI on your development/deployment machine. In `functions`, run `npm install`. Deploy from the project root with your explicitly selected project: `firebase deploy --project YOUR_PROJECT_ID --only functions,firestore:rules,firestore:indexes,storage`.
 4. Default function region is `us-central1`. To choose another supported region, set `FUNCTION_REGION` in the Functions environment before deployment and use the same value in the Android `firebase_functions_region` resource. Place compute close to Firestore where practical.
 5. All callable functions require Firebase Authentication. Anonymous Firebase users are allowed to own their personal workspace. Optional App Check enforcement is enabled by `ENFORCE_APP_CHECK=true` after configuring the Android provider; do not turn it on before the Android app is registered for it. The backend does not need service-account keys in the Android app.
 6. Cloud Storage rules use `firestore.get` to check clinic membership; grant the cross-service rules access when prompted by Firebase deployment. Direct patient/config document reads/writes are denied. The app uses callable endpoints for role-filtered reads and commits.
@@ -124,15 +124,13 @@ How it works:
 - The server accepts only verified Google emails from the Firebase ID token.
 - To change the list, set `SUPER_ADMINS` (comma-separated) in the Functions environment and `SUPER_ADMIN_EMAILS` in `app/build.gradle.kts`.
 
-## Patient appointment reminders (no Cloud Function)
+## Patient appointment reminders (server pushes)
 
-- **Token storage:** after sign-in, the patient app writes its FCM token to `workspaces/{clinic}/patients/{patient}.patientDevices.{deviceId}`, one entry per phone and at most 5. This is a direct Firestore update allowed by `firestore.rules`: only the signed-in patient, only that field, only their own document. Sign-out deletes the entry. `commitPatient` preserves the field, and staff responses never include tokens.
-- **Delivery:** sending a push through FCM requires server credentials, which must never ship in the app. So reminders are scheduled on the patient's phone with WorkManager (24 h and 2 h before each upcoming appointment). They survive reboots and are re-planned whenever the patient opens the app, books or cancels. Patients can turn them off in the app.
-- **Admin pushes (Cloud Functions):** use drawer › **Notify patients**, or a patient's Overview › **Send notification**. Choose the recipients: patients with appointments on a day, all patients with app access, a hand-picked list, or one patient. Pick a template or write a message, then send now or schedule it.
+- **Token storage:** after sign-in, the patient app writes its FCM token to `workspaces/{clinic}/patients/{patient}.patientDevices.{deviceId}`, one entry per phone and at most 5. Firestore rules allow only the signed-in patient to update only that field of only their own document. Sign-out deletes the entry. `commitPatient` preserves the field, and staff responses never include tokens.
+- **Admin pushes:** use drawer › **Notify patients**, or a patient's Overview › **Send notification**. Choose the recipients: patients with appointments on a day, all patients with app access, a hand-picked list, or one patient. Pick a template or write a message, then send now or schedule it.
   - `queuePatientPush` delivers "send now" immediately.
-  - Scheduled messages are kept in the clinic document (`patientPushJobs`, last 100) and delivered by **`dispatchPatientPushes`**, which runs every 5 minutes and queries only clinics with a due job (`nextPatientPushAt`).
+  - Scheduled messages are kept in the clinic document (`patientPushJobs`, last 100) and delivered by **`dispatchPatientPushes`**, which runs every 5 minutes and queries only clinics with a due job.
   - `cancelPatientPush` cancels a scheduled message.
-  - Invalid tokens are removed from the patient document after each send.
-- **Automatic reminders to patients:** turn on the switch in the Notify patients dialog (`config.patientPushReminders`). The existing `dispatchClinicReminders` then also pushes each due appointment reminder to that patient's phones.
-- Only patients who signed in to the patient app and allowed notifications receive pushes. The on-device reminders above still work as a fallback.
-- Deploy the updated rules: `firebase deploy --only firestore:rules`.
+  - Invalid tokens are removed after each send.
+- **Automatic reminders:** turn on the switch in the Notify patients dialog (`config.patientPushReminders`). `dispatchClinicReminders` then also pushes each due appointment reminder to that patient's phones.
+- Patients receive reminders only as pushes. There are no reminders scheduled on the phone, and older app versions' on-device reminders are cleared on sign-in. Only patients who signed in to the patient app and allowed notifications receive them.
