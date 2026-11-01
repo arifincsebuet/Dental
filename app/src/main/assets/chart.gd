@@ -35,6 +35,9 @@ const TREATED := Color("60a5fa")
 const GUM_DEEP := Color("d4848b")
 const SULCUS := Color("c46d75")
 const PALATE := Color("e3a0a5")
+const CEMENTUM := Color("e6d2a8")
+const APEX := Color("c9ad7c")
+const FISSURE := Color("c4a57a")
 
 # --- Camera presets: [pitch, yaw, distance, arch filter] --------------------------------------
 const VIEWS := {
@@ -264,11 +267,12 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 				crown.mesh = crown_mesh(kind, dimensions, sign_y, surface_colors(state, color, position <= 3), 1.0 if patient_right else -1.0)
 				var crown_material := mat(Color(1, 1, 1, 0.5) if presence == "unerupted" else Color.WHITE, 0.18)
 				crown_material.vertex_color_use_as_albedo = true
+				apply_enamel_texture(crown_material)
 				crown.material_override = crown_material
 				body.set_meta("crownMaterial", crown_material)
 				body.add_child(crown)
 				if replacement == "implant": add_implant(body, dimensions, sign_y)
-				else: add_roots(body, kind, dimensions, sign_y, is_upper)
+				else: add_roots(body, kind, dimensions, sign_y, is_upper, position, primary, 1.0 if patient_right else -1.0)
 				add_state_markers(body, state, dimensions, sign_y)
 			else:
 				add_absent_marker(body, dimensions, sign_y)
@@ -315,6 +319,50 @@ func enamel(color: Color, level: float, kind: String) -> Color:
 	var occlusion := 0.80 + 0.20 * clampf(level / 0.35, 0.0, 1.0)
 	return Color(result.r * occlusion, result.g * occlusion, result.b * occlusion, 1.0)
 
+## Natural enamel is never uniform: a stable per-vertex brightness variation (same hash as the profile preview).
+func mottle(color: Color, p: Vector3) -> Color:
+	var n := fposmod(sin(p.x * 12.9898 + p.y * 78.233 + p.z * 37.719) * 43758.5453, 1.0)
+	var f := 0.975 + 0.05 * n
+	return Color(color.r * f, color.g * f, color.b * f, color.a)
+
+## Darker, slightly stained occlusal fissures on premolars and molars.
+func fissure_stain(color: Color, kind: String, u: float, v: float) -> Color:
+	if kind not in ["premolar", "molar"]: return color
+	var groove := exp(-v * v * 70.0)
+	if kind == "molar": groove = max(groove, exp(-u * u * 70.0) * 0.8)
+	return color.lerp(FISSURE, 0.50 * groove)
+
+## Procedural enamel micro-relief (perikymata-like streaks) and gloss variation. Generated once.
+var enamel_normal: NoiseTexture2D
+var enamel_roughness: NoiseTexture2D
+func apply_enamel_texture(material: StandardMaterial3D) -> void:
+	if enamel_normal == null:
+		var noise := FastNoiseLite.new()
+		noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		noise.frequency = 0.045
+		noise.fractal_octaves = 3
+		enamel_normal = NoiseTexture2D.new()
+		enamel_normal.width = 256
+		enamel_normal.height = 256
+		enamel_normal.seamless = true
+		enamel_normal.as_normal_map = true
+		enamel_normal.bump_strength = 1.6
+		enamel_normal.noise = noise
+		var gloss := FastNoiseLite.new()
+		gloss.frequency = 0.02
+		enamel_roughness = NoiseTexture2D.new()
+		enamel_roughness.width = 128
+		enamel_roughness.height = 128
+		enamel_roughness.seamless = true
+		enamel_roughness.noise = gloss
+	material.normal_enabled = true
+	material.normal_texture = enamel_normal
+	material.normal_scale = 0.35
+	material.roughness_texture = enamel_roughness
+	material.roughness = 0.32
+	# Stretch the noise horizontally around the crown: fine bands like perikymata.
+	material.uv1_scale = Vector3(3.0, 9.0, 1.0)
+
 func side_surface(angle: float, mesial_sign: float) -> String:
 	var c := cos(angle)
 	var s := sin(angle)
@@ -343,9 +391,11 @@ func crown_mesh(kind: String, size: Vector3, sign_y: float, colors: Dictionary =
 			var face: Color = colors.get(side_surface((a + b) * 0.5, mesial_sign), base)
 			var levels_of := [low, high, low, low, high, high]
 			var corners := [p0, p2, p1, p1, p2, p3]
+			var angles_of := [a, a, b, b, a, b]
 			for i in range(6):
 				var vertex: Vector3 = corners[i]
-				tool.set_color(enamel(face, levels_of[i], kind))
+				tool.set_color(mottle(enamel(face, levels_of[i], kind), vertex))
+				tool.set_uv(Vector2(angles_of[i] / TAU * 2.0, levels_of[i]))
 				tool.set_normal(Vector3(vertex.x / (half_x * half_x), 0.09 * sign_y, vertex.z / (half_z * half_z)).normalized())
 				tool.add_vertex(vertex)
 	# The occlusal table is a continuous custom surface with cusp and fissure relief.
@@ -360,7 +410,8 @@ func crown_mesh(kind: String, size: Vector3, sign_y: float, colors: Dictionary =
 			var top: Color = colors.get("top", base)
 			for index in [0, 1, 2, 2, 1, 3]:
 				var vertex := points[index]
-				tool.set_color(enamel(top, 1.0, kind))
+				tool.set_color(mottle(fissure_stain(enamel(top, 1.0, kind), kind, vertex.x / half_x, vertex.z / half_z), vertex))
+				tool.set_uv(Vector2(0.5 + vertex.x / size.x, 1.0 + vertex.z / size.z))
 				var epsilon := 0.006
 				var dx := (top_height(kind, (vertex.x + epsilon) / half_x, vertex.z / half_z) - top_height(kind, (vertex.x - epsilon) / half_x, vertex.z / half_z)) * size.y / (2.0 * epsilon)
 				var dz := (top_height(kind, vertex.x / half_x, (vertex.z + epsilon) / half_z) - top_height(kind, vertex.x / half_x, (vertex.z - epsilon) / half_z)) * size.y / (2.0 * epsilon)
@@ -488,27 +539,68 @@ func add_palate(tool: SurfaceTool, center_y: float, factor: float, shift: float,
 				tool.set_normal(Vector3.DOWN)
 				tool.add_vertex(quad[index])
 
-func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_upper: bool) -> void:
+## Root anatomy by tooth type: [mesial offset, facial offset (fractions of the crown half-width/depth),
+## length (× crown height), radius x, radius z (fractions), mesial tilt, facial tilt].
+func root_specs(kind: String, position: int, is_upper: bool, primary: bool) -> Array:
+	var specs: Array
+	match kind:
+		"incisor": specs = [[0.0, 0.0, 1.30 if is_upper and position == 1 else 1.20, 0.70, 0.90, 0.0, 0.0]]
+		"canine": specs = [[0.0, 0.0, 1.65, 0.70, 0.90, 0.0, 0.0]]
+		"premolar":
+			if is_upper and position == 4: specs = [[0.0, 0.42, 1.25, 0.55, 0.42, 0.0, 0.10], [0.0, -0.42, 1.20, 0.55, 0.42, 0.0, -0.10]]
+			else: specs = [[0.0, 0.0, 1.35, 0.62, 0.88, 0.0, 0.0]]
+		_:
+			if is_upper: specs = [[0.45, 0.36, 1.15, 0.38, 0.40, 0.12, 0.08], [-0.45, 0.36, 1.05, 0.36, 0.38, -0.12, 0.08], [0.0, -0.45, 1.25, 0.40, 0.42, 0.0, -0.18]]
+			else: specs = [[0.45, 0.0, 1.20, 0.40, 0.80, 0.10, 0.0], [-0.45, 0.0, 1.10, 0.38, 0.74, -0.08, 0.0]]
+	if primary:
+		for spec in specs:
+			spec[2] *= 0.8
+			spec[5] *= 1.6
+			spec[6] *= 1.6
+	return specs
+
+## Point on a root: superellipse section tapering to a rounded apex, divergent and gently curved distally.
+func root_point(spec: Array, angle: float, t: float, size: Vector3, sign_y: float, mesial_sign: float) -> Vector3:
+	var length: float = spec[2] * size.y
+	# Wide at the neck, gently narrowing, rounded apex.
+	var taper := 0.10 + 0.90 * pow(1.0 - pow(t, 1.8), 0.7)
+	var edge := boundary(angle, size.x * 0.5 * spec[3] * taper, size.z * 0.5 * spec[4] * taper, 2.4)
+	var cx: float = spec[0] * size.x * 0.5 * (1.0 - 0.25 * t) + spec[5] * length * pow(t, 1.5) - 0.06 * length * t * t
+	var cz: float = spec[1] * size.z * 0.5 * (1.0 - 0.25 * t) + spec[6] * length * pow(t, 1.5)
+	return Vector3(edge.x + cx * mesial_sign, -sign_y * (t * length - 0.02), edge.y + cz)
+
+func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_upper: bool, position: int = 1, primary: bool = false, mesial_sign: float = 1.0) -> void:
 	var root_group := Node3D.new()
 	root_group.name = "Roots"
 	root_group.visible = show_roots
 	body.add_child(root_group)
-	var count := 3 if kind == "molar" and is_upper else 2 if kind == "molar" or kind == "premolar" else 1
-	for index in range(count):
-		var root := MeshInstance3D.new()
-		var cylinder := CylinderMesh.new()
-		var wide := size.x * (0.30 if count == 1 else 0.20)
-		# The wide end always meets the crown at the cervical line; the apex points away.
-		cylinder.top_radius = wide if sign_y > 0 else 0.035
-		cylinder.bottom_radius = 0.035 if sign_y > 0 else wide
-		cylinder.height = size.y * (1.35 if kind == "canine" else 1.1)
-		cylinder.radial_segments = 18
-		cylinder.rings = 3
-		root.mesh = cylinder
-		root.position = Vector3((float(index) - (count - 1) * 0.5) * size.x * 0.34, -sign_y * cylinder.height * 0.5, 0)
-		root.rotation.z = (float(index) - (count - 1) * 0.5) * 0.14 * sign_y
-		root.material_override = mat(Color("ecd8b4"), 0.5)
-		root_group.add_child(root)
+	var tool := SurfaceTool.new()
+	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var segments := 18
+	var rings := 10
+	for spec in root_specs(kind, position, is_upper, primary):
+		for ring in range(rings):
+			for segment in range(segments):
+				var a := TAU * segment / segments
+				var b := TAU * (segment + 1) / segments
+				var t0 := float(ring) / rings
+				var t1 := float(ring + 1) / rings
+				var corners := [root_point(spec, a, t0, size, sign_y, mesial_sign), root_point(spec, a, t1, size, sign_y, mesial_sign), root_point(spec, b, t0, size, sign_y, mesial_sign),
+					root_point(spec, b, t0, size, sign_y, mesial_sign), root_point(spec, a, t1, size, sign_y, mesial_sign), root_point(spec, b, t1, size, sign_y, mesial_sign)]
+				var ts := [t0, t1, t0, t0, t1, t1]
+				for i in range(6):
+					var vertex: Vector3 = corners[i]
+					tool.set_color(mottle(CEMENTUM.lerp(APEX, pow(ts[i], 2.0)), vertex))
+					# Normal from the root's own (curved) axis at this height.
+					var center := root_point(spec, 0.0, ts[i], size, sign_y, mesial_sign).lerp(root_point(spec, PI, ts[i], size, sign_y, mesial_sign), 0.5)
+					tool.set_normal((vertex - center).normalized())
+					tool.add_vertex(vertex)
+	var root := MeshInstance3D.new()
+	root.mesh = tool.commit()
+	var material := mat(Color.WHITE, 0.55)
+	material.vertex_color_use_as_albedo = true
+	root.material_override = material
+	root_group.add_child(root)
 
 func add_implant(body: Node3D, size: Vector3, sign_y: float) -> void:
 	var titanium := mat(Color("9aa8b0"), 0.22)

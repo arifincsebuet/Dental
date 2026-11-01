@@ -97,6 +97,9 @@ The profile preview (`Teeth3DView.kt`) is a line-for-line port of the Godot gene
 - the alveolar-ridge gingiva, with papillae between the teeth, and the domed upper palate
 - the camera: 40° FOV, raised by 0.30 × distance, distance 12, intro swing from −0.6 rad
 
+- anatomical roots: one, two or three roots by tooth type, tapered, divergent and distally curved, in cementum colour. Godot's Roots toggle and the preview's X-ray button show them through translucent gum.
+- enamel mottling and stained occlusal fissures. Godot also adds a procedural micro-relief normal map and gloss texture.
+
 Changes to one must be made in the other.
 
 ### Inline 3D on profiles
