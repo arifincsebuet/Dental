@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "199381444458",
+    "project_id": "dental-sm",
+    "storage_bucket": "dental-sm.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:199381444458:android:d539e7451689d9b7d16713",
+        "android_client_info": {
+          "package_name": "com.spala.dental"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "199381444458-du0o7u7udp2puv9kstbr8jfmmg4u48h2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.spala.dental",
+            "certificate_hash": "8ec3d5ed4b2a7adb045133ab64f99e38e34d881b"
+          }
+        },
+        {
+          "client_id": "199381444458-httpe05m186iln2mqbu7re6ihoi3njfp.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.spala.dental",
+            "certificate_hash": "07742273d064eca761d8d44e51153fe40f4498bd"
+          }
+        },
+        {
+          "client_id": "199381444458-ui4s1hecjra1j2ia3hjlulevmgr8ovo7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMYDVioONQhff7nNIW5lAVzhc74CeWPug"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "199381444458-ui4s1hecjra1j2ia3hjlulevmgr8ovo7.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
