@@ -368,7 +368,8 @@ exports.updateClinic = onCall(callOptions, async request => {
   const clinicId = identifier(data.clinicId || uid, "clinic ID"); const operationId = identifier(data.operationId, "operation ID");
   assert(Number.isSafeInteger(data.expectedRevision) && data.expectedRevision >= 0, "Invalid expected revision");
   const config = clone(object(data.config, "clinic config"));
-  keysOnly(config, ["name", "timeZone", "currency", "members", "staff", "services", "settings", "taxBps", "bufferMinutes", "reminderHours", "remindersEnabled", "quietStart", "quietEnd", "phone", "address", "numberingSystem"], "clinic config");
+  keysOnly(config, ["name", "timeZone", "currency", "members", "staff", "services", "settings", "taxBps", "bufferMinutes", "reminderHours", "remindersEnabled", "quietStart", "quietEnd", "phone", "address", "numberingSystem", "availability", "patientBooking"], "clinic config");
+  validateAvailability(config.availability || []);
   text(config.name, "clinic name", 200); assert(config.name.trim(), "Clinic name is required");
   assert(typeof config.currency === "string" && /^[A-Z]{3}$/.test(config.currency), "Invalid clinic currency");
   try { new Intl.DateTimeFormat("en", { timeZone: config.timeZone }).format(); } catch (_) { fail("Invalid clinic time zone"); }
@@ -820,3 +821,130 @@ exports.verifySubscription = onCall(callOptions, async request => {
   else await ref.set({ config: defaultConfig(clinicId), revision: 0, billing, subscription });
   return { subscription: publicSubscription({ subscription }) };
 });
+
+
+// ---------------------------------------------------------------------------------------------
+// Appointment slots. Admins define availability sessions (doctor, dates/weekdays, hours, slot
+// length) inside the clinic config; individual slots are computed, never stored. A slot is free
+// when no active appointment of that doctor overlaps it (checked against the clinic scheduleIndex).
+// ---------------------------------------------------------------------------------------------
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+function minutes(value) { const [h, m] = value.split(":").map(Number); return h * 60 + m; }
+function validateAvailability(sessions) {
+  array(sessions, "availability", 300); uniqueIds(sessions, "availability");
+  for (const session of sessions) {
+    keysOnly(session, ["id", "doctor", "room", "startDate", "endDate", "weekdays", "start", "end", "slotMinutes", "active", "note"], "availability session");
+    assert(typeof session.doctor === "string" && session.doctor.trim() && session.doctor.length <= 200, "Availability needs a doctor");
+    assert(YMD.test(session.startDate) && YMD.test(session.endDate) && session.endDate >= session.startDate, "Availability dates must be YYYY-MM-DD, end on or after start");
+    assert(HHMM.test(session.start) && HHMM.test(session.end) && minutes(session.end) > minutes(session.start), "Availability hours must be HH:mm with end after start");
+    assert(Number.isInteger(session.slotMinutes) && session.slotMinutes >= 5 && session.slotMinutes <= 240, "Slot length must be 5–240 minutes");
+    assert(Array.isArray(session.weekdays || []) && (session.weekdays || []).every(day => Number.isInteger(day) && day >= 1 && day <= 7), "Weekdays must be 1 (Mon)–7 (Sun)");
+    if (session.room !== undefined) text(session.room, "room", 200);
+  }
+}
+function addDays(ymd, days) { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
+function isoWeekday(ymd) { const day = new Date(`${ymd}T12:00:00Z`).getUTCDay(); return day === 0 ? 7 : day; }
+/** All slots of one date with availability, using the clinic schedule index for "booked". */
+function slotsFor(clinic, date, now) {
+  const zone = clinic.config.timeZone || "UTC";
+  const index = clinic.scheduleIndex || [];
+  const out = [];
+  for (const session of clinic.config.availability || []) {
+    if (session.active === false || date < session.startDate || date > session.endDate) continue;
+    if ((session.weekdays || []).length && !session.weekdays.includes(isoWeekday(date))) continue;
+    for (let t = minutes(session.start); t + session.slotMinutes <= minutes(session.end); t += session.slotMinutes) {
+      const time = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+      let startAt; try { startAt = localTime(`${date} ${time}`, zone); } catch (_) { continue; }
+      const endAt = startAt + session.slotMinutes * 60000;
+      const doctor = session.doctor.trim();
+      const booked = index.some(item => item.clinician.toLowerCase() === doctor.toLowerCase() && item.startAt < endAt && startAt < item.endAt);
+      out.push({ sessionId: session.id, doctor, room: session.room || "", date, time, startAt, endAt, durationMinutes: session.slotMinutes, available: !booked && startAt > now });
+    }
+  }
+  return out.sort((a, b) => a.startAt - b.startAt || a.doctor.localeCompare(b.doctor));
+}
+
+async function slotCaller(request) {
+  const uid = actor(request);
+  const token = request.auth.token;
+  if (token.role === "patient") return { uid, clinicId: identifier(token.clinicId, "clinic ID"), patientId: identifier(token.patientId, "patient ID"), patient: true };
+  const clinicId = identifier(request.data.clinicId || uid, "clinic ID");
+  return { uid, clinicId, patient: false };
+}
+
+/** Slots for up to 42 days from `from` (one clinic read; no names of other patients are returned). */
+exports.getSlots = onCall(callOptions, async request => {
+  const caller = await slotCaller(request);
+  const from = String(request.data.from || ""); assert(YMD.test(from), "from must be YYYY-MM-DD");
+  const days = request.data.days === undefined ? 31 : request.data.days;
+  assert(Number.isInteger(days) && days >= 1 && days <= 42, "days must be 1–42");
+  const snapshot = await db.doc(`workspaces/${caller.clinicId}`).get();
+  const clinic = snapshot.exists ? snapshot.data() : { config: defaultConfig(caller.clinicId) };
+  if (!caller.patient) roleFor(caller.clinicId, caller.uid, snapshot.exists ? clinic : null);
+  const now = Date.now(); const slots = [];
+  for (let i = 0; i < days; i++) slots.push(...slotsFor(clinic, addDays(from, i), now));
+  return { slots, timeZone: clinic.config.timeZone || "UTC", patientBooking: clinic.config.patientBooking !== false };
+});
+
+/** Patient self-booking of a free slot: one transaction on the clinic and the patient's own document. */
+exports.bookSlot = onCall(callOptions, async request => {
+  const caller = await slotCaller(request);
+  assert(caller.patient, "Staff book slots from the clinic app", "permission-denied");
+  const startAt = request.data.startAt; assert(Number.isSafeInteger(startAt), "Choose a slot");
+  const doctor = text(request.data.doctor, "doctor", 200).trim();
+  const reason = text(request.data.reason || "Check-up", "reason", 500).trim() || "Check-up";
+  const clinicRef = db.doc(`workspaces/${caller.clinicId}`);
+  const patientRef = db.doc(`workspaces/${caller.clinicId}/patients/${caller.patientId}`);
+  return db.runTransaction(async tx => {
+    const [clinicSnap, patientSnap] = await Promise.all([tx.get(clinicRef), tx.get(patientRef)]);
+    assert(clinicSnap.exists && patientSnap.exists, "Your record is not available", "not-found");
+    const clinic = clinicSnap.data(); const patient = patientSnap.data(); const now = Date.now();
+    assert(clinic.config.patientBooking !== false, "Online booking is turned off for this clinic", "failed-precondition");
+    const date = new Intl.DateTimeFormat("sv-SE", { timeZone: clinic.config.timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(startAt));
+    const slot = slotsFor(clinic, date, now).find(item => item.startAt === startAt && item.doctor.toLowerCase() === doctor.toLowerCase());
+    assert(slot, "That slot is not offered", "not-found");
+    assert(slot.available, "That slot was just taken. Please choose another time.", "already-exists");
+    const upcoming = (patient.appointments || []).filter(a => ["scheduled", "confirmed"].includes(normalized(a.status)) && (a.startAt || 0) > now);
+    assert(upcoming.length < 3, "You already have 3 upcoming appointments. Contact the clinic to book more.", "resource-exhausted");
+    const appointment = { id: `apt-${createHash("sha256").update(`${caller.patientId}:${startAt}:${now}`).digest("hex").slice(0, 20)}`,
+      date: `${slot.date} ${slot.time}`, startAt: slot.startAt, durationMinutes: slot.durationMinutes, doctor: slot.doctor, room: slot.room,
+      reason, status: "Scheduled", bookedBy: "patient", bookedAt: now, reminderEnabled: clinicSetting(clinic, "remindersEnabled", false) === true, consent: patient.communicationConsent === true };
+    patient.appointments = [...(patient.appointments || []), appointment];
+    return commitSelfService(tx, clinicRef, patientRef, clinic, patient, caller, now, `Appointment booked by patient: ${slot.date} ${slot.time} with ${slot.doctor}`, { appointment });
+  });
+});
+
+/** Patient cancels one of their own upcoming appointments (at least 2 hours ahead). */
+exports.cancelMyAppointment = onCall(callOptions, async request => {
+  const caller = await slotCaller(request);
+  assert(caller.patient, "Patient login required", "permission-denied");
+  const appointmentId = identifier(request.data.appointmentId, "appointment ID");
+  const clinicRef = db.doc(`workspaces/${caller.clinicId}`);
+  const patientRef = db.doc(`workspaces/${caller.clinicId}/patients/${caller.patientId}`);
+  return db.runTransaction(async tx => {
+    const [clinicSnap, patientSnap] = await Promise.all([tx.get(clinicRef), tx.get(patientRef)]);
+    assert(clinicSnap.exists && patientSnap.exists, "Your record is not available", "not-found");
+    const clinic = clinicSnap.data(); const patient = patientSnap.data(); const now = Date.now();
+    const appointment = (patient.appointments || []).find(item => item.id === appointmentId);
+    assert(appointment && ["scheduled", "confirmed"].includes(normalized(appointment.status)), "Appointment not found", "not-found");
+    assert((appointment.startAt || 0) - now >= 2 * 3600000, "Appointments can be cancelled in the app up to 2 hours before. Please call the clinic.", "failed-precondition");
+    appointment.status = "Cancelled"; appointment.cancelledBy = "patient"; appointment.cancelledAt = now;
+    return commitSelfService(tx, clinicRef, patientRef, clinic, patient, caller, now, `Appointment cancelled by patient: ${appointment.date}`, { appointment });
+  });
+});
+
+/** Shared write for patient self-service: revision, history, audit, schedule index and reminders. */
+function commitSelfService(tx, clinicRef, patientRef, clinic, patient, caller, now, action, result) {
+  const revision = (patient.revision || 0) + 1;
+  const scheduleIndex = scheduling(patient, caller.clinicId, clinic, now);
+  const jobs = reminderJobs(patient, clinic, scheduleIndex, now);
+  patient.history = [...(patient.history || []), { id: `self-${revision}-${now}`, at: now, text: action, actor: caller.uid, recordedAt: now, source: "patient-app", revision }];
+  patient.audit = [...(patient.audit || []), { id: `self-${revision}-${now}`, actor: caller.uid, at: now, revision, action: "patient_self_service", changedFields: ["appointments"] }];
+  patient.revision = revision; patient.updatedAt = now; patient.updatedBy = caller.uid;
+  const nextClinic = { ...clinic, scheduleIndex, reminderJobs: jobs, nextReminderAt: nextReminder(jobs) };
+  sizeGuard(patient); sizeGuard(nextClinic);
+  tx.set(patientRef, patient); tx.set(clinicRef, nextClinic);
+  return { ...result, revision };
+}

@@ -106,3 +106,10 @@ How it works:
 - **Without an active subscription:** staff see the paywall. Only the owner or an admin can subscribe. Patient logins are never blocked.
 - **Debug builds** skip the paywall so you can test features.
 - **Offline mode** (no Firebase): the purchase is acknowledged on the device and checked from the device's Play purchases.
+
+## Appointment slots
+
+- **Creating availability (admins):** Schedule › Calendar › **Manage slots**. Each availability entry sets a doctor, a date range, weekdays, start and end time, slot length and an optional room. It's stored in the clinic document as `config.availability` (at most 300 entries). Slots are computed from it and never stored individually, so there are no per-slot documents.
+- **The calendar:** a month calendar marks days with free slots (green) and fully booked days (grey). Picking a day lists its slots by doctor. Staff see who booked each slot and can tap a free slot to book any patient, searching by name, phone or Patient ID.
+- **Patient booking:** patients book from the patient app (`getSlots` makes 1 read; `bookSlot` is one transaction on the clinic and patient documents). The server re-checks the slot is still free, so two people can't take the same time. Patients may hold up to 3 upcoming bookings and can cancel up to 2 hours before (`cancelMyAppointment`). Online booking can be turned off in Manage slots (`config.patientBooking`).
+- **After changing availability,** Sync so patients see it.

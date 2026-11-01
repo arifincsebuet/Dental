@@ -482,6 +482,35 @@ class ClinicStore(private val context: Context) {
         portalClinic = JSONObject(result["clinic"] as? Map<*, *> ?: emptyMap<String, Any>())
     }
 
+    /** Free/booked slots for the patient app (getSlots: one clinic read, no other patients' names). */
+    var portalSlots by mutableStateOf<List<JSONObject>>(emptyList()); private set
+    var portalBookingEnabled by mutableStateOf(true); private set
+
+    fun loadSlots(from: java.time.LocalDate) {
+        scope.launch { runCatching {
+            val result = functions().getHttpsCallable("getSlots").call(mapOf("from" to from.toString(), "days" to 42)).await().data as Map<*, *>
+            portalSlots = (result["slots"] as? List<*>).orEmpty().map { JSONObject(it as Map<*, *>) }
+            portalBookingEnabled = result["patientBooking"] != false
+        }.onFailure { message = it.localizedMessage ?: "Could not load appointment slots" } }
+    }
+
+    fun bookSlot(startAt: Long, doctor: String, reason: String, done: (String?) -> Unit) = selfService("bookSlot", mapOf("startAt" to startAt, "doctor" to doctor, "reason" to reason), "Appointment booked", done)
+    fun cancelMyAppointment(appointmentId: String, done: (String?) -> Unit) = selfService("cancelMyAppointment", mapOf("appointmentId" to appointmentId), "Appointment cancelled", done)
+    private fun selfService(name: String, data: Map<String, Any>, success: String, done: (String?) -> Unit) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val error = runCatching {
+                functions().getHttpsCallable(name).call(data).await()
+                loadMyRecord()
+                portalSlots.firstOrNull()?.optString("date")?.let { loadSlots(java.time.LocalDate.parse(it)) }
+                message = success
+            }.exceptionOrNull()?.localizedMessage
+            busy = false
+            done(error)
+        }
+    }
+
     fun refreshMyRecord() = operation { loadMyRecord(); message = "Your record is up to date" }
 
     /** Patient changes the temporary (or current) password; Firebase requires recent authentication. */

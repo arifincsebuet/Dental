@@ -131,6 +131,7 @@ fun PatientPortalScreen(store: ClinicStore) {
     val record = store.portalRecord
     var focus by rememberSaveable { mutableStateOf<String?>(null) }
     var changing by remember { mutableStateOf(false) }
+    var cancelling by remember { mutableStateOf<JSONObject?>(null) }
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
         TopAppBar(title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -174,12 +175,18 @@ fun PatientPortalScreen(store: ClinicStore) {
             SectionHeader("Upcoming appointments")
             if (upcoming.isEmpty()) SurfaceCard(background = SurfaceTint) { Text("No upcoming appointments.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
             upcoming.forEach { a ->
+                val startAt = runCatching { ClinicalRules.appointmentMillis(a, store.portalClinic) }.getOrDefault(0L)
                 SurfaceCard(padding = 14.dp) {
-                    Text(runCatching { ClinicalRules.displayTime(ClinicalRules.appointmentMillis(a, store.portalClinic), store.portalClinic) }.getOrDefault(a.optString("date")),
-                        style = MaterialTheme.typography.titleSmall, color = Ink)
-                    Text(listOf(a.optString("doctor"), a.optString("reason")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(runCatching { ClinicalRules.displayTime(startAt, store.portalClinic) }.getOrDefault(a.optString("date")), style = MaterialTheme.typography.titleSmall, color = Ink)
+                            Text(listOf(a.optString("doctor"), a.optString("reason")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                        }
+                        if (startAt - now >= 2 * 3_600_000L) TextButton(onClick = { cancelling = a }, enabled = !store.busy) { Text("Cancel", color = Rose600) }
+                    }
                 }
             }
+            PatientBookingSection(store)
             val invoices = record.optJSONArray("invoices").objectList()
             if (invoices.isNotEmpty()) {
                 val currency = store.portalClinic.optString("currency", "BDT")
@@ -193,6 +200,12 @@ fun PatientPortalScreen(store: ClinicStore) {
                 OutlinedButton(onClick = { changing = true }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Change password") }
             }
         }
+    }
+    cancelling?.let { appointment ->
+        AlertDialog(onDismissRequest = { cancelling = null }, title = { Text("Cancel appointment?") },
+            text = { Text("${appointment.optString("date")} with ${appointment.optString("doctor")}. The slot becomes free for others.") },
+            confirmButton = { TextButton(onClick = { store.cancelMyAppointment(appointment.optString("id")) { cancelling = null } }) { Text("Cancel appointment", color = Rose600) } },
+            dismissButton = { TextButton(onClick = { cancelling = null }) { Text("Keep") } })
     }
     if (store.mustChangePassword) ChangePasswordDialog(store, forced = true) {}
     else if (changing) ChangePasswordDialog(store, forced = false) { changing = false }
