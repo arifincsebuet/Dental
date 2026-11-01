@@ -167,7 +167,7 @@ private val GuideArticles = listOf(
         "Keep the profile and clinical story with the correct person.",
         listOf(
             "Open Patients and search by name or phone. Select the patient to open Overview.",
-            "Use Edit profile to correct demographics and medical alerts where your role allows it. Dates of birth use YYYY-MM-DD.",
+            "Use Edit profile to correct demographics and medical alerts where your role allows it. Tap Date of birth to pick it from the calendar.",
             "Use Update clinical story for the patient's clinical narrative. Review the selected name before saving a change.",
             "Archive patient requires a reason and keeps the record. Use Include archived patients in the patient list to find it again, then Restore patient if appropriate."
         ),
@@ -238,7 +238,7 @@ private val GuideArticles = listOf(
         listOf(
             "Open Schedule. Choose Day, Week, Month, or All and use the calendar date, Previous, Today, or Next controls.",
             "Choose Book appointment and select the patient. Enter the clinician, date and time, duration, room if used, and reason or service.",
-            "Use YYYY-MM-DD HH:mm in the clinic time zone. Review any clinician or room conflict, including the clinic buffer, before saving.",
+            "Tap Date & time to pick the day on the calendar, then the time on the clock (clinic time zone). Review any clinician or room conflict, including the clinic buffer, before saving.",
             "Choose Reschedule / edit on an active appointment to change its details.",
             "Use the available status actions to confirm, check in, start, complete, cancel, or record a no-show. Open patient takes you back to the associated record."
         ),
@@ -272,7 +272,7 @@ private val GuideArticles = listOf(
         "Compare activity and finances for the selected reporting period.",
         listOf(
             "Open Reports and choose Day, Week, Month, Custom, or All.",
-            "For Custom, enter the first and last date as YYYY-MM-DD. The last date is included.",
+            "For Custom, pick the first and last dates on the calendar. The last date is included.",
             "Read billed amounts, payments received, refunds, net cash, and outstanding balances separately. Currency totals are shown separately.",
             "Review appointment states, clinician workload, and treatment activity below the financial totals.",
             "Choose Share financial report CSV to share the displayed financial report."

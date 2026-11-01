@@ -64,7 +64,7 @@ private fun shareText(context: Context, title: String, text: String, type: Strin
         var error by remember { mutableStateOf("") }
         AlertDialog(onDismissRequest = dismiss, title = { Text(active.title) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                active.fields.forEach { field -> OutlinedTextField(value = values[field.key].orEmpty(), onValueChange = { values[field.key] = it }, label = { Text(field.label) }, modifier = Modifier.fillMaxWidth()) }
+                active.fields.forEach { field -> if (field.label.endsWith("HH:mm")) TimeField(values[field.key].orEmpty(), { values[field.key] = it }, field.label.removeSuffix(" HH:mm")) else OutlinedTextField(value = values[field.key].orEmpty(), onValueChange = { values[field.key] = it }, label = { Text(field.label) }, modifier = Modifier.fillMaxWidth()) }
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             }
         }, confirmButton = { TextButton(onClick = {
@@ -297,7 +297,7 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
     var error by remember { mutableStateOf("") }
     FeatureHeading("Appointments", "Clinic time zone · ${config.optString("timeZone", "Asia/Dhaka")}")
     FeatureChoices(listOf("Day", "Week", "Month", "All"), period) { period = it }
-    OutlinedTextField(reference, { reference = it }, label = { Text("Calendar date YYYY-MM-DD") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    DateField(reference, { reference = it }, "Calendar date", today = LocalDate.now(ClinicalRules.zone(config)))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).minusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("‹ Previous", maxLines = 1) }
         OutlinedButton(onClick = { reference = LocalDate.now(ClinicalRules.zone(config)).toString() }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Today", maxLines = 1) }
@@ -369,7 +369,7 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
             Text(patient.optString("name"), fontWeight = FontWeight.SemiBold)
             if (clinicians.isNotEmpty()) FeatureChoices(clinicians.map { it.optString("name") }, doctor) { doctor = it }
             OutlinedTextField(doctor, { doctor = it }, label = { Text("Clinician") })
-            OutlinedTextField(date, { date = it }, label = { Text("YYYY-MM-DD HH:mm · clinic time") })
+            DateTimeField(date, { date = it }, "Date & time (clinic time)", today = LocalDate.now(ClinicalRules.zone(config)))
             OutlinedTextField(duration, { duration = it }, label = { Text("Duration minutes") })
             OutlinedTextField(room, { room = it }, label = { Text("Room / chair (optional)") })
             OutlinedTextField(reason, { reason = it }, label = { Text("Reason / service") })
@@ -395,7 +395,7 @@ fun AdvancedReportsScreen(patients: List<JSONObject>, config: JSONObject) {
     var period by remember { mutableStateOf("Month") }; var start by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).withDayOfMonth(1).toString()) }; var end by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).toString()) }
     FeatureHeading("Practice reports", "Payment dates and clinic time zone determine the reporting period")
     FeatureChoices(listOf("Day", "Week", "Month", "Custom", "All"), period) { period = it }
-    if (period == "Custom") { OutlinedTextField(start, { start = it }, label = { Text("From YYYY-MM-DD") }); OutlinedTextField(end, { end = it }, label = { Text("To YYYY-MM-DD, inclusive") }) }
+    if (period == "Custom") { DateField(start, { start = it }, "From", today = LocalDate.now(ClinicalRules.zone(config))); DateField(end, { end = it }, "To (inclusive)", today = LocalDate.now(ClinicalRules.zone(config))) }
     val rangeResult = runCatching { ClinicalRules.range(period, start, end, config) }
     val range = rangeResult.getOrNull()
     if (range == null) { Text(rangeResult.exceptionOrNull()?.localizedMessage ?: "Review the date range", color = MaterialTheme.colorScheme.error); return }
