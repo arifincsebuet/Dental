@@ -2,4 +2,14 @@
 <resources>
 
     <style name="Theme.Dental" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- 3D chart host: the window shows the chart's own background while Godot starts,
+         so the transition never flashes black or shows an engine logo. -->
+    <style name="Theme.Dental.Chart" parent="Theme.Dental">
+        <item name="android:windowBackground">@color/chart_background</item>
+        <item name="android:statusBarColor">@color/chart_background</item>
+        <item name="android:navigationBarColor">@color/chart_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Activity</item>
+    </style>
 </resources>

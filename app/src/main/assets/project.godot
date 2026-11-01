@@ -3,6 +3,10 @@ config_version=5
 [application]
 config/name="Dental Care Chart"
 run/main_scene="res://chart.tscn"
+config/quit_on_go_back=false
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.961,0.984,0.988,1)
+boot_splash/minimum_display_time=0
 
 [display]
 window/size/viewport_width=1080

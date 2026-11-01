@@ -62,6 +62,31 @@ Godot 4.5.1 Android library hosts the source project directly from `app/src/main
 
 The full-screen chart uses a studio sky and lighting, and its camera eases toward its target with inertia. A view switcher offers Front, Upper occlusal, Lower occlusal, Left and Right presets. A floating rail holds zoom, tooth-number and root controls; turning roots on also makes the gingiva translucent. A bottom sheet first shows the arch filter and legend. After a tooth is tapped, it shows the tooth name, status chips, an M/D/F/L/O surface pad laid out like an odontogram, and one primary "Assess" action. The bridge contract (`chart`, `selectTooth`, `selectSurface`, `closeChart`) is unchanged.
 
+### Process isolation, loading and Back
+
+`Dental3DActivity` runs in its own `:chart3d` process. Godot force-quits its host process when its activity is destroyed, which previously closed the whole app on Back or after a tooth was chosen. The boot splash image is disabled. The chart window uses the chart background colour, and `chart.gd` fades out a "Preparing 3D chart…" overlay after the meshes are built. Back clears a selected tooth first and then returns to the profile (`quit_on_go_back=false`).
+
+### Tooth numbering
+
+Records always use canonical FDI keys. Display numbering is a device setting in Settings › Tooth numbering:
+- **Palmer** (default): 1–8 / A–E per quadrant, e.g. UR6.
+- **FDI**: e.g. 16.
+- **Universal**: 1–32 / A–T, e.g. #3.
+
+The setting applies to the inline model, the Godot chart (passed as a whitelisted `notation` field), the 2D odontogram, the history list and the dialogs.
+
+### Treatment history and roles
+
+The patient profile opens on the 3D model. Teeth are tinted by their full history: blue for treated, amber for findings, a teal + for planned care and a cross for loss. Below the model is a vertical per-tooth history list built from treatments, performed procedures and chart findings (`TreatmentHistory.kt`). Tapping a row expands its timeline and highlights the tooth; tapping a tooth on the model opens its row.
+
+Only `owner`, `admin`, `administrator` and `dentist` roles can record treatment, for one tooth or a selected set of teeth. Each tooth gets its own treatment item with a shared `groupId`. Completed care also writes a performed-procedure record and its coded chart outcome:
+- filling, crown, inlay, onlay or sealant adds a restoration code
+- extraction records the tooth as extracted
+- a root canal adds the `endodontically_treated` finding
+- an implant on a lost tooth records the implant replacement
+
+Other roles get a read-only model and history, and the Godot chart opens read-only for them.
+
 ### Inline 3D on profiles
 
 `Teeth3DView.kt` is a small Compose software renderer. It uses smooth-shaded triangles, a painter's sort and `Canvas.drawVertices`. It draws the same schema-2 chart snapshot directly inside the patient profile, as the first clinical card, and inside the doctor profile, using a neutral reference dentition. Only one Godot engine may run per process, so Godot cannot be embedded in scrolling screens. The inline model supports rotate, pinch zoom, double-tap reset, optional tooth numbers and tap-to-select, and selection opens the native tooth editor. Status colours match the Godot chart: amber for findings, blue for restorations, a teal "+" for planned care and a slate cross for recorded loss.

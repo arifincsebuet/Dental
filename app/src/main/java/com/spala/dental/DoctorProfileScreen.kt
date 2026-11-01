@@ -71,18 +71,18 @@ fun DoctorProfileScreen(
         chart = reference,
         title = "Clinical model",
         subtitle = "Reference dentition · tap a tooth to identify it",
-        selectedTooth = tooth,
+        selectedTeeth = setOfNotNull(tooth),
         onToothTap = { tooth = if (tooth == it) null else it },
     ) {
         val selected = tooth
         if (selected != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Teal500, Teal700))), contentAlignment = Alignment.Center) {
-                    Text(selected, color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(ToothNotation.label(selected), color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(toothName(selected), style = MaterialTheme.typography.titleSmall, color = Ink)
-                    Text("FDI $selected · ${if (selected[1].digitToInt() <= 3) "Anterior" else "Posterior"} · ${if (selected[0] in "12") "Maxillary" else "Mandibular"} arch",
+                    Text("${if (ToothNotation.current == ToothNotation.FDI) "" else "FDI $selected · "}${if (selected[1].digitToInt() <= 3) "Anterior" else "Posterior"} · ${if (selected[0] in "1256") "Maxillary" else "Mandibular"} arch",
                         style = MaterialTheme.typography.bodySmall, color = InkMuted)
                 }
                 TextButton(onClick = { tooth = null }) { Text("Clear") }

@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private val store by lazy { (application as ClinicApplication).store }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ToothNotation.load(this)
         setContent {
             DentalTheme {
                 CompositionLocalProvider(LocalEditorSaveStatus provides { EditorSaveStatus(store.saveSequence, store.saveError) }) {
@@ -78,14 +79,22 @@ private fun ClinicApp(store: ClinicStore) {
     var showArchived by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<Form?>(null) }
     var tooth by remember { mutableStateOf<String?>(null) }
-    var heroTooth by rememberSaveable(patientId) { mutableStateOf<String?>(null) }
+    // Tooth focused on the 3D model / expanded in the history list, and multi-tooth selection mode.
+    var focusTooth by rememberSaveable(patientId) { mutableStateOf<String?>(null) }
+    var selecting by rememberSaveable(patientId) { mutableStateOf(false) }
+    val selection = remember(patientId) { mutableStateListOf<String>() }
+    var recordTeeth by remember { mutableStateOf<List<String>?>(null) }
+    var recordSurface by remember { mutableStateOf("") }
     var chartPatientId by rememberSaveable { mutableStateOf<String?>(null) }
     var chartToken by rememberSaveable { mutableStateOf("") }
     var toothSurface by remember { mutableStateOf("") }
     val chartLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK && patientId == chartPatientId) {
             val token = result.data?.getStringExtra("sessionToken")
-            if (token == chartToken && result.data?.getLongExtra("chartVersion", -1) == store.patients.firstOrNull { it.optString("id") == patientId }?.optJSONObject("chart")?.optLong("chartVersion")) { tooth = result.data?.getStringExtra("tooth"); toothSurface = result.data?.getStringExtra("surface").orEmpty() }
+            if (token == chartToken && canEditClinical(store.currentRole) && result.data?.getLongExtra("chartVersion", -1) == store.patients.firstOrNull { it.optString("id") == patientId }?.optJSONObject("chart")?.optLong("chartVersion")) {
+                // A tooth chosen in the full 3D chart opens the treatment recorder for it.
+                result.data?.getStringExtra("tooth")?.let { key -> recordTeeth = listOf(key); recordSurface = result.data?.getStringExtra("surface").orEmpty(); focusTooth = key }
+            }
         }
     }
     var explanation by remember { mutableStateOf(false) }
@@ -127,6 +136,8 @@ private fun ClinicApp(store: ClinicStore) {
     /** Every 3D launch gets a fresh session token so stale results from an earlier chart are ignored. */
     fun open3D(p: JSONObject, chart: JSONObject) {
         chartPatientId = p.optString("id"); chartToken = uid()
+        chart.put("notation", ToothNotation.current)
+        if (!canEditClinical(store.currentRole)) chart.put("readOnly", true)
         chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
     }
     fun openPatient(id: String) { patientId = id; tab = "Overview" }
@@ -179,42 +190,75 @@ private fun ClinicApp(store: ClinicStore) {
                 TextButton(onClick = { patientId = null }, contentPadding = PaddingValues(horizontal = 4.dp)) {
                     GlyphIcon(Glyph.Back, Teal700, 18.dp); Spacer(Modifier.width(4.dp)); Text(if (doctor != null) "Back to ${doctor.optString("name")}" else "Patients")
                 }
-                PatientHeader(p)
-                if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy, modifier = Modifier.fillMaxWidth()) { Text("Review conflict · retain draft and load server version") }
-                // The 3D model is the first clinical element of the profile.
+                val canEdit = canEditClinical(store.currentRole)
+                // First view: the patient's 3D dentition, coloured by their full treatment history.
                 if (p.has("chart")) {
-                    val chart = p.obj("chart")
-                    val summary = chartCounts(chart)
+                    val signature = p.toString() + ToothNotation.current
+                    val view = remember(signature) { displayChart(p) }
+                    val records = remember(signature) { toothRecords(p) }
+                    val highlighted = if (selecting) selection.toSet() else setOfNotNull(focusTooth)
                     Teeth3DHeroCard(
-                        chart = chart,
-                        title = "Smile overview",
-                        subtitle = "${chart.optString("dentition", "permanent").replaceFirstChar { it.uppercase() }} dentition · revision ${chart.optLong("chartVersion")}",
-                        selectedTooth = heroTooth,
-                        onToothTap = { key -> heroTooth = if (heroTooth == key) null else key },
-                        onOpenFull = { open3D(p, JSONObject(chart.toString())) },
+                        chart = view,
+                        title = p.optString("name"),
+                        subtitle = listOfNotNull(ageText(p.optString("dob")), "${view.optString("dentition", "permanent").replaceFirstChar { it.uppercase() }} dentition",
+                            "${records.count { it.completed > 0 }} teeth treated").joinToString(" · "),
+                        selectedTeeth = highlighted,
+                        onToothTap = { key ->
+                            if (selecting) { if (key in selection) selection.remove(key) else selection.add(key) }
+                            else focusTooth = if (focusTooth == key) null else key
+                        },
+                        onOpenFull = { open3D(p, displayChart(p)) },
+                        banner = {
+                            if (selecting) HeroHint(if (selection.isEmpty()) "Tap teeth to select them" else "${selection.size} selected · tap to add or remove", highlight = true)
+                            else HeroHint(focusTooth?.let { "${ToothNotation.label(it)} · ${toothName(it)}" } ?: "Drag to rotate · pinch to zoom · tap a tooth", highlight = focusTooth != null)
+                        },
                     ) {
-                        val selected = heroTooth
-                        if (selected != null) SelectedToothSummary(selected, chart.optJSONObject("teeth")?.optJSONObject(selected), onClear = { heroTooth = null }) { tooth = selected; toothSurface = "" }
-                        else {
+                        if (selecting) {
+                            Text(if (selection.isEmpty()) "Select one or more teeth on the model" else selection.sortedBy { ToothNotation.orderIndex(it) }.joinToString(", ") { ToothNotation.label(it) },
+                                style = MaterialTheme.typography.titleSmall, color = Ink)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                MiniMetric("${summary.assessed}", "Assessed", Teal700, Modifier.weight(1f))
-                                MiniMetric("${summary.findings}", "Findings", Amber600, Modifier.weight(1f))
-                                MiniMetric("${summary.restorations}", "Restored", Blue600, Modifier.weight(1f))
-                                MiniMetric("${summary.planned}", "Planned", Color(0xFF7C3AED), Modifier.weight(1f))
+                                Button(onClick = { recordTeeth = selection.sortedBy { ToothNotation.orderIndex(it) }; recordSurface = "" }, enabled = selection.isNotEmpty(),
+                                    modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(16.dp)) { Text("Record treatment (${selection.size})") }
+                                OutlinedButton(onClick = { selecting = false; selection.clear() }, modifier = Modifier.height(50.dp), shape = RoundedCornerShape(16.dp)) { Text("Cancel") }
+                            }
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                MiniMetric("${records.count { it.completed > 0 }}", "Treated", Blue600, Modifier.weight(1f))
+                                MiniMetric("${records.count { it.open > 0 }}", "Planned", Teal700, Modifier.weight(1f))
+                                MiniMetric("${records.count { it.findings.isNotEmpty() }}", "Findings", Amber600, Modifier.weight(1f))
+                                MiniMetric("${records.count { it.presence in setOf("missing", "extracted", "exfoliated", "congenitally_absent") }}", "Missing", InkMuted, Modifier.weight(1f))
                             }
                             ChartLegendRow()
-                        }
-                        Button(onClick = { open3D(p, JSONObject(chart.toString())) }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(16.dp)) {
-                            GlyphIcon(Glyph.Cube, Color.White, 18.dp); Spacer(Modifier.width(8.dp)); Text("Open interactive 3D chart")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { open3D(p, displayChart(p)) }, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(16.dp)) {
+                                    GlyphIcon(Glyph.Cube, Color.White, 18.dp); Spacer(Modifier.width(8.dp)); Text("Full 3D chart")
+                                }
+                                if (canEdit) FilledTonalButton(onClick = { selecting = true; selection.clear(); focusTooth?.let { selection.add(it) } },
+                                    modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(16.dp)) {
+                                    GlyphIcon(Glyph.Plus, Teal900, 16.dp); Spacer(Modifier.width(6.dp)); Text("Record treatment")
+                                }
+                            }
+                            if (!canEdit) Text("View only · treatment entries are added by the dentist.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
                         }
                     }
-                } else if (p.has("name")) SurfaceCard(background = SurfaceTint) {
-                    Text("Dental chart", style = MaterialTheme.typography.titleSmall, color = Ink)
-                    Text("Clinical chart details are not available for your clinic role.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                    if (p.optString("allergies").isNotBlank()) AlertBanner("Medical alerts", p.optString("allergies"))
+                    if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy, modifier = Modifier.fillMaxWidth()) { Text("Review conflict · retain draft and load server version") }
+                    ToothHistoryList(records, store.config, focusTooth, canEdit,
+                        onToggle = { key -> focusTooth = if (focusTooth == key) null else key },
+                        onRecord = { key -> recordTeeth = listOf(key); recordSurface = "" },
+                        onEditStatus = { key -> tooth = key; toothSurface = "" })
+                } else {
+                    PatientHeader(p)
+                    if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy, modifier = Modifier.fillMaxWidth()) { Text("Review conflict · retain draft and load server version") }
+                    if (p.has("name")) SurfaceCard(background = SurfaceTint) {
+                        Text("Dental chart", style = MaterialTheme.typography.titleSmall, color = Ink)
+                        Text("Clinical chart details are not available for your clinic role.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                    }
                 }
                 SegmentedPills(patientTabs, tab.takeIf { it in patientTabs } ?: "Overview", Modifier.fillMaxWidth()) { tab = it }
                 when (tab.takeIf { it in patientTabs } ?: "Overview") {
                     "Overview" -> {
+                        if (p.has("chart")) PatientHeader(p, showAlert = false)
                         SectionHeader("Profile")
                         SurfaceCard {
                             InfoRow(Glyph.Calendar, "Date of birth", p.optString("dob").ifBlank { "Not recorded" } + (ageText(p.optString("dob"))?.let { " · $it" } ?: ""))
@@ -302,8 +346,8 @@ private fun ClinicApp(store: ClinicStore) {
                         SurfaceCard {
                             Text("Tap a tooth to assess or plan care", style = MaterialTheme.typography.bodySmall, color = InkMuted)
                             val inventory = p.obj("chart").optString("dentition")
-                            if (inventory != "primary") NativeDentalChart(p, false) { tooth = it }
-                            if (inventory != "permanent") NativeDentalChart(p, true) { tooth = it }
+                            if (inventory != "primary") NativeDentalChart(p, false) { if (canEdit) tooth = it else focusTooth = it }
+                            if (inventory != "permanent") NativeDentalChart(p, true) { if (canEdit) tooth = it else focusTooth = it }
                         }
                         SurfaceCard(background = SurfaceTint) {
                             Text("Chart legend", style = MaterialTheme.typography.titleSmall, color = Ink)
@@ -363,6 +407,11 @@ private fun ClinicApp(store: ClinicStore) {
                 "Reports" -> AdvancedReportsScreen(store.patients, store.config)
                 "Settings" -> {
                     Heading("Settings", "Storage and account preferences")
+                    SurfaceCard {
+                        Text("Tooth numbering", style = MaterialTheme.typography.titleSmall, color = Ink)
+                        Text("How teeth are labelled on the 3D model, charts and history. Records are always stored in FDI.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                        SegmentedPills(ToothNotation.all, ToothNotation.current, Modifier.fillMaxWidth(), label = { ToothNotation.title(it) }) { ToothNotation.set(context, it) }
+                    }
                     OutlinedButton(onClick = { showHowTo = true }, modifier = Modifier.fillMaxWidth()) { Text("How to use") }
                     if (store.cloudIdentity.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text("Cloud UID: ${store.cloudIdentity}\nWorkspace: ${store.workspaceId.ifBlank { store.cloudIdentity }}") }
                     if (store.reminderRebuildRequired) CardBlock("Refresh older appointment reminders", "Some saved appointments need their reminder settings refreshed. Review and save those appointments in Schedule, then synchronize.", Color(0xFFFFF7ED))
@@ -402,7 +451,15 @@ private fun ClinicApp(store: ClinicStore) {
         var formError by remember { mutableStateOf("") }
         AlertDialog(onDismissRequest = { form = null }, title = { Text(active.title) }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { active.fields.forEach { field -> OutlinedTextField(values[field.key] ?: "", { values[field.key] = it }, label = { Text(field.label) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), minLines = if (field.key == "story") 5 else 1) }; if (formError.isNotBlank()) Text(formError, color = MaterialTheme.colorScheme.error) } }, confirmButton = { TextButton(enabled = !store.busy, onClick = { runCatching { require(active.fields.none { it.required && values[it.key].isNullOrBlank() }) { "Complete the required fields" }; val before = saveStatus(); active.save(values.toMap()); requireAcceptedSave(before, saveStatus()) }.onSuccess { form = null }.onFailure { formError = it.localizedMessage ?: "Review the values" } }) { Text("Save") } }, dismissButton = { TextButton(onClick = { form = null }) { Text("Cancel") } })
     } }
-    tooth?.let { number -> if (patient != null) ToothEditor(number, patient, toothSurface, { tooth = null; toothSurface = "" }) { changed, action -> store.save(changed, action); if (store.saveError == null) tooth = null } }
+    recordTeeth?.let { teeth -> if (patient != null) RecordTreatmentDialog(
+        patient, teeth, recordSurface,
+        clinicianRecords(store.config).filter { it.optBoolean("active", true) }.map { it.optString("name") }.filter { it.isNotBlank() },
+        store.config, onDismiss = { recordTeeth = null; recordSurface = "" },
+    ) { changed, action ->
+        store.save(changed, action)
+        store.saveError ?: run { selecting = false; selection.clear(); focusTooth = teeth.first(); null }
+    } }
+    tooth?.let { number -> if (patient != null && canEditClinical(store.currentRole)) ToothEditor(number, patient, toothSurface, { tooth = null; toothSurface = "" }) { changed, action -> store.save(changed, action); if (store.saveError == null) tooth = null } }
 }
 
 private fun todaysVisits(store: ClinicStore): Int = runCatching {
@@ -432,7 +489,7 @@ private fun todaysVisits(store: ClinicStore): Int = runCatching {
     }
 }
 
-@Composable private fun PatientHeader(p: JSONObject) {
+@Composable private fun PatientHeader(p: JSONObject, showAlert: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Avatar(p.optString("name"), 60.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -446,38 +503,7 @@ private fun todaysVisits(store: ClinicStore): Int = runCatching {
             }
         }
     }
-    if (p.optString("allergies").isNotBlank()) AlertBanner("Medical alerts", p.optString("allergies"))
-}
-
-/** Footer of the profile 3D card when a tooth has been tapped on the model. */
-@Composable private fun SelectedToothSummary(key: String, state: JSONObject?, onClear: () -> Unit, onAssess: () -> Unit) {
-    val presence = state?.optString("presence", "unknown") ?: "unknown"
-    val assessment = state?.optString("assessment", "not_assessed") ?: "not_assessed"
-    val surfaces = state?.optJSONObject("surfaces")
-    val findings = mutableListOf<String>(); val restorations = mutableListOf<String>()
-    state?.optJSONArray("findings")?.let { a -> for (i in 0 until a.length()) findings += a.optString(i) }
-    surfaces?.keys()?.forEach { s ->
-        val o = surfaces.optJSONObject(s)
-        o?.optJSONArray("findings")?.let { a -> for (i in 0 until a.length()) findings += "${a.optString(i)} ($s)" }
-        o?.optJSONArray("restorations")?.let { a -> for (i in 0 until a.length()) restorations += "${a.optString(i)} ($s)" }
-    }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Teal500, Teal700))), contentAlignment = Alignment.Center) {
-            Text(key, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(toothName(key), style = MaterialTheme.typography.titleSmall, color = Ink)
-            Text("${assessment.replace('_', ' ').replaceFirstChar { it.uppercase() }} · ${presence.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall, color = InkMuted)
-        }
-        TextButton(onClick = onClear) { Text("Clear") }
-    }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (findings.isEmpty() && restorations.isEmpty()) StatusPill("No coded findings recorded", SurfaceTint, InkMuted, dot = false)
-        findings.forEach { StatusPill(it.replace('_', ' '), Amber100, Amber600) }
-        restorations.forEach { StatusPill(it.replace('_', ' '), Blue100, Blue600) }
-        if ((state?.optJSONArray("treatmentStates")?.length() ?: 0) > 0) StatusPill("Planned care", Teal50, Teal700)
-    }
-    FilledTonalButton(onClick = onAssess, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Assess tooth $key") }
+    if (showAlert && p.optString("allergies").isNotBlank()) AlertBanner("Medical alerts", p.optString("allergies"))
 }
 
 @Composable private fun DoctorChip(member: JSONObject, onClick: () -> Unit) {
@@ -520,7 +546,7 @@ private fun todaysVisits(store: ClinicStore): Int = runCatching {
     var procedure by remember(number) { mutableStateOf("") }
     var note by remember(number) { mutableStateOf("") }
     var toothError by remember(number) { mutableStateOf("") }
-    AlertDialog(onDismissRequest = close, shape = RoundedCornerShape(28.dp), title = { Column { Text(toothName(number), style = MaterialTheme.typography.titleLarge); Text("FDI tooth $number", style = MaterialTheme.typography.bodySmall, color = InkMuted) } }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    AlertDialog(onDismissRequest = close, shape = RoundedCornerShape(28.dp), title = { Column { Text("Chart status · ${ToothNotation.label(number)}", style = MaterialTheme.typography.titleLarge); Text(ToothNotation.describe(number), style = MaterialTheme.typography.bodySmall, color = InkMuted) } }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Assessment"); Choices(listOf("assessed", "not_assessed", "unable_to_assess"), assessment) { assessment = it }
         Text("Presence"); Choices(listOf("unknown", "present", "unerupted", "missing", "extracted", "exfoliated", "congenitally_absent"), presence) { presence = it }
         Text("Replacement"); Choices(listOf("not recorded", "none", "implant", "pontic", "removable_prosthesis"), replacement) { replacement = it }

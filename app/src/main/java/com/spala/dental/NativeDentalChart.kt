@@ -86,7 +86,7 @@ fun NativeDentalChart(patient: JSONObject, primary: Boolean, onSelect: (String) 
                         shape = RoundedCornerShape(12.dp)) {
                         Column(Modifier.padding(horizontal = 5.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(key, fontWeight = FontWeight.Bold, color = ChartSlate, fontSize = 14.sp)
+                            Text(ToothNotation.short(key), fontWeight = FontWeight.Bold, color = ChartSlate, fontSize = 14.sp)
                             Canvas(Modifier.width(44.dp).height(54.dp)) { drawClinicalTooth(key, tooth) }
                             Text(when { presence in absentStates -> "Recorded loss"; presence == "unknown" -> "Unknown";
                                 presence == "unerupted" -> "Unerupted"; assessment == "not_assessed" -> "Unassessed";
@@ -198,9 +198,9 @@ fun PatientExplanationDialog(patient: JSONObject, onClose: () -> Unit, onOpen3D:
                 Text("Your care, clearly explained", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = ChartTeal)
                 Text("Your clinician can use this view to discuss recorded findings and care options with you. Planned treatment is separate from care already performed.", color = ChartSlate)
                 ExplanationSection("Care to discuss or continue", proposed.map { item ->
-                    "Tooth ${item.optString("tooth", "not specified")}: ${item.optString("procedure", "Treatment").replace('_', ' ')} · ${item.optString("status")}" })
+                    "Tooth ${item.optString("tooth").takeIf { it.isNotBlank() }?.let { ToothNotation.label(it) } ?: "not specified"}: ${item.optString("procedure", "Treatment").replace('_', ' ')} · ${item.optString("status")}" })
                 ExplanationSection("Care recorded as performed", performed.map { item ->
-                    "Tooth ${item.optString("tooth", "not specified")}: ${item.optString("procedure", "Treatment").replace('_', ' ')}" })
+                    "Tooth ${item.optString("tooth").takeIf { it.isNotBlank() }?.let { ToothNotation.label(it) } ?: "not specified"}: ${item.optString("procedure", "Treatment").replace('_', ' ')}" })
                 Text("The chart illustrates recorded tooth states. An unassessed or unknown tooth does not mean healthy, and this view does not make a diagnosis.",
                     style = MaterialTheme.typography.bodySmall, color = ChartSlate.copy(alpha = .75f))
                 Button(onClick = { onOpen3D(explanationChart(patient)) }, modifier = Modifier.fillMaxWidth()) { Text("Explore the dental chart in 3D") }
@@ -248,5 +248,5 @@ private fun explanationChart(patient: JSONObject): JSONObject {
     }
     return JSONObject().put("schemaVersion", source.optInt("schemaVersion", 2)).put("catalogVersion", source.optString("catalogVersion", "fdi-v1"))
         .put("dentition", source.optString("dentition", "permanent")).put("chartVersion", source.optLong("chartVersion"))
-        .put("teeth", teeth).put("readOnly", true)
+        .put("teeth", teeth).put("readOnly", true).put("notation", ToothNotation.current)
 }
