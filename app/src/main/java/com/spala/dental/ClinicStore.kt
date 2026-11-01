@@ -539,17 +539,37 @@ class ClinicStore(private val context: Context) {
     }
 
     /** Admin: create the patient's app login. The temporary password is returned once for sharing. */
-    fun createPatientLogin(patientId: String) = portalCall(patientId, reset = false)
-    /** Issues a new Patient ID and temporary password; the previous Patient ID stops working. */
-    fun resetPatientPassword(patientId: String) = portalCall(patientId, reset = true)
-    private fun portalCall(patientId: String, reset: Boolean) = operation {
-        val patient = patients.first { it.optString("id") == patientId }
-        check(!patient.optBoolean("dirty") && patient.optLong("remoteVersion") > 0) { "Sync this patient to the cloud first, then create the login" }
-        check(isSuperAdmin || currentRole in listOf("owner", "admin", "administrator", "dentist")) { "Only clinic administrators manage patient logins" }
-        val login = ClinicCloud.createPatientLogin(context, clinic(), cloudIdentity, patientId, reset)
-        val next = patients.map { if (it.optString("id") == patientId) JSONObject(it.toString()).put("portal", login.portal).put("remoteVersion", login.revision).put("revision", login.revision) else it }
-        persist(next); patients = next
-        credentialNotice = JSONObject().put("name", patient.optString("name")).put("loginId", login.loginId).put("password", login.password).put("reset", reset)
+    /**
+     * Admin/dentist creates the patient's app login with the Patient ID and password they chose.
+     * [reset] issues a new Patient ID + password; the previous Patient ID stops working.
+     * An unsynced patient is saved to the cloud first. [done] gets null on success or the problem.
+     */
+    fun createPatientLogin(patientId: String, loginId: String, password: String, reset: Boolean, done: (String?) -> Unit) {
+        if (busy) { done("Please wait for the current operation to finish"); return }
+        busy = true
+        scope.launch {
+            val error = runCatching {
+                check(configured() && session == "staff") { "Patient logins need the clinic cloud. Sign in with Google first." }
+                check(isSuperAdmin || currentRole in listOf("owner", "admin", "administrator", "dentist")) { "Only clinic administrators and dentists manage patient logins" }
+                val clinicId = clinic()
+                var patient = patients.first { it.optString("id") == patientId }
+                check(!patient.has("operationId")) { "This patient has a pending cloud submission. Sync first." }
+                if (patient.optBoolean("dirty") || patient.optLong("remoteVersion") == 0L) {
+                    // Save the patient to the cloud first so the login has a record to open.
+                    val committed = ClinicCloud.commitPatient(clinicId, cloudIdentity, patient)
+                    patient = committed.put("dirty", false).put("remoteVersion", committed.optLong("revision")).put("cloudOwner", clinicId)
+                    val synced = patients.map { if (it.optString("id") == patientId) patient else it }
+                    persist(synced); patients = synced
+                }
+                val login = ClinicCloud.createPatientLogin(context, clinicId, cloudIdentity, patientId, loginId, password, reset)
+                val next = patients.map { if (it.optString("id") == patientId) JSONObject(it.toString()).put("portal", login.portal).put("remoteVersion", login.revision).put("revision", login.revision) else it }
+                persist(next); patients = next
+                credentialNotice = JSONObject().put("name", patient.optString("name")).put("loginId", login.loginId).put("password", login.password).put("reset", reset)
+                message = if (reset) "New patient login issued" else "Patient login created"
+            }.exceptionOrNull()?.let { friendlyError(it) }
+            busy = false
+            done(error)
+        }
     }
 
     /** Incremental pull: only patient documents changed since the last pull are read. */

@@ -43,6 +43,8 @@ private fun JSONObject?.codes(name: String): List<String> = this?.optJSONArray(n
 data class HistoryEntry(
     val status: String, val procedure: String, val surface: String, val at: Long,
     val doctor: String, val notes: String, val outcome: String,
+    /** Id of the editable treatment item ("" for older standalone performed-care records). */
+    val treatmentId: String = "",
 )
 
 /** Everything recorded for one tooth slot, newest first. */
@@ -60,8 +62,9 @@ fun toothRecords(patient: JSONObject): List<ToothRecord> {
     val performed = patient.optJSONArray("performedProcedures").objectList()
     val matched = HashSet<String>()
     for (treatment in treatments) {
-        val outcome = performed.firstOrNull { it.optString("treatmentId") == treatment.optString("id") }
-        if (outcome != null) matched += outcome.optString("id")
+        val linked = performed.filter { it.optString("treatmentId") == treatment.optString("id") }
+        linked.forEach { matched += it.optString("id") }
+        val outcome = linked.firstOrNull { !it.optBoolean("voided") }
         val entry = HistoryEntry(
             status = treatment.optString("status", "Planned"),
             procedure = treatment.optString("procedure", "Treatment"),
@@ -70,11 +73,12 @@ fun toothRecords(patient: JSONObject): List<ToothRecord> {
             doctor = treatment.optString("doctor").ifBlank { outcome?.optString("doctor").orEmpty() },
             notes = treatment.optString("notes"),
             outcome = outcome?.optString("outcome").orEmpty(),
+            treatmentId = treatment.optString("id"),
         )
         keysOf(treatment).forEach { entries.getOrPut(it) { mutableListOf() } += entry }
     }
     for (procedure in performed) {
-        if (procedure.optString("id") in matched) continue
+        if (procedure.optString("id") in matched || procedure.optBoolean("voided")) continue
         val entry = HistoryEntry("Completed", procedure.optString("procedure", "Procedure"), procedure.optString("surface").takeIf { it != "Whole tooth" }.orEmpty(),
             procedure.optLong("at"), procedure.optString("doctor"), "", procedure.optString("outcome"))
         keysOf(procedure).forEach { entries.getOrPut(it) { mutableListOf() } += entry }
@@ -111,7 +115,7 @@ fun displayChart(patient: JSONObject): JSONObject {
     val chart = JSONObject((patient.optJSONObject("chart") ?: JSONObject().put("schemaVersion", 2).put("dentition", "permanent")).toString())
     val teeth = chart.optJSONObject("teeth") ?: JSONObject().also { chart.put("teeth", it) }
     val treated = HashSet<String>()
-    patient.optJSONArray("performedProcedures").objectList().forEach { treated += keysOf(it) }
+    patient.optJSONArray("performedProcedures").objectList().filterNot { it.optBoolean("voided") }.forEach { treated += keysOf(it) }
     patient.optJSONArray("treatments").objectList().filter { it.optString("status") == "Completed" }.forEach { treated += keysOf(it) }
     val dentition = chart.optString("dentition", "permanent")
     for (key in treated) {
@@ -140,8 +144,7 @@ fun ToothHistoryList(
     expanded: String?,
     canEdit: Boolean,
     onToggle: (String) -> Unit,
-    onRecord: (String) -> Unit,
-    onEditStatus: (String) -> Unit,
+    onEdit: (String) -> Unit,
 ) {
     val procedures = records.sumOf { it.entries.size }
     SectionHeader("Treatment history · ${records.size} teeth · $procedures procedures")
@@ -154,15 +157,38 @@ fun ToothHistoryList(
     }
     // A tooth tapped on the model that has no history yet still gets a detail card.
     if (expanded != null && records.none { it.key == expanded }) {
-        ToothRow(ToothRecord(expanded, emptyList(), emptyList(), emptyList(), "unknown", "none"), config, true, canEdit, onToggle, onRecord, onEditStatus)
+        ToothRow(ToothRecord(expanded, emptyList(), emptyList(), emptyList(), "unknown", "none"), config, true, canEdit, onToggle, onEdit)
     }
-    records.forEach { record -> ToothRow(record, config, record.key == expanded, canEdit, onToggle, onRecord, onEditStatus) }
+    records.forEach { record -> ToothRow(record, config, record.key == expanded, canEdit, onToggle, onEdit) }
+}
+
+/** Actions for the tooth selected on the 3D model; shown above (outside) the treatment history. */
+@Composable
+fun SelectedToothActions(key: String, onRecord: (String) -> Unit, onEditStatus: (String) -> Unit, onClose: () -> Unit) {
+    SurfaceCard(background = Teal50) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Teal500, Teal700))), contentAlignment = Alignment.Center) {
+                Text(ToothNotation.label(key), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Selected tooth", style = MaterialTheme.typography.labelMedium, color = Teal700)
+                Text(toothName(key), style = MaterialTheme.typography.titleSmall, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = onClose) { Text("Clear") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { onRecord(key) }, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f)) {
+                GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); Text("Record treatment")
+            }
+            OutlinedButton(onClick = { onEditStatus(key) }, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f)) { Text("Chart status") }
+        }
+    }
 }
 
 @Composable
 private fun ToothRow(
     record: ToothRecord, config: JSONObject, open: Boolean, canEdit: Boolean,
-    onToggle: (String) -> Unit, onRecord: (String) -> Unit, onEditStatus: (String) -> Unit,
+    onToggle: (String) -> Unit, onEdit: (String) -> Unit,
 ) {
     val lost = record.presence in setOf("missing", "extracted", "exfoliated", "congenitally_absent")
     Surface(
@@ -221,18 +247,14 @@ private fun ToothRow(
                                     val (bg, fg) = statusColors(entry.status)
                                     StatusPill(entry.status, bg, fg, dot = false)
                                 }
+                                if (canEdit && entry.treatmentId.isNotBlank()) TextButton(onClick = { onEdit(entry.treatmentId) }, contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(30.dp)) { Text("Edit", style = MaterialTheme.typography.labelLarge, color = Teal700) }
                                 Text(listOf(shortDate(entry.at, config), entry.doctor, entry.surface.takeIf { it.isNotBlank() }?.let { "Surface $it" }.orEmpty())
                                     .filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = InkMuted)
                                 if (entry.outcome.isNotBlank()) Text("Outcome: ${entry.outcome}", style = MaterialTheme.typography.bodySmall, color = Ink)
                                 if (entry.notes.isNotBlank()) Text(entry.notes, style = MaterialTheme.typography.bodySmall, color = Ink)
                             }
                         }
-                    }
-                    if (canEdit) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onRecord(record.key) }, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f)) {
-                            GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); Text("Record treatment")
-                        }
-                        OutlinedButton(onClick = { onEditStatus(record.key) }, shape = RoundedCornerShape(14.dp)) { Text("Chart status") }
                     }
                 }
             }
@@ -267,20 +289,29 @@ fun RecordTreatmentDialog(
     clinicians: List<String>,
     config: JSONObject,
     onDismiss: () -> Unit,
+    /** A recorded treatment item to correct; null records a new one. */
+    editing: JSONObject? = null,
     onSave: (JSONObject, String) -> String?,
 ) {
-    var procedure by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf("Completed") }
-    val surfaces = remember { mutableStateListOf<String>().apply { if (initialSurface.isNotBlank()) add(if (initialSurface in setOf("I", "O")) "Top" else initialSurface) } }
-    var doctor by remember { mutableStateOf(clinicians.firstOrNull().orEmpty()) }
-    var date by remember { mutableStateOf(LocalDate.now(runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault())).toString()) }
-    var notes by remember { mutableStateOf("") }
+    val zoneOf = { runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault()) }
+    val linkedOutcome = editing?.let { item -> patient.optJSONArray("performedProcedures").objectList().firstOrNull { it.optString("treatmentId") == item.optString("id") && !it.optBoolean("voided") } }
+    var procedure by remember { mutableStateOf(editing?.optString("procedure").orEmpty()) }
+    var status by remember { mutableStateOf(editing?.optString("status")?.ifBlank { null } ?: "Completed") }
+    val surfaces = remember { mutableStateListOf<String>().apply {
+        val start = editing?.optString("surface")?.takeIf { it != "Whole tooth" }?.map { it.toString() } ?: listOfNotNull(initialSurface.ifBlank { null })
+        start.forEach { add(if (it in setOf("I", "O")) "Top" else it) }
+    } }
+    var doctor by remember { mutableStateOf(editing?.optString("doctor")?.ifBlank { null } ?: clinicians.firstOrNull().orEmpty()) }
+    var date by remember { mutableStateOf(
+        (editing?.let { it.optLong("performedAt").takeIf { v -> v > 0 } ?: it.optLong("at").takeIf { v -> v > 0 } }
+            ?.let { java.time.Instant.ofEpochMilli(it).atZone(zoneOf()).toLocalDate() } ?: LocalDate.now(zoneOf())).toString()) }
+    var notes by remember { mutableStateOf(editing?.optString("notes")?.ifBlank { null } ?: linkedOutcome?.optString("outcome").orEmpty()) }
     var error by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp),
         title = {
             Column {
-                Text("Record treatment", style = MaterialTheme.typography.titleLarge)
+                Text(if (editing != null) "Edit treatment" else "Record treatment", style = MaterialTheme.typography.titleLarge)
                 Text(teeth.joinToString(", ") { ToothNotation.label(it) } + if (teeth.size == 1) " · ${toothName(teeth.first())}" else " · ${teeth.size} teeth",
                     style = MaterialTheme.typography.bodySmall, color = InkMuted)
             }
@@ -293,7 +324,10 @@ fun RecordTreatmentDialog(
                 }
                 OutlinedTextField(procedure, { procedure = it }, label = { Text("Procedure (or type your own)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
                 Text("Status", style = MaterialTheme.typography.labelLarge, color = Ink)
-                SegmentedPills(listOf("Completed", "In progress", "Planned"), status, Modifier.fillMaxWidth()) { status = it }
+                SegmentedPills(if (editing != null) listOf("Completed", "In progress", "Planned", "Cancelled") else listOf("Completed", "In progress", "Planned"),
+                    status, Modifier.fillMaxWidth()) { status = it }
+                if (editing != null) Text("The previous values are kept in the treatment's change log and the patient history.",
+                    style = MaterialTheme.typography.bodySmall, color = InkMuted)
                 Text("Surfaces (optional)", style = MaterialTheme.typography.labelLarge, color = Ink)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("M" to "Mesial", "D" to "Distal", "F" to "Buccal/Labial", "L" to "Lingual/Palatal", "Top" to "Occlusal/Incisal").forEach { (code, name) ->
@@ -322,6 +356,11 @@ fun RecordTreatmentDialog(
                     require(at <= System.currentTimeMillis() + 366L * 86_400_000L) { "Check the treatment date" }
                     val copy = JSONObject(patient.toString())
                     val option = procedureOptions.firstOrNull { it.label.equals(name, true) }
+                    if (editing != null) {
+                        val description = editTreatment(copy, editing.optString("id"), name, status, surfaces.toList(), doctor.trim(), at, notes.trim(), option)
+                        onSave(copy, "Treatment edited · $description")?.let { throw IllegalStateException(it) }
+                        return@runCatching
+                    }
                     val group = uid()
                     for (key in teeth) {
                         // Every treatment must point at a recorded chart slot (validated locally and on the server).
@@ -352,6 +391,44 @@ fun RecordTreatmentDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/**
+ * Corrects one recorded treatment in [copy]. The change is logged as an "edited" event holding the
+ * previous values. Linked performed care follows the treatment: updated while Completed, kept but
+ * marked voided when the treatment is moved to another status, and created when it becomes Completed.
+ */
+private fun editTreatment(copy: JSONObject, id: String, name: String, status: String, surfaces: List<String>, doctor: String, at: Long, notes: String, option: ProcedureOption?): String {
+    val item = copy.optJSONArray("treatments").objectList().firstOrNull { it.optString("id") == id } ?: error("This treatment no longer exists. Reopen the patient.")
+    val key = item.optString("tooth")
+    val top = if (key[1].digitToInt() <= 3) "I" else "O"
+    val codes = surfaces.map { if (it == "Top") top else it }.distinct()
+    val surfaceText = if (codes.isEmpty()) "Whole tooth" else codes.joinToString("")
+    if (status == "Completed") require(doctor.isNotBlank()) { "Record the doctor who performed the treatment" }
+    val wasCompleted = item.optString("status") == "Completed"
+    val previous = JSONObject()
+    for (field in listOf("procedure", "status", "surface", "doctor", "at", "performedAt", "notes")) if (item.has(field)) previous.put(field, item.get(field))
+    item.put("procedure", name).put("status", status).put("surface", surfaceText).put("doctor", doctor).put("at", at).put("notes", notes)
+    if (status == "Completed") item.put("performedAt", at) else item.remove("performedAt")
+    item.array("events").put(JSONObject().put("id", uid()).put("to", status).put("at", System.currentTimeMillis()).put("doctor", doctor)
+        .put("edit", true).put("previous", previous))
+    val performed = copy.array("performedProcedures")
+    val linked = performed.objects().filter { it.optString("treatmentId") == id }
+    if (status == "Completed") {
+        val current = linked.firstOrNull() ?: JSONObject().put("id", uid()).put("treatmentId", id).put("tooth", key).also { performed.put(it) }
+        current.put("surface", surfaceText).put("procedure", name).put("doctor", doctor).put("outcome", notes.ifBlank { "$name completed" }).put("at", at).remove("voided")
+        linked.drop(1).forEach { it.put("voided", true) }
+        if (!wasCompleted || !previous.optString("procedure").equals(name, true)) applyOutcome(copy, key, name, option, codes, top)
+    } else linked.forEach { it.put("voided", true) }
+    val changes = listOfNotNull(
+        "procedure ${previous.optString("procedure")} → $name".takeIf { previous.optString("procedure") != name },
+        "status ${previous.optString("status")} → $status".takeIf { previous.optString("status") != status },
+        "surface ${previous.optString("surface")} → $surfaceText".takeIf { previous.optString("surface") != surfaceText },
+        "doctor → $doctor".takeIf { previous.optString("doctor") != doctor },
+        "date changed".takeIf { previous.optLong("at") != at },
+        "notes updated".takeIf { previous.optString("notes") != notes },
+    ).ifEmpty { listOf("no changes") }
+    return "${ToothNotation.label(key)} (FDI $key) · " + changes.joinToString("; ")
 }
 
 /** Writes the chart consequence of completed care, using only the schema's coded vocabulary. */

@@ -4,7 +4,6 @@ import android.content.Context
 import com.google.firebase.FirebaseApp
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
@@ -35,7 +34,6 @@ import java.time.Instant
 object ClinicCloud {
     const val MAX_BYTES = 750_000
     const val PATIENT_EMAIL_DOMAIN = "patient.dentalcare.local"
-    private const val ACCOUNTS_APP = "patient-accounts"
     private val LOCAL_FIELDS = listOf("dirty", "operationId", "remoteVersion", "cloudOwner", "retainedAt", "syncedAt", "patientDevices")
     private val STAFF_ROLE = mapOf("owner" to "admin", "admin" to "admin", "administrator" to "admin", "dentist" to "dentist",
         "assistant" to "assistant", "receptionist" to "receptionist", "cashier" to "cashier", "auditor" to "auditor")
@@ -245,44 +243,93 @@ object ClinicCloud {
     fun patientEmail(loginId: String) = "${loginId.trim().lowercase()}@$PATIENT_EMAIL_DOMAIN"
     fun isPatientAccount(user: FirebaseUser?) = user?.email?.lowercase()?.endsWith("@$PATIENT_EMAIL_DOMAIN") == true
 
-    /** A second Firebase instance so creating the patient's account never signs the admin out. */
-    private fun accountsAuth(context: Context): FirebaseAuth {
-        val app = FirebaseApp.getApps(context).firstOrNull { it.name == ACCOUNTS_APP }
-            ?: FirebaseApp.initializeApp(context, FirebaseApp.getInstance().options, ACCOUNTS_APP).also { AppCheckSetup.install(it) }
-        return FirebaseAuth.getInstance(app)
+    fun suggestLoginId() = randomText(LOGIN_ALPHABET, 8)
+    fun suggestPassword() = randomText(PASSWORD_ALPHABET, 10)
+    fun validLoginId(value: String) = value.trim().matches(Regex("[A-Za-z0-9]{6,12}"))
+    fun passwordProblem(value: String): String? = when {
+        value.length < 8 -> "Use at least 8 characters"
+        !(value.any { it.isLetter() } && value.any { it.isDigit() }) -> "Use letters and numbers"
+        value.any { it.isWhitespace() } -> "Spaces are not allowed"
+        else -> null
     }
+
+    /** The chosen Patient ID already belongs to another login. */
+    class LoginTaken : Exception("This Patient ID is already in use. Choose another one.")
+
+    /**
+     * Creates the Email/Password account through Firebase Auth's sign-up endpoint. This does not
+     * sign anyone in on this phone, so the admin stays signed in, and it carries this app's App Check
+     * token and Android identity (needed when the API key is restricted to the app).
+     */
+    private suspend fun createAuthAccount(context: Context, email: String, password: String): String {
+        val appCheck = runCatching { com.google.firebase.appcheck.FirebaseAppCheck.getInstance().getAppCheckToken(false).await().token }.getOrNull()
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val key = FirebaseApp.getInstance().options.apiKey
+            val connection = java.net.URL("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$key").openConnection() as java.net.HttpURLConnection
+            try {
+                connection.requestMethod = "POST"; connection.doOutput = true
+                connection.connectTimeout = 20_000; connection.readTimeout = 20_000
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("X-Android-Package", context.packageName)
+                signingSha1(context)?.let { connection.setRequestProperty("X-Android-Cert", it) }
+                appCheck?.let { connection.setRequestProperty("X-Firebase-AppCheck", it) }
+                connection.outputStream.use { it.write(JSONObject().put("email", email).put("password", password).put("returnSecureToken", true).toString().toByteArray()) }
+                val ok = connection.responseCode in 200..299
+                val body = (if (ok) connection.inputStream else connection.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (ok) return@withContext JSONObject(body).getString("localId")
+                val reason = runCatching { JSONObject(body).getJSONObject("error").getString("message") }.getOrDefault("HTTP ${connection.responseCode}")
+                throw when {
+                    reason.startsWith("EMAIL_EXISTS") -> LoginTaken()
+                    reason.startsWith("OPERATION_NOT_ALLOWED") || reason.startsWith("ADMIN_ONLY_OPERATION") ->
+                        IllegalStateException("Patient logins are turned off. In the Firebase console open Authentication → Sign-in method and enable Email/Password (and allow user sign-up).")
+                    reason.startsWith("CONFIGURATION_NOT_FOUND") ->
+                        IllegalStateException("Firebase Authentication is not set up for this project. Open Authentication in the Firebase console, press Get started and enable Email/Password.")
+                    reason.startsWith("WEAK_PASSWORD") -> IllegalArgumentException("The password is too weak. Use at least 8 letters and numbers.")
+                    reason.startsWith("TOO_MANY_ATTEMPTS") -> IllegalStateException("Too many attempts. Wait a few minutes and try again.")
+                    reason.contains("App Check", true) || reason.contains("APP_CHECK", true) ->
+                        IllegalStateException("App Check rejected this request. Add this device's debug token in the Firebase console (App Check → Manage debug tokens), or install the app from Google Play.")
+                    reason.contains("blocked", true) || reason.contains("API_KEY", true) || reason.contains("PERMISSION_DENIED", true) ->
+                        IllegalStateException("The Firebase API key refused this request ($reason). Check the key's Android app restriction (package com.spala.dental and this build's SHA-1) and that the Identity Toolkit API is allowed.")
+                    else -> IllegalStateException("Could not create the patient login: $reason")
+                }
+            } finally { connection.disconnect() }
+        }
+    }
+
+    /** SHA-1 of this build's signing certificate, as Google API key restrictions expect it. */
+    private fun signingSha1(context: Context): String? = runCatching {
+        val info = context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+        val signer = info.signingInfo?.apkContentsSigners?.firstOrNull() ?: return null
+        java.security.MessageDigest.getInstance("SHA-1").digest(signer.toByteArray()).joinToString("") { "%02X".format(it) }
+    }.getOrNull()
 
     data class NewLogin(val loginId: String, val password: String, val portal: JSONObject, val revision: Long)
 
     /**
-     * Creates a new Patient ID + temporary password and points the patient's record at it. A
-     * "reset" is the same thing: the previous Patient ID loses access because the record no longer
-     * names its account (changing another user's password needs a server).
+     * Creates the Patient ID and password the admin chose and links them to the patient's record.
+     * "Reset" works the same way with a new Patient ID: the previous Patient ID loses access because
+     * the record no longer names its account (changing another user's password needs a server).
      */
-    suspend fun createPatientLogin(context: Context, clinicId: String, staffUid: String, patientId: String, reset: Boolean): NewLogin {
-        val auth = accountsAuth(context)
-        val password = randomText(PASSWORD_ALPHABET, 10)
-        var loginId = ""; var accountUid: String? = null
-        for (attempt in 0 until 5) {
-            loginId = randomText(LOGIN_ALPHABET, 8)
-            try { accountUid = auth.createUserWithEmailAndPassword(patientEmail(loginId), password).await().user?.uid; break }
-            catch (e: FirebaseAuthUserCollisionException) { continue }
-        }
-        auth.signOut()
-        val newUid = accountUid ?: error("Could not allocate a Patient ID; try again")
+    suspend fun createPatientLogin(context: Context, clinicId: String, staffUid: String, patientId: String, loginId: String, password: String, reset: Boolean): NewLogin {
+        val id = loginId.trim().uppercase()
+        require(validLoginId(id)) { "Patient ID: 6–12 letters or numbers" }
+        passwordProblem(password)?.let { throw IllegalArgumentException("Password: $it") }
+        val ref = patientRef(clinicId, patientId)
+        // Check the record first so a refused write doesn't leave an unlinked account behind.
+        val before = ref.get().await()
+        check(before.exists()) { "Sync this patient to the cloud first, then create the login" }
+        if (!reset) check(before.get("portal") == null) { "This patient already has a login. Use Reset password." }
+        val newUid = createAuthAccount(context, patientEmail(id), password)
         val now = System.currentTimeMillis()
         return db.runTransaction { tx ->
-            val ref = patientRef(clinicId, patientId)
             val snap = tx.get(ref)
-            check(snap.exists()) { "Sync this patient to the cloud first, then create the login" }
             val old = fromValue(snap.get("portal")) as? JSONObject
-            if (!reset) check(old == null) { "This patient already has a login. Use Reset password." }
-            val portal = JSONObject().put("loginId", loginId).put("uid", newUid).put("mustChange", true)
+            val portal = JSONObject().put("loginId", id).put("uid", newUid).put("mustChange", true)
                 .put("createdAt", old?.optLong("createdAt")?.takeIf { it > 0 } ?: now).put("createdBy", old?.optString("createdBy")?.ifBlank { null } ?: staffUid)
                 .put("passwordResetAt", now).put("resetBy", staffUid)
             val revision = (snap.getLong("revision") ?: 0L) + 1
             tx.update(ref, mapOf("portal" to toMap(portal), "revision" to revision, "updatedBy" to staffUid, "syncedAt" to FieldValue.serverTimestamp()))
-            NewLogin(loginId, password, portal, revision)
+            NewLogin(id, password, portal, revision)
         }.await()
     }
 
