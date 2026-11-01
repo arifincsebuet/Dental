@@ -20,14 +20,25 @@ const LOST := ["missing", "extracted", "exfoliated", "congenitally_absent"]
 const SURFACES := ["M", "D", "F", "L", "I", "O"]
 
 # --- Arch geometry ----------------------------------------------------------------------------
+# ---- Shared tooth geometry spec v2 ------------------------------------------------------------
+# Teeth3DView.kt (profile preview) ports these constants and functions line for line so both views
+# show the same model. Change them together.
 const ARCH_A := 3.5
 const ARCH_B := 4.1
 const ARCH_SHIFT := 1.9
-const COLLAR := 1.45
+const COLLAR := 1.30
+const DENTIN := Color("ead7b2")
+const TRANSLUCENT := Color("d3e0ea")
+const FINDING := Color("f59e0b")
+const RESTORATION := Color("4f7fe8")
+const TREATED := Color("60a5fa")
+const GUM_DEEP := Color("d4848b")
+const SULCUS := Color("c46d75")
+const PALATE := Color("e3a0a5")
 
 # --- Camera presets: [pitch, yaw, distance, arch filter] --------------------------------------
 const VIEWS := {
-	"Front": [0.0, 0.0, 13.5, "Both"],
+	"Front": [0.0, 0.0, 12.0, "Both"],
 	"Upper": [-1.22, 0.0, 12.0, "Upper"],
 	"Lower": [1.22, 0.0, 12.0, "Lower"],
 	"Left": [0.0, -1.2, 12.5, "Both"],
@@ -47,11 +58,11 @@ var gum_materials: Array[StandardMaterial3D] = []
 var target := Vector3.ZERO
 var yaw := 0.0
 var pitch := 0.0
-var distance := 13.5
+var distance := 12.0
 var cur_target := Vector3.ZERO
-var cur_yaw := -0.9
-var cur_pitch := 0.35
-var cur_distance := 19.0
+var cur_yaw := -0.6
+var cur_pitch := 0.0
+var cur_distance := 16.0
 var yaw_velocity := 0.0
 var pulse := 0.0
 
@@ -193,8 +204,8 @@ func build_inventory() -> void:
 	if dentition != "primary":
 		build_jaw(1, false, upper, 1.0, 0.0)
 		build_jaw(4, false, lower, 0.96, 0.0)
-		upper.add_child(gum_band(COLLAR, 1.0, 0.0, dentition == "mixed"))
-		lower.add_child(gum_band(-COLLAR, 0.96, 0.0, dentition == "mixed"))
+		upper.add_child(gum_band(COLLAR, 1.0, 0.0, dentition == "mixed", 8))
+		lower.add_child(gum_band(-COLLAR, 0.96, 0.0, dentition == "mixed", 8))
 	if dentition != "permanent":
 		# Mixed dentition keeps two labeled inventories: primary slots occupy an inner
 		# diagrammatic row rather than replacing or silently overlapping successors.
@@ -202,8 +213,8 @@ func build_inventory() -> void:
 		build_jaw(5, true, upper, factor, 0.0)
 		build_jaw(8, true, lower, factor * 0.96, 0.0)
 		if dentition == "primary":
-			upper.add_child(gum_band(COLLAR * 0.92, factor * 0.78, 0.0, false))
-			lower.add_child(gum_band(-COLLAR * 0.92, factor * 0.75, 0.0, false))
+			upper.add_child(gum_band(COLLAR * 0.92, factor * 0.78, 0.0, false, 5))
+			lower.add_child(gum_band(-COLLAR * 0.92, factor * 0.75, 0.0, false, 5))
 
 func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float, shift: float) -> void:
 	var max_position := 5 if primary else 8
@@ -244,13 +255,15 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 			var absent := presence in LOST
 			if not absent or replacement not in ["none", ""]:
 				var color := ENAMEL if state.get("assessment", "not_assessed") == "assessed" else UNKNOWN
-				if presence == "unerupted": color = Color(0.80, 0.87, 0.91, 0.5)
-				if absent and replacement == "implant": color = Color("e9eef2")
-				if state.get("treated", false): color = color.lerp(Color("60a5fa"), 0.22)
+				if presence == "unerupted": color = Color("d5dee5")
+				if absent: color = Color("e9eef2") if replacement == "implant" else Color("f1ecf8")
+				if state.get("treated", false): color = color.lerp(TREATED, 0.22)
+				if not state.get("findings", []).is_empty(): color = color.lerp(FINDING, 0.28)
 				var crown := MeshInstance3D.new()
 				crown.name = "Crown"
-				crown.mesh = crown_mesh(kind, dimensions, sign_y)
-				var crown_material := mat(color)
+				crown.mesh = crown_mesh(kind, dimensions, sign_y, surface_colors(state, color, position <= 3), 1.0 if patient_right else -1.0)
+				var crown_material := mat(Color(1, 1, 1, 0.5) if presence == "unerupted" else Color.WHITE, 0.18)
+				crown_material.vertex_color_use_as_albedo = true
 				crown.material_override = crown_material
 				body.set_meta("crownMaterial", crown_material)
 				body.add_child(crown)
@@ -282,9 +295,36 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 func dentition_is_primary_only() -> bool:
 	return chart.get("dentition", "permanent") == "primary"
 
-func crown_mesh(kind: String, size: Vector3, sign_y: float) -> ArrayMesh:
+## Per-surface colours: recorded findings tint amber, restorations blue (same rule as the 2D chart and profile).
+func surface_colors(state: Dictionary, base: Color, anterior: bool) -> Dictionary:
+	var colors := {"base": base}
+	var surfaces: Dictionary = state.get("surfaces", {})
+	for surface in ["M", "D", "F", "L", "I" if anterior else "O"]:
+		var observation: Dictionary = surfaces.get(surface, {})
+		var color := base
+		if not observation.get("restorations", []).is_empty(): color = base.lerp(RESTORATION, 0.72)
+		if not observation.get("findings", []).is_empty(): color = base.lerp(FINDING, 0.78)
+		colors["top" if surface in ["I", "O"] else surface] = color
+	return colors
+
+## Enamel shading baked into vertex colours: warmer dentin at the neck, soft occlusion at the gumline
+## and translucent incisal edges on front teeth.
+func enamel(color: Color, level: float, kind: String) -> Color:
+	var result := color.lerp(DENTIN, 0.30 * pow(1.0 - level, 2.0))
+	if kind in ["incisor", "canine"]: result = result.lerp(TRANSLUCENT, 0.42 * pow(level, 5.0))
+	var occlusion := 0.80 + 0.20 * clampf(level / 0.35, 0.0, 1.0)
+	return Color(result.r * occlusion, result.g * occlusion, result.b * occlusion, 1.0)
+
+func side_surface(angle: float, mesial_sign: float) -> String:
+	var c := cos(angle)
+	var s := sin(angle)
+	if abs(s) >= abs(c): return "F" if s > 0 else "L"
+	return "M" if (c > 0) == (mesial_sign > 0) else "D"
+
+func crown_mesh(kind: String, size: Vector3, sign_y: float, colors: Dictionary = {}, mesial_sign: float = 1.0) -> ArrayMesh:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var base: Color = colors.get("base", ENAMEL)
 	var segments := 40
 	var levels := 10
 	var half_x := size.x * 0.5
@@ -300,7 +340,12 @@ func crown_mesh(kind: String, size: Vector3, sign_y: float) -> ArrayMesh:
 			var p1 := crown_side(b, low, half_x, half_z, size.y, exponent, kind, sign_y)
 			var p2 := crown_side(a, high, half_x, half_z, size.y, exponent, kind, sign_y)
 			var p3 := crown_side(b, high, half_x, half_z, size.y, exponent, kind, sign_y)
-			for vertex in [p0, p2, p1, p1, p2, p3]:
+			var face: Color = colors.get(side_surface((a + b) * 0.5, mesial_sign), base)
+			var levels_of := [low, high, low, low, high, high]
+			var corners := [p0, p2, p1, p1, p2, p3]
+			for i in range(6):
+				var vertex: Vector3 = corners[i]
+				tool.set_color(enamel(face, levels_of[i], kind))
 				tool.set_normal(Vector3(vertex.x / (half_x * half_x), 0.09 * sign_y, vertex.z / (half_z * half_z)).normalized())
 				tool.add_vertex(vertex)
 	# The occlusal table is a continuous custom surface with cusp and fissure relief.
@@ -312,8 +357,10 @@ func crown_mesh(kind: String, size: Vector3, sign_y: float) -> ArrayMesh:
 				var x: float = edge.x * polar.x * tip_width(kind)
 				var z: float = edge.y * polar.x * tip_depth(kind)
 				points.append(Vector3(x, top_height(kind, x / half_x, z / half_z) * size.y * sign_y, z))
+			var top: Color = colors.get("top", base)
 			for index in [0, 1, 2, 2, 1, 3]:
 				var vertex := points[index]
+				tool.set_color(enamel(top, 1.0, kind))
 				var epsilon := 0.006
 				var dx := (top_height(kind, (vertex.x + epsilon) / half_x, vertex.z / half_z) - top_height(kind, (vertex.x - epsilon) / half_x, vertex.z / half_z)) * size.y / (2.0 * epsilon)
 				var dz := (top_height(kind, vertex.x / half_x, (vertex.z + epsilon) / half_z) - top_height(kind, vertex.x / half_x, (vertex.z - epsilon) / half_z)) * size.y / (2.0 * epsilon)
@@ -339,8 +386,13 @@ func crown_side(angle: float, level: float, half_x: float, half_z: float, height
 	var depth: float = lerpf(belly, tip_depth(kind), pow(level, 4.0))
 	var x := edge.x * width
 	var z := edge.y * depth
+	# Front teeth: shovel-shaped lingual surface with a cingulum near the neck.
+	if z < 0.0 and kind in ["incisor", "canine"]: z *= lingual_profile(level)
 	var top := top_height(kind, edge.x * tip_width(kind) / half_x, edge.y * tip_depth(kind) / half_z)
 	return Vector3(x, level * top * height * sign_y, z)
+
+func lingual_profile(level: float) -> float:
+	return 1.0 - 0.20 * sin(PI * level) * clampf((level - 0.12) / 0.25, 0.0, 1.0)
 
 func top_height(kind: String, x: float, z: float) -> float:
 	if kind == "incisor":
@@ -356,43 +408,85 @@ func top_height(kind: String, x: float, z: float) -> float:
 	if kind == "molar": base -= 0.035 * exp(-x * x * 70.0)
 	return base
 
-## Gingiva: a soft tube following the arch with scalloped papillae toward the teeth.
-func gum_band(height: float, factor: float, shift: float, wide: bool) -> MeshInstance3D:
+## Interdental papilla weight for an arch angle: 1 between neighbouring teeth, 0 at a tooth centre.
+func papilla(angle: float, max_position: int) -> float:
+	return 0.5 + 0.5 * cos(TAU * (abs(angle) * float(max_position) / 1.62 - 0.05))
+
+## Gingiva: a tube following the arch, wider over the molars, hugging the teeth with a scalloped
+## margin whose papillae sit exactly between neighbouring teeth.
+func gum_band(height: float, factor: float, shift: float, wide: bool, max_position: int = 8) -> MeshInstance3D:
 	var tool := SurfaceTool.new()
 	tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var sections := 120
+	var sections := 140
 	var rings := 18
-	var radius_x := (0.78 if wide else 0.50) * factor
-	var radius_y := 0.30 * factor + 0.06
-	var inner := -0.22 * factor if wide else 0.0
+	var radius_y := 0.24 * factor + 0.04
+	var inner := -0.20 * factor if wide else 0.0
 	var up := 1.0 if height > 0 else -1.0
-	var center_y := height + up * 0.14
+	var center_y := height + up * (radius_y - 0.12)
 	for section in range(sections):
 		for ring in range(rings):
 			var vertices: Array[Vector3] = []
 			var normals: Array[Vector3] = []
+			var colors: Array[Color] = []
 			for point in [Vector2(section, ring), Vector2(section + 1, ring), Vector2(section, ring + 1), Vector2(section + 1, ring + 1)]:
 				var angle: float = -1.70 + point.x / float(sections) * 3.40
 				var cross_angle: float = point.y / float(rings) * TAU
+				var radius_x: float = ((0.72 if wide else 0.44) + 0.20 * clampf(abs(angle) / 1.4, 0.0, 1.0)) * factor
 				var outward := Vector3(sin(angle) / ARCH_A, 0, cos(angle) / ARCH_B).normalized()
 				var center := Vector3(sin(angle) * ARCH_A * factor, center_y, (cos(angle) * ARCH_B - ARCH_SHIFT) * factor + shift)
 				var toward_teeth: float = max(0.0, -sin(cross_angle) * up)
-				var papilla := 0.07 * toward_teeth * (0.5 + 0.5 * cos(angle * 16.0 / factor))
-				var offset := outward * (cos(cross_angle) * radius_x + inner) + Vector3.UP * (sin(cross_angle) * (radius_y + papilla))
+				var reach := 0.16 * factor * toward_teeth * papilla(angle, max_position)
+				# Alveolar ridge / model base: the half away from the teeth is taller and squarer.
+				var sn := sin(cross_angle)
+				var cs := cos(cross_angle)
+				var stretch := 1.0
+				if sn * up > 0.0:
+					sn = sign(sn) * pow(abs(sn), 0.45)
+					cs = sign(cs) * pow(abs(cs), 0.7)
+					stretch = 1.9
+				var offset := outward * (cs * radius_x + inner) + Vector3.UP * (sn * radius_y * stretch - up * reach)
 				vertices.append(center + offset)
-				normals.append((outward * cos(cross_angle) + Vector3.UP * sin(cross_angle)).normalized())
+				normals.append((outward * cs / radius_x + Vector3.UP * sn / (radius_y * stretch)).normalized())
+				colors.append(GUM.lerp(GUM_DEEP, max(0.0, sin(cross_angle) * up) * 0.6).lerp(SULCUS, 0.35 * pow(toward_teeth, 4.0)))
 			for index in [0, 2, 1, 1, 2, 3]:
+				tool.set_color(colors[index])
 				tool.set_normal(normals[index])
 				tool.add_vertex(vertices[index])
+	if up > 0.0: add_palate(tool, center_y, factor, shift, wide)
 	var mesh := MeshInstance3D.new()
 	mesh.name = "Gingiva"
 	mesh.mesh = tool.commit()
-	var gum_material := mat(GUM, 0.42)
-	gum_material.rim = 0.4
+	var gum_material := mat(Color.WHITE, 0.45)
+	gum_material.vertex_color_use_as_albedo = true
+	gum_material.rim = 0.35
 	gum_material.rim_tint = 0.2
 	mesh.material_override = gum_material
 	gum_materials.append(gum_material)
 	return mesh
+
+## Domed palate closing the upper arch (visible in the upper occlusal view).
+func add_palate(tool: SurfaceTool, center_y: float, factor: float, shift: float, wide: bool) -> void:
+	var sections := 70
+	var rows := 8
+	# Interior of the arch only, rising gently (smoothstep) so no edge shows behind the molars.
+	var peak := center_y + 0.42 * factor
+	for section in range(sections):
+		for row in range(rows):
+			var quad: Array[Vector3] = []
+			for point in [Vector2(section, row), Vector2(section + 1, row), Vector2(section, row + 1), Vector2(section + 1, row + 1)]:
+				var angle: float = -1.35 + point.x / float(sections) * 2.70
+				var t: float = point.y / float(rows)
+				var radius_x: float = ((0.72 if wide else 0.44) + 0.20 * clampf(abs(angle) / 1.4, 0.0, 1.0)) * factor
+				var outward := Vector3(sin(angle) / ARCH_A, 0, cos(angle) / ARCH_B).normalized()
+				var lingual := Vector3(sin(angle) * ARCH_A * factor, center_y, (cos(angle) * ARCH_B - ARCH_SHIFT) * factor + shift) + outward * (-radius_x + (-0.20 * factor if wide else 0.0))
+				var middle := Vector3(0, peak, lingual.z)
+				var p := lingual.lerp(middle, t)
+				p.y = lerpf(center_y, peak, t * t * (3.0 - 2.0 * t))
+				quad.append(p)
+			for index in [0, 2, 1, 1, 2, 3]:
+				tool.set_color(PALATE)
+				tool.set_normal(Vector3.DOWN)
+				tool.add_vertex(quad[index])
 
 func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_upper: bool) -> void:
 	var root_group := Node3D.new()
@@ -471,45 +565,19 @@ func glow(color: Color) -> StandardMaterial3D:
 	result.emission_energy_multiplier = 0.35
 	return result
 
+## Findings and restorations are painted on the crown surfaces (vertex colours). Open care gets a "+".
 func add_state_markers(body: Node3D, state: Dictionary, size: Vector3, sign_y: float) -> void:
-	var surfaces: Dictionary = state.get("surfaces", {})
-	for surface in surfaces:
-		if surface not in SURFACES: continue
-		var observation: Dictionary = surfaces[surface]
-		var findings: Array = observation.get("findings", [])
-		var restorations: Array = observation.get("restorations", [])
-		if findings.is_empty() and restorations.is_empty(): continue
-		var anchor := face_anchor(body, surface)
-		var normal := anchor - Vector3(0, size.y * sign_y * 0.45, 0)
-		if surface in ["I", "O"]: normal = Vector3.UP * sign_y
-		normal = normal.normalized()
-		for index in range(2):
-			if (index == 0 and findings.is_empty()) or (index == 1 and restorations.is_empty()): continue
-			var marker := MeshInstance3D.new()
-			var sphere := SphereMesh.new()
-			sphere.radius = 0.12 * size.x / 0.72
-			sphere.height = sphere.radius * 2.0
-			sphere.radial_segments = 20
-			sphere.rings = 10
-			marker.mesh = sphere
-			marker.scale = Vector3(1, 0.16, 1)
-			marker.quaternion = Quaternion(Vector3.UP, normal)
-			var both := not findings.is_empty() and not restorations.is_empty()
-			var lateral := (0.09 if index == 1 else -0.09) if both else 0.0
-			marker.position = anchor + normal * 0.02 + Vector3(lateral, 0, 0)
-			marker.material_override = glow(AMBER if index == 0 else BLUE)
-			body.add_child(marker)
-	if not state.get("findings", []).is_empty() or not state.get("treatmentStates", []).is_empty():
-		var badge := Label3D.new()
-		badge.text = "!" if not state.get("findings", []).is_empty() else "+"
-		badge.position = Vector3(0, sign_y * size.y * 0.45, size.z * 0.75)
-		badge.font_size = 56
-		badge.outline_size = 14
-		badge.outline_modulate = Color.WHITE
-		badge.pixel_size = 0.0045
-		badge.modulate = AMBER if badge.text == "!" else TEAL
-		badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		body.add_child(badge)
+	if state.get("treatmentStates", []).is_empty(): return
+	var badge := Label3D.new()
+	badge.text = "+"
+	badge.position = Vector3(0, -sign_y * 0.05, 0.42)
+	badge.font_size = 56
+	badge.outline_size = 14
+	badge.outline_modulate = Color.WHITE
+	badge.pixel_size = 0.0045
+	badge.modulate = TEAL
+	badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	body.add_child(badge)
 
 # ==============================================================================================
 # Interface
@@ -820,7 +888,7 @@ func rail_action(caption: String) -> void:
 			# X-ray look: soften the gingiva so roots are visible inside the bone line.
 			for gum_material in gum_materials:
 				gum_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA if show_roots else BaseMaterial3D.TRANSPARENCY_DISABLED
-				gum_material.albedo_color = Color(GUM, 0.32 if show_roots else 1.0)
+				gum_material.albedo_color = Color(1, 1, 1, 0.32 if show_roots else 1.0)
 
 func apply_view(view: String) -> void:
 	if not VIEWS.has(view): return
