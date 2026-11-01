@@ -152,7 +152,6 @@ fun PatientPortalScreen(store: ClinicStore) {
             notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
     }
-    var remindersOn by remember { mutableStateOf(PatientReminders.enabled(context)) }
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen,
@@ -223,15 +222,6 @@ fun PatientPortalScreen(store: ClinicStore) {
                         }
                         if (startAt - now >= 2 * 3_600_000L) TextButton(onClick = { cancelling = a }, enabled = !store.busy) { Text("Cancel", color = Rose600) }
                     }
-                }
-            }
-            SurfaceCard(padding = 12.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Appointment reminders", style = MaterialTheme.typography.titleSmall, color = Ink)
-                        Text("A notification 1 day and 2 hours before each visit.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
-                    }
-                    Switch(remindersOn, { on -> remindersOn = on; PatientReminders.setEnabled(context, on); if (on) PatientReminders.schedule(context, record, store.portalClinic) })
                 }
             }
             Spacer(mark("book"))
