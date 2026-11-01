@@ -304,7 +304,7 @@ fun RecordTreatmentDialog(
                     clinicians.forEach { name -> FilterChip(selected = doctor == name, onClick = { doctor = name }, label = { Text(name) }) }
                 }
                 OutlinedTextField(doctor, { doctor = it }, label = { Text("Doctor") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
-                OutlinedTextField(date, { date = it }, label = { Text("Date (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+                DateField(date, { date = it }, if (status == "Planned") "Planned date" else "Treatment date", today = LocalDate.now(runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault())))
                 OutlinedTextField(notes, { notes = it }, label = { Text("Notes / outcome") }, minLines = 3, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             }
@@ -318,7 +318,7 @@ fun RecordTreatmentDialog(
                     if (status == "Completed") require(doctor.isNotBlank()) { "Record the doctor who performed the treatment" }
                     val zone = runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault())
                     val at = runCatching { LocalDate.parse(date.trim()).atTime(12, 0).atZone(zone).toInstant().toEpochMilli() }
-                        .getOrElse { throw IllegalArgumentException("Enter the date as YYYY-MM-DD") }
+                        .getOrElse { throw IllegalArgumentException("Choose the treatment date") }
                     require(at <= System.currentTimeMillis() + 366L * 86_400_000L) { "Check the treatment date" }
                     val copy = JSONObject(patient.toString())
                     val option = procedureOptions.firstOrNull { it.label.equals(name, true) }
