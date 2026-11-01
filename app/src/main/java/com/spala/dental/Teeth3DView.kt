@@ -120,7 +120,11 @@ private object Palette {
     const val GUM = 0xFFE8979D.toInt()
     const val GUM_DEEP = 0xFFD4848B.toInt()
     const val SULCUS = 0xFFC46D75.toInt()
-    const val PALATE = 0xFFE3A0A5.toInt()
+    const val PALATE = 0xFFE9AAAF.toInt()
+    const val MUCOSA = 0xFFC8606B.toInt()
+    const val MARGIN = 0xFFF2AEB2.toInt()
+    const val VESSEL = 0xFFA3424F.toInt()
+    const val RUGA = 0xFFEDB3B7.toInt()
     const val CEMENTUM = 0xFFE6D2A8.toInt()
     const val APEX = 0xFFC9AD7C.toInt()
     const val FISSURE = 0xFFC4A57A.toInt()
@@ -294,6 +298,25 @@ private fun rootPoint(spec: FloatArray, angle: Float, t: Float, sx: Float, sy: F
     val cz = spec[1] * sz * 0.5f * (1f - 0.25f * t) + spec[6] * length * t.pow(1.5f)
     return Triple(ex + cx * mesialSign, -signY * (t * length - 0.02f), ez + cz)
 }
+private fun smoothstep(a: Float, b: Float, x: Float): Float { val t = ((x - a) / (b - a)).coerceIn(0f, 1f); return t * t * (3f - 2f * t) }
+// chart.gd: gum_color — zones, vessels and stippling. Alpha carries gloss for the preview shader
+// (matte stippled attached gingiva → shiny alveolar mucosa); Godot uses its roughness texture instead.
+private fun gumColor(toward: Float, apical: Float, angle: Float, cross: Float, p: Vec): Int {
+    var c = mix(Palette.GUM, Palette.MUCOSA, smoothstep(0.35f, 0.75f, apical))
+    c = mix(c, Palette.MARGIN, 0.5f * smoothstep(0.55f, 0.9f, toward))
+    c = mix(c, Palette.SULCUS, 0.35f * toward.pow(6))
+    val mucosa = smoothstep(0.45f, 0.85f, apical)
+    val vessel = (0.5f + 0.5f * sin(angle * 11f + 2.2f * sin(cross * 3f + angle * 4f))).pow(10)
+    c = mix(c, Palette.VESSEL, 0.55f * mucosa * vessel)
+    val v = sin(p.x * 12.9898 + p.y * 78.233 + p.z * 37.719) * 43758.5453
+    val n = (v - kotlin.math.floor(v)).toFloat()
+    c = scale(c, 1f + (n - 0.5f) * 0.10f * (1f - mucosa))
+    val gloss = (0.25f + 0.75f * mucosa).coerceIn(0f, 1f)
+    return (c and 0x00FFFFFF) or ((gloss * 255f).toInt() shl 24)
+}
+// chart.gd: ruga — transverse palatal ridges near the front of the palate
+private fun ruga(angle: Float, t: Float): Float =
+    max(0f, sin(t * Math.PI.toFloat() * 6f)).pow(2) * (1f - abs(angle) / 0.75f).coerceIn(0f, 1f) * sin(t * Math.PI.toFloat())
 // chart.gd: papilla
 private fun papilla(angle: Float, maxPosition: Int) = 0.5f + 0.5f * cos(2f * Math.PI.toFloat() * (abs(angle) * maxPosition / 1.62f - 0.05f))
 
@@ -456,7 +479,7 @@ private fun buildJaw(builder: SceneBuilder, slots: MutableList<SlotInfo>, teeth:
 
 // chart.gd: gum_band
 private fun buildGum(builder: SceneBuilder, height: Float, factor: Float, wide: Boolean, maxPosition: Int) {
-    val sections = 84; val rings = 14
+    val sections = 120; val rings = 16
     val radiusY = 0.24f * factor + 0.04f
     val inner = if (wide) -0.20f * factor else 0f
     val up = if (height > 0f) 1f else -1f
@@ -475,8 +498,7 @@ private fun buildGum(builder: SceneBuilder, height: Float, factor: Float, wide: 
         var sn = sin(cross); var cs = cos(cross); var stretch = 1f
         if (sn * up > 0f) { sn = Math.signum(sn) * abs(sn).pow(0.45f); cs = Math.signum(cs) * abs(cs).pow(0.7f); stretch = 1.9f }
         val p = center + outward * (cs * radiusX + inner) + Vec(0f, sn * radiusY * stretch - up * reach, 0f)
-        val color = mix(mix(Palette.GUM, Palette.GUM_DEEP, max(0f, sin(cross) * up) * 0.6f), Palette.SULCUS, 0.35f * towardTeeth.pow(4))
-        return P(p, color)
+        return P(p, gumColor(towardTeeth, max(0f, sin(cross) * up), angle, cross, p))
     }
     for (section in 0 until sections) {
         val angle = -1.70f + (section + 0.5f) / sections * 3.40f
@@ -496,14 +518,14 @@ private fun buildGum(builder: SceneBuilder, height: Float, factor: Float, wide: 
         val interior = hub + tangent * (if (end == 0) 1f else -1f) // a point inside the tube
         for (ring in 0 until rings) {
             val a = point(end, ring); val b = point(end, ring + 1)
-            builder.triangle(hub, a.p, b.p, interior, Palette.GUM_DEEP, a.color, b.color, -1, MAT_GUM)
+            builder.triangle(hub, a.p, b.p, interior, (Palette.GUM_DEEP and 0x00FFFFFF) or (0x40 shl 24), a.color, b.color, -1, MAT_GUM)
         }
     }
 }
 
 // chart.gd: add_palate — domed palate closing the upper arch.
 private fun buildPalate(builder: SceneBuilder, centerY: Float, factor: Float, wide: Boolean) {
-    val sections = 44; val rows = 6
+    val sections = 44; val rows = 12
     val peak = centerY + 0.42f * factor
     fun point(section: Int, row: Int): Vec {
         val angle = -1.35f + section.toFloat() / sections * 2.70f // interior of the arch only
@@ -511,12 +533,16 @@ private fun buildPalate(builder: SceneBuilder, centerY: Float, factor: Float, wi
         val radiusX = ((if (wide) 0.72f else 0.44f) + 0.20f * (abs(angle) / 1.4f).coerceIn(0f, 1f)) * factor
         val outward = Vec(sin(angle) / ARCH_A, 0f, cos(angle) / ARCH_B).normalized()
         val lingual = Vec(sin(angle) * ARCH_A * factor, centerY, (cos(angle) * ARCH_B - ARCH_SHIFT) * factor) + outward * (-radiusX + if (wide) -0.20f * factor else 0f)
-        return Vec(lingual.x * (1f - t), centerY + (peak - centerY) * t * t * (3f - 2f * t), lingual.z)
+        return Vec(lingual.x * (1f - t), centerY + (peak - centerY) * t * t * (3f - 2f * t) - 0.05f * factor * ruga(angle, t), lingual.z)
+    }
+    fun tint(section: Int, row: Int): Int {
+        val r = ruga(-1.35f + section.toFloat() / sections * 2.70f, row.toFloat() / rows)
+        return (mix(Palette.PALATE, Palette.RUGA, 0.55f * r) and 0x00FFFFFF) or (0x60 shl 24) // palate: moist, fairly glossy
     }
     for (section in 0 until sections) for (row in 0 until rows) {
         val a = point(section, row); val b = point(section + 1, row); val c = point(section, row + 1); val d = point(section + 1, row + 1)
         val above = (a + d) * 0.5f + Vec(0f, 1f, 0f) // the palate faces down toward the teeth
-        builder.quad(a, b, c, d, above, Palette.PALATE, Palette.PALATE, Palette.PALATE, Palette.PALATE, -1, MAT_GUM)
+        builder.quad(a, b, c, d, above, tint(section, row), tint(section + 1, row), tint(section, row + 1), tint(section + 1, row + 1), -1, MAT_GUM)
     }
 }
 
@@ -558,7 +584,12 @@ private fun shade(base: Int, nx: Float, ny: Float, nz: Float, material: Byte): I
     val light = 0.40f + 0.62f * diffuse(k) + 0.22f * diffuse(f) + 0.10f * diffuse(bo)
     val hk = max(0f, nx * Light.keyHalf[0] + ny * Light.keyHalf[1] + nz * Light.keyHalf[2])
     val hf = max(0f, nx * Light.fillHalf[0] + ny * Light.fillHalf[1] + nz * Light.fillHalf[2])
-    val spec = if (material == MAT_ENAMEL) pow2n(hk, 6) * 0.55f + pow2n(hf, 5) * 0.12f else pow2n(hk, 4) * 0.14f
+    val gloss = ((base ushr 24) and 0xFF) / 255f
+    val spec = when (material) {
+        MAT_ENAMEL -> pow2n(hk, 6) * 0.55f + pow2n(hf, 5) * 0.12f
+        MAT_GUM -> pow2n(hk, 5) * (0.06f + 0.34f * gloss) + pow2n(hk, 3) * 0.05f * (1f - gloss) // stippled = broad, dull sheen
+        else -> pow2n(hk, 4) * 0.14f
+    }
     val edge = 1f - abs(nz)
     val rim = edge * edge * edge * (if (material == MAT_ENAMEL) 0.20f else 0.12f) + max(0f, nx * b[0] + ny * b[1] + nz * b[2]) * 0.10f
     fun ch(shift: Int, rimTint: Float): Int {

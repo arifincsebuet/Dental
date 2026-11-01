@@ -34,7 +34,11 @@ const RESTORATION := Color("4f7fe8")
 const TREATED := Color("60a5fa")
 const GUM_DEEP := Color("d4848b")
 const SULCUS := Color("c46d75")
-const PALATE := Color("e3a0a5")
+const PALATE := Color("e9aaaf")
+const MUCOSA := Color("c8606b")
+const MARGIN := Color("f2aeb2")
+const VESSEL := Color("a3424f")
+const RUGA := Color("edb3b7")
 const CEMENTUM := Color("e6d2a8")
 const APEX := Color("c9ad7c")
 const FISSURE := Color("c4a57a")
@@ -479,6 +483,7 @@ func gum_band(height: float, factor: float, shift: float, wide: bool, max_positi
 			var vertices: Array[Vector3] = []
 			var normals: Array[Vector3] = []
 			var colors: Array[Color] = []
+			var uvs: Array[Vector2] = []
 			for point in [Vector2(section, ring), Vector2(section + 1, ring), Vector2(section, ring + 1), Vector2(section + 1, ring + 1)]:
 				var angle: float = -1.70 + point.x / float(sections) * 3.40
 				var cross_angle: float = point.y / float(rings) * TAU
@@ -498,9 +503,11 @@ func gum_band(height: float, factor: float, shift: float, wide: bool, max_positi
 				var offset := outward * (cs * radius_x + inner) + Vector3.UP * (sn * radius_y * stretch - up * reach)
 				vertices.append(center + offset)
 				normals.append((outward * cs / radius_x + Vector3.UP * sn / (radius_y * stretch)).normalized())
-				colors.append(GUM.lerp(GUM_DEEP, max(0.0, sin(cross_angle) * up) * 0.6).lerp(SULCUS, 0.35 * pow(toward_teeth, 4.0)))
+				colors.append(gum_color(toward_teeth, max(0.0, sin(cross_angle) * up), angle, cross_angle, center + offset))
+				uvs.append(Vector2(angle * 8.0, cross_angle * 1.5))
 			for index in [0, 2, 1, 1, 2, 3]:
 				tool.set_color(colors[index])
+				tool.set_uv(uvs[index])
 				tool.set_normal(normals[index])
 				tool.add_vertex(vertices[index])
 	if up > 0.0: add_palate(tool, center_y, factor, shift, wide)
@@ -509,6 +516,7 @@ func gum_band(height: float, factor: float, shift: float, wide: bool, max_positi
 	mesh.mesh = tool.commit()
 	var gum_material := mat(Color.WHITE, 0.45)
 	gum_material.vertex_color_use_as_albedo = true
+	apply_gum_texture(gum_material)
 	gum_material.rim = 0.35
 	gum_material.rim_tint = 0.2
 	mesh.material_override = gum_material
@@ -516,6 +524,53 @@ func gum_band(height: float, factor: float, shift: float, wide: bool, max_positi
 	return mesh
 
 ## Domed palate closing the upper arch (visible in the upper occlusal view).
+## Gingiva colour zones (shared with the profile preview):
+## marginal gingiva lighter at the tooth, coral stippled attached gingiva, a mucogingival junction into
+## deeper red, shinier alveolar mucosa with fine vessels, and a dark sulcus line at the very edge.
+func gum_color(toward: float, apical: float, angle: float, cross_angle: float, p: Vector3) -> Color:
+	var c := GUM.lerp(MUCOSA, smoothstep(0.35, 0.75, apical))
+	c = c.lerp(MARGIN, 0.5 * smoothstep(0.55, 0.9, toward))
+	c = c.lerp(SULCUS, 0.35 * pow(toward, 6.0))
+	var mucosa := smoothstep(0.45, 0.85, apical)
+	var vessel := pow(0.5 + 0.5 * sin(angle * 11.0 + 2.2 * sin(cross_angle * 3.0 + angle * 4.0)), 10.0)
+	c = c.lerp(VESSEL, 0.55 * mucosa * vessel)
+	var n := fposmod(sin(p.x * 12.9898 + p.y * 78.233 + p.z * 37.719) * 43758.5453, 1.0)
+	var f := 1.0 + (n - 0.5) * 0.10 * (1.0 - mucosa)
+	return Color(c.r * f, c.g * f, c.b * f, 1.0)
+
+## Transverse palatal rugae near the front of the palate (0 → 1 ridge strength).
+func ruga(angle: float, t: float) -> float:
+	return pow(max(0.0, sin(t * PI * 6.0)), 2.0) * clampf(1.0 - abs(angle) / 0.75, 0.0, 1.0) * sin(t * PI)
+
+## Stippled ("orange-peel") attached gingiva and varying gloss, as procedural textures. Generated once.
+var gum_normal: NoiseTexture2D
+var gum_roughness: NoiseTexture2D
+func apply_gum_texture(material: StandardMaterial3D) -> void:
+	if gum_normal == null:
+		var stipple := FastNoiseLite.new()
+		stipple.noise_type = FastNoiseLite.TYPE_CELLULAR
+		stipple.cellular_return_type = FastNoiseLite.RETURN_DISTANCE
+		stipple.frequency = 0.09
+		gum_normal = NoiseTexture2D.new()
+		gum_normal.width = 256
+		gum_normal.height = 256
+		gum_normal.seamless = true
+		gum_normal.as_normal_map = true
+		gum_normal.bump_strength = 2.2
+		gum_normal.noise = stipple
+		var sheen := FastNoiseLite.new()
+		sheen.frequency = 0.03
+		gum_roughness = NoiseTexture2D.new()
+		gum_roughness.width = 128
+		gum_roughness.height = 128
+		gum_roughness.seamless = true
+		gum_roughness.noise = sheen
+	material.normal_enabled = true
+	material.normal_texture = gum_normal
+	material.normal_scale = 0.45
+	material.roughness_texture = gum_roughness
+	material.roughness = 0.55
+
 func add_palate(tool: SurfaceTool, center_y: float, factor: float, shift: float, wide: bool) -> void:
 	var sections := 70
 	var rows := 8
@@ -524,6 +579,8 @@ func add_palate(tool: SurfaceTool, center_y: float, factor: float, shift: float,
 	for section in range(sections):
 		for row in range(rows):
 			var quad: Array[Vector3] = []
+			var tints: Array[Color] = []
+			var uvs: Array[Vector2] = []
 			for point in [Vector2(section, row), Vector2(section + 1, row), Vector2(section, row + 1), Vector2(section + 1, row + 1)]:
 				var angle: float = -1.35 + point.x / float(sections) * 2.70
 				var t: float = point.y / float(rows)
@@ -532,10 +589,14 @@ func add_palate(tool: SurfaceTool, center_y: float, factor: float, shift: float,
 				var lingual := Vector3(sin(angle) * ARCH_A * factor, center_y, (cos(angle) * ARCH_B - ARCH_SHIFT) * factor + shift) + outward * (-radius_x + (-0.20 * factor if wide else 0.0))
 				var middle := Vector3(0, peak, lingual.z)
 				var p := lingual.lerp(middle, t)
-				p.y = lerpf(center_y, peak, t * t * (3.0 - 2.0 * t))
+				var r := ruga(angle, t)
+				p.y = lerpf(center_y, peak, t * t * (3.0 - 2.0 * t)) - 0.05 * factor * r
 				quad.append(p)
+				tints.append(PALATE.lerp(RUGA, 0.55 * r))
+				uvs.append(Vector2(angle * 6.0, t * 3.0))
 			for index in [0, 2, 1, 1, 2, 3]:
-				tool.set_color(PALATE)
+				tool.set_color(tints[index])
+				tool.set_uv(uvs[index])
 				tool.set_normal(Vector3.DOWN)
 				tool.add_vertex(quad[index])
 

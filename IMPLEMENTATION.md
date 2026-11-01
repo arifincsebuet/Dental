@@ -100,6 +100,8 @@ The profile preview (`Teeth3DView.kt`) is a line-for-line port of the Godot gene
 - anatomical roots: one, two or three roots by tooth type, tapered, divergent and distally curved, in cementum colour. Godot's Roots toggle and the preview's X-ray button show them through translucent gum.
 - enamel mottling and stained occlusal fissures. Godot also adds a procedural micro-relief normal map and gloss texture.
 
+- gingiva colour zones: a lighter marginal gingiva and a dark sulcus line at the tooth, then coral stippled attached gingiva. A mucogingival junction leads into deeper red, glossier alveolar mucosa with fine vessels. The palate has transverse rugae. Godot also uses a cellular-noise stippling normal map and gloss texture. The preview carries per-vertex gloss in the vertex-colour alpha.
+
 Changes to one must be made in the other.
 
 ### Inline 3D on profiles
