@@ -121,11 +121,15 @@ private object Palette {
     const val GUM_DEEP = 0xFFD4848B.toInt()
     const val SULCUS = 0xFFC46D75.toInt()
     const val PALATE = 0xFFE3A0A5.toInt()
+    const val CEMENTUM = 0xFFE6D2A8.toInt()
+    const val APEX = 0xFFC9AD7C.toInt()
+    const val FISSURE = 0xFFC4A57A.toInt()
     const val SELECT = 0xFF14B8A6.toInt()
 }
 
 private const val MAT_ENAMEL: Byte = 0
 private const val MAT_GUM: Byte = 1
+private const val MAT_ROOT: Byte = 2
 
 private fun mix(a: Int, b: Int, t: Float): Int {
     val k = t.coerceIn(0f, 1f)
@@ -255,6 +259,41 @@ private fun enamel(color: Int, level: Float, kind: Kind): Int {
     if (kind == Kind.INCISOR || kind == Kind.CANINE) result = mix(result, Palette.TRANSLUCENT, 0.42f * level.pow(5))
     return scale(result, 0.80f + 0.20f * (level / 0.35f).coerceIn(0f, 1f))
 }
+// chart.gd: mottle — stable per-vertex enamel brightness variation
+private fun mottle(color: Int, p: Vec): Int {
+    val v = sin(p.x * 12.9898 + p.y * 78.233 + p.z * 37.719) * 43758.5453
+    val n = (v - kotlin.math.floor(v)).toFloat()
+    return scale(color, 0.975f + 0.05f * n)
+}
+// chart.gd: fissure_stain
+private fun fissureStain(color: Int, kind: Kind, u: Float, v: Float): Int {
+    if (kind != Kind.PREMOLAR && kind != Kind.MOLAR) return color
+    var groove = exp(-v * v * 70f)
+    if (kind == Kind.MOLAR) groove = max(groove, exp(-u * u * 70f) * 0.8f)
+    return mix(color, Palette.FISSURE, 0.50f * groove)
+}
+// chart.gd: root_specs — [mesial, facial offset, length × crown height, radius x, radius z, mesial tilt, facial tilt]
+private fun rootSpecs(kind: Kind, position: Int, upper: Boolean, primary: Boolean): List<FloatArray> {
+    val specs = when (kind) {
+        Kind.INCISOR -> listOf(floatArrayOf(0f, 0f, if (upper && position == 1) 1.30f else 1.20f, 0.70f, 0.90f, 0f, 0f))
+        Kind.CANINE -> listOf(floatArrayOf(0f, 0f, 1.65f, 0.70f, 0.90f, 0f, 0f))
+        Kind.PREMOLAR -> if (upper && position == 4) listOf(floatArrayOf(0f, 0.42f, 1.25f, 0.55f, 0.42f, 0f, 0.10f), floatArrayOf(0f, -0.42f, 1.20f, 0.55f, 0.42f, 0f, -0.10f))
+            else listOf(floatArrayOf(0f, 0f, 1.35f, 0.62f, 0.88f, 0f, 0f))
+        Kind.MOLAR -> if (upper) listOf(floatArrayOf(0.45f, 0.36f, 1.15f, 0.38f, 0.40f, 0.12f, 0.08f), floatArrayOf(-0.45f, 0.36f, 1.05f, 0.36f, 0.38f, -0.12f, 0.08f), floatArrayOf(0f, -0.45f, 1.25f, 0.40f, 0.42f, 0f, -0.18f))
+            else listOf(floatArrayOf(0.45f, 0f, 1.20f, 0.40f, 0.80f, 0.10f, 0f), floatArrayOf(-0.45f, 0f, 1.10f, 0.38f, 0.74f, -0.08f, 0f))
+    }
+    if (primary) specs.forEach { it[2] *= 0.8f; it[5] *= 1.6f; it[6] *= 1.6f }
+    return specs
+}
+// chart.gd: root_point — local (x mesial-signed, y toward the apex, z facial)
+private fun rootPoint(spec: FloatArray, angle: Float, t: Float, sx: Float, sy: Float, sz: Float, signY: Float, mesialSign: Float): Triple<Float, Float, Float> {
+    val length = spec[2] * sy
+    val taper = 0.10f + 0.90f * (1f - t.pow(1.8f)).pow(0.7f) // wide neck, rounded apex
+    val (ex, ez) = boundary(angle, sx * 0.5f * spec[3] * taper, sz * 0.5f * spec[4] * taper, 2.4f)
+    val cx = spec[0] * sx * 0.5f * (1f - 0.25f * t) + spec[5] * length * t.pow(1.5f) - 0.06f * length * t * t
+    val cz = spec[1] * sz * 0.5f * (1f - 0.25f * t) + spec[6] * length * t.pow(1.5f)
+    return Triple(ex + cx * mesialSign, -signY * (t * length - 0.02f), ez + cz)
+}
 // chart.gd: papilla
 private fun papilla(angle: Float, maxPosition: Int) = 0.5f + 0.5f * cos(2f * Math.PI.toFloat() * (abs(angle) * maxPosition / 1.62f - 0.05f))
 
@@ -362,6 +401,10 @@ private fun buildJaw(builder: SceneBuilder, slots: MutableList<SlotInfo>, teeth:
                 val x = ex * radius * tw; val z = ez * radius * td
                 return world(x, topHeight(kind, x / hx, z / hz) * sy * signY, z)
             }
+            fun capColor(angle: Float, radius: Float, p: Vec): Int {
+                val (ex, ez) = boundary(angle, hx, hz, exponent)
+                return mottle(fissureStain(enamel(top, 1f, kind), kind, ex * radius * tw / hx, ez * radius * td / hz), p)
+            }
             val inside = world(0f, signY * sy * 0.45f, 0f)
             val segments = 20; val levels = 8
             val step = (2.0 * Math.PI / segments).toFloat()
@@ -372,23 +415,39 @@ private fun buildJaw(builder: SceneBuilder, slots: MutableList<SlotInfo>, teeth:
                 val (nax, naz) = boundary(a, hx * 0.62f, hz * 0.62f, exponent)
                 val (nbx, nbz) = boundary(b, hx * 0.62f, hz * 0.62f, exponent)
                 val dark = enamel(face, 0f, kind)
-                builder.quad(world(nax, -signY * sy * 0.16f, naz), world(nbx, -signY * sy * 0.16f, nbz), side(a, 0f), side(b, 0f), inside,
-                    dark, dark, dark, dark, slotIndex, MAT_ENAMEL)
+                val na = world(nax, -signY * sy * 0.16f, naz); val nb = world(nbx, -signY * sy * 0.16f, nbz)
+                builder.quad(na, nb, side(a, 0f), side(b, 0f), inside, dark, dark, dark, dark, slotIndex, MAT_ENAMEL)
                 for (level in 0 until levels) {
                     val lo = level.toFloat() / levels; val hi = (level + 1).toFloat() / levels
-                    builder.quad(side(a, lo), side(b, lo), side(a, hi), side(b, hi), inside,
-                        enamel(face, lo, kind), enamel(face, lo, kind), enamel(face, hi, kind), enamel(face, hi, kind), slotIndex, MAT_ENAMEL)
+                    val p0 = side(a, lo); val p1 = side(b, lo); val p2 = side(a, hi); val p3 = side(b, hi)
+                    builder.quad(p0, p1, p2, p3, inside, mottle(enamel(face, lo, kind), p0), mottle(enamel(face, lo, kind), p1),
+                        mottle(enamel(face, hi, kind), p2), mottle(enamel(face, hi, kind), p3), slotIndex, MAT_ENAMEL)
                 }
             }
             val capInside = world(0f, signY * sy * 0.2f, 0f)
-            val topColor = enamel(top, 1f, kind)
             val rings = 4
             for (ring in 0 until rings) {
                 val r0 = ring.toFloat() / rings; val r1 = (ring + 1).toFloat() / rings
                 for (segment in 0 until segments) {
                     val a = step * segment; val b = step * (segment + 1)
-                    if (ring == 0) builder.triangle(cap(a, 0f), cap(a, r1), cap(b, r1), capInside, topColor, topColor, topColor, slotIndex, MAT_ENAMEL)
-                    else builder.quad(cap(a, r0), cap(b, r0), cap(a, r1), cap(b, r1), capInside, topColor, topColor, topColor, topColor, slotIndex, MAT_ENAMEL)
+                    val q0 = cap(a, r0); val q1 = cap(b, r0); val q2 = cap(a, r1); val q3 = cap(b, r1)
+                    if (ring == 0) builder.triangle(q0, q2, q3, capInside, capColor(a, 0f, q0), capColor(a, r1, q2), capColor(b, r1, q3), slotIndex, MAT_ENAMEL)
+                    else builder.quad(q0, q1, q2, q3, capInside, capColor(a, r0, q0), capColor(b, r0, q1), capColor(a, r1, q2), capColor(b, r1, q3), slotIndex, MAT_ENAMEL)
+                }
+            }
+            // chart.gd: add_roots — shown in X-ray mode (implants have no natural roots).
+            if (replacement != "implant") for (spec in rootSpecs(kind, position, isUpper, primary)) {
+                val rootSegments = 14; val rootRings = 8
+                fun rp(angle: Float, t: Float): Vec { val (x, y, z) = rootPoint(spec, angle, t, sx, sy, sz, signY, mesialSign); return world(x, y, z) }
+                for (ring in 0 until rootRings) {
+                    val t0 = ring.toFloat() / rootRings; val t1 = (ring + 1).toFloat() / rootRings
+                    val axis = (rp(0f, (t0 + t1) * 0.5f) + rp(Math.PI.toFloat(), (t0 + t1) * 0.5f)) * 0.5f
+                    val c0 = mix(Palette.CEMENTUM, Palette.APEX, t0 * t0); val c1 = mix(Palette.CEMENTUM, Palette.APEX, t1 * t1)
+                    for (segment in 0 until rootSegments) {
+                        val a = (2.0 * Math.PI / rootSegments * segment).toFloat(); val b = (2.0 * Math.PI / rootSegments * (segment + 1)).toFloat()
+                        val p0 = rp(a, t0); val p1 = rp(b, t0); val p2 = rp(a, t1); val p3 = rp(b, t1)
+                        builder.quad(p0, p1, p2, p3, axis, mottle(c0, p0), mottle(c0, p1), mottle(c1, p2), mottle(c1, p3), slotIndex, MAT_ROOT)
+                    }
                 }
             }
         }
@@ -521,6 +580,7 @@ fun Teeth3DView(
     modifier: Modifier = Modifier,
     selectedTeeth: Set<String> = emptySet(),
     showLabels: Boolean = false,
+    showRoots: Boolean = false,
     onToothTap: ((String) -> Unit)? = null,
 ) {
     val signature = chart?.optJSONObject("teeth")?.toString().orEmpty() + "|" + chart?.optString("dentition").orEmpty()
@@ -601,6 +661,7 @@ fun Teeth3DView(
         val v = scene.vertices; val n = scene.normals; val vn = scene.vertexNormals
         var visible = 0
         for (t in 0 until scene.triangles) {
+            if (scene.materials[t] == MAT_ROOT && !showRoots) continue
             val nx0 = n[t * 3]; val ny0 = n[t * 3 + 1]; val nz0 = n[t * 3 + 2]
             val nx = r00 * nx0 + r01 * ny0 + r02 * nz0
             val ny = r10 * nx0 + r11 * ny0 + r12 * nz0
@@ -628,7 +689,9 @@ fun Teeth3DView(
                 val sz = r20 * vn[i] + r21 * vn[i + 1] + r22 * vn[i + 2]
                 var base = scene.vertexColors[t * 3 + k]
                 if (selected) base = mix(base, Palette.SELECT, 0.45f)
-                buffers.shade[visible * 3 + k] = shade(base, sx, sy, sz, material)
+                val lit = shade(base, sx, sy, sz, material)
+                // X-ray: translucent gingiva reveals the roots (painter's order blends back to front).
+                buffers.shade[visible * 3 + k] = if (showRoots && material == MAT_GUM) (lit and 0x00FFFFFF) or (0x5C shl 24) else lit
             }
             val depthBits = ((100f - depthSum / 3f) * 10_000f).toLong().coerceIn(0, Int.MAX_VALUE.toLong())
             buffers.sortKeys[visible] = (depthBits shl 32) or visible.toLong()

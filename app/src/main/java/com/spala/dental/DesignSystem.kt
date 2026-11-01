@@ -308,6 +308,7 @@ fun Teeth3DHeroCard(
     footer: @Composable ColumnScope.() -> Unit = {},
 ) {
     var labels by rememberSaveable { mutableStateOf(true) }
+    var roots by rememberSaveable { mutableStateOf(false) }
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = SurfaceWhite, border = BorderStroke(1.dp, Hairline), shadowElevation = 2.dp) {
         Column {
             Box(
@@ -319,9 +320,9 @@ fun Teeth3DHeroCard(
                     val c = Offset(size.width / 2f, size.height * 0.55f)
                     for (i in 1..3) drawCircle(Color.White.copy(alpha = 0.35f / i), size.minDimension * (0.22f + i * 0.14f), c, style = Stroke(1.dp.toPx()))
                 }
-                Teeth3DView(chart, Modifier.matchParentSize(), selectedTeeth = selectedTeeth, showLabels = labels, onToothTap = onToothTap)
+                Teeth3DView(chart, Modifier.matchParentSize(), selectedTeeth = selectedTeeth, showLabels = labels, showRoots = roots, onToothTap = onToothTap)
                 // Leave room for the two round buttons at the top-right so long names never run under them.
-                Column(Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 16.dp, end = 112.dp)) {
+                Column(Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 16.dp, end = 160.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Teal700).padding(horizontal = 7.dp, vertical = 3.dp)) {
                             Text("3D", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
@@ -331,6 +332,7 @@ fun Teeth3DHeroCard(
                     Text(subtitle, style = MaterialTheme.typography.bodySmall, color = InkMuted, modifier = Modifier.padding(top = 2.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Row(Modifier.align(Alignment.TopEnd).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HeroIconButton(Glyph.Tooth, if (roots) "Hide roots" else "Show roots (X-ray)", active = roots) { roots = !roots }
                     HeroIconButton(Glyph.Labels, if (labels) "Hide tooth numbers" else "Show tooth numbers", active = labels) { labels = !labels }
                     if (onOpenFull != null) HeroIconButton(Glyph.Expand, "Open full 3D chart", active = false, onClick = onOpenFull)
                 }
