@@ -300,16 +300,18 @@ fun Teeth3DHeroCard(
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
-    selectedTooth: String? = null,
+    selectedTeeth: Set<String> = emptySet(),
     onToothTap: ((String) -> Unit)? = null,
     onOpenFull: (() -> Unit)? = null,
+    height: Dp = 340.dp,
+    banner: @Composable BoxScope.() -> Unit = { HeroHint("Drag to rotate · pinch to zoom · double-tap to reset") },
     footer: @Composable ColumnScope.() -> Unit = {},
 ) {
-    var labels by rememberSaveable { mutableStateOf(false) }
+    var labels by rememberSaveable { mutableStateOf(true) }
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = SurfaceWhite, border = BorderStroke(1.dp, Hairline), shadowElevation = 2.dp) {
         Column {
             Box(
-                Modifier.fillMaxWidth().height(300.dp)
+                Modifier.fillMaxWidth().height(height)
                     .background(Brush.verticalGradient(listOf(HeroTop, HeroBottom))),
             ) {
                 // Faint studio rings behind the model.
@@ -317,7 +319,7 @@ fun Teeth3DHeroCard(
                     val c = Offset(size.width / 2f, size.height * 0.55f)
                     for (i in 1..3) drawCircle(Color.White.copy(alpha = 0.35f / i), size.minDimension * (0.22f + i * 0.14f), c, style = Stroke(1.dp.toPx()))
                 }
-                Teeth3DView(chart, Modifier.matchParentSize(), selectedTooth = selectedTooth, showLabels = labels, onToothTap = onToothTap)
+                Teeth3DView(chart, Modifier.matchParentSize(), selectedTeeth = selectedTeeth, showLabels = labels, onToothTap = onToothTap)
                 Column(Modifier.align(Alignment.TopStart).padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Teal700).padding(horizontal = 7.dp, vertical = 3.dp)) {
@@ -331,16 +333,22 @@ fun Teeth3DHeroCard(
                     HeroIconButton(Glyph.Labels, if (labels) "Hide tooth numbers" else "Show tooth numbers", active = labels) { labels = !labels }
                     if (onOpenFull != null) HeroIconButton(Glyph.Expand, "Open full 3D chart", active = false, onClick = onOpenFull)
                 }
-                Text(
-                    "Drag to rotate · pinch to zoom · double-tap to reset",
-                    style = MaterialTheme.typography.labelSmall, color = InkMuted.copy(alpha = .9f),
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
-                        .clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = .7f)).padding(horizontal = 10.dp, vertical = 4.dp),
-                )
+                banner()
             }
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = footer)
         }
     }
+}
+
+/** Small pill at the bottom of the 3D stage. */
+@Composable
+fun BoxScope.HeroHint(text: String, highlight: Boolean = false) {
+    Text(
+        text, style = MaterialTheme.typography.labelSmall, color = if (highlight) Color.White else InkMuted,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(50)).background(if (highlight) Teal700 else Color.White.copy(alpha = .75f))
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+    )
 }
 
 @Composable
@@ -361,6 +369,7 @@ fun ChartLegendRow() {
         LegendDot(InkSubtle, "Unassessed", hollow = true)
         LegendDot(Amber600, "Finding")
         LegendDot(Blue600, "Restoration")
+        LegendDot(Color(0xFF60A5FA), "Treated")
         LegendDot(Teal700, "Planned care")
         LegendDot(Color(0xFF64748B), "Recorded loss")
     }

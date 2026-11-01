@@ -69,6 +69,8 @@ var arch_filter := "Both"
 var current_view := "Front"
 var input_valid := true
 var read_only := false
+var notation := "palmer"
+var loading_overlay: ColorRect
 
 # UI
 var canvas := CanvasLayer.new()
@@ -108,6 +110,7 @@ func _ready() -> void:
 		if parsed is Dictionary and parsed.get("schemaVersion", 0) == 2 and parsed.get("teeth", null) is Dictionary:
 			chart = parsed
 			read_only = chart.get("readOnly", false)
+			notation = str(chart.get("notation", "palmer"))
 		else:
 			input_valid = false
 	add_child(rig)
@@ -119,11 +122,37 @@ func _ready() -> void:
 	camera.fov = 40
 	camera.near = 0.05
 	build_environment()
+	build_ui()
+	show_loading()
+	update_camera()
+	set_process_unhandled_input(false)
+	# Let the first (overlay) frame present before building meshes, then fade the model in.
+	await get_tree().process_frame
+	await get_tree().process_frame
 	if input_valid:
 		build_inventory()
-	build_ui()
-	update_camera()
+	toggle_buttons["123"].button_pressed = show_labels
 	set_process_unhandled_input(input_valid)
+	var fade := create_tween()
+	fade.tween_property(loading_overlay, "color:a", 0.0, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	fade.parallel().tween_property(loading_overlay.get_child(0), "modulate:a", 0.0, 0.25)
+	fade.tween_callback(loading_overlay.queue_free)
+
+func show_loading() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 10
+	add_child(layer)
+	loading_overlay = ColorRect.new()
+	loading_overlay.color = Color("f5fbfc")
+	loading_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	loading_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(loading_overlay)
+	var text := label("Preparing 3D chart…", 30, TEAL, true)
+	text.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	text.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	text.grow_vertical = Control.GROW_DIRECTION_BOTH
+	loading_overlay.add_child(text)
 
 func build_environment() -> void:
 	var world := WorldEnvironment.new()
@@ -217,6 +246,7 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 				var color := ENAMEL if state.get("assessment", "not_assessed") == "assessed" else UNKNOWN
 				if presence == "unerupted": color = Color(0.80, 0.87, 0.91, 0.5)
 				if absent and replacement == "implant": color = Color("e9eef2")
+				if state.get("treated", false): color = color.lerp(Color("60a5fa"), 0.22)
 				var crown := MeshInstance3D.new()
 				crown.name = "Crown"
 				crown.mesh = crown_mesh(kind, dimensions, sign_y)
@@ -237,7 +267,7 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 			body.add_child(collision)
 			var tooth_label := Label3D.new()
 			tooth_label.name = "SlotLabel"
-			tooth_label.text = key
+			tooth_label.text = notation_short(key)
 			tooth_label.font_size = 40
 			tooth_label.outline_size = 12
 			tooth_label.pixel_size = 0.0042
@@ -503,7 +533,9 @@ func box_style(color: Color, radius: int = 24, shadow: int = 0, border: Color = 
 		style.border_color = border
 	return style
 
-func label(text: String, size: int, color: Color, bold: bool = false) -> Label:
+## Labels never wrap unless asked: an autowrapped Label inside a flow/box row has zero minimum
+## width and collapses to one character per line.
+func label(text: String, size: int, color: Color, bold: bool = false, wrap: bool = false) -> Label:
 	var result := Label.new()
 	result.text = text
 	result.add_theme_font_size_override("font_size", size)
@@ -511,7 +543,10 @@ func label(text: String, size: int, color: Color, bold: bool = false) -> Label:
 	if bold:
 		result.add_theme_constant_override("outline_size", 1)
 		result.add_theme_color_override("font_outline_color", color)
-	result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if wrap:
+		result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		result.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		result.custom_minimum_size.x = 240
 	return result
 
 ## Pill button. Toggle buttons show a filled teal state when pressed.
@@ -639,7 +674,7 @@ func build_ui() -> void:
 	if not input_valid:
 		var error := PanelContainer.new()
 		error.add_theme_stylebox_override("panel", box_style(Color("fff1f2"), 28, 10, Color("fecdd3")))
-		error.add_child(label("This chart version cannot be displayed safely. Return and use the 2D chart.", 26, Color("be123c")))
+		error.add_child(label("This chart version cannot be displayed safely. Return and use the 2D chart.", 26, Color("be123c"), false, true))
 		top.add_child(error)
 
 	# --- Right rail -------------------------------------------------------------------------
@@ -686,8 +721,8 @@ func build_ui() -> void:
 	# Idle: arch filter, guidance and legend.
 	sheet_idle.add_theme_constant_override("separation", 18)
 	sheet_idle.add_child(segmented(["Both", "Upper", "Lower"], arch_buttons, set_arch))
-	sheet_idle.add_child(label("Historical chart · read only. Tap a tooth to review it." if read_only else "Tap any tooth to inspect it, then choose a surface to assess.", 25, INK))
-	sheet_idle.add_child(label("Drag to rotate  ·  pinch to zoom  ·  two fingers to pan  ·  double-tap to reset", 21, MUTED))
+	sheet_idle.add_child(label("View only · tap a tooth to review its record." if read_only else "Tap a tooth to review it and record treatment.", 25, INK, false, true))
+	sheet_idle.add_child(label("Drag to rotate  ·  pinch to zoom  ·  two fingers to pan  ·  double-tap to reset", 21, MUTED, false, true))
 	var legend := HFlowContainer.new()
 	legend.add_theme_constant_override("h_separation", 26)
 	legend.add_theme_constant_override("v_separation", 12)
@@ -695,6 +730,7 @@ func build_ui() -> void:
 	legend.add_child(legend_item(Color("94a3b8"), "Unassessed", true))
 	legend.add_child(legend_item(AMBER, "Finding"))
 	legend.add_child(legend_item(BLUE, "Restoration"))
+	legend.add_child(legend_item(Color("60a5fa"), "Treated"))
 	legend.add_child(legend_item(TEAL, "Planned care (+)"))
 	legend.add_child(legend_item(Color("64748b"), "Recorded loss (×)"))
 	sheet_idle.add_child(legend)
@@ -708,7 +744,7 @@ func build_ui() -> void:
 	var badge := PanelContainer.new()
 	badge.custom_minimum_size = Vector2(104, 104)
 	badge.add_theme_stylebox_override("panel", box_style(TEAL, 30))
-	badge_label.add_theme_font_size_override("font_size", 38)
+	badge_label.add_theme_font_size_override("font_size", 34)
 	badge_label.add_theme_color_override("font_color", Color.WHITE)
 	badge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	badge_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -721,10 +757,12 @@ func build_ui() -> void:
 	name_label.add_theme_font_size_override("font_size", 30)
 	name_label.add_theme_color_override("font_color", INK)
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	name_label.custom_minimum_size.x = 260
 	names.add_child(name_label)
 	status_label.add_theme_font_size_override("font_size", 23)
 	status_label.add_theme_color_override("font_color", MUTED)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status_label.custom_minimum_size.x = 260
 	names.add_child(status_label)
 	var close := fab("×")
 	close.custom_minimum_size = Vector2(80, 80)
@@ -749,13 +787,14 @@ func build_ui() -> void:
 	surface_hint.add_theme_font_size_override("font_size", 22)
 	surface_hint.add_theme_color_override("font_color", MUTED)
 	surface_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	surface_hint.custom_minimum_size.x = 260
 	pad_text.add_child(surface_hint)
 	var whole := pill("Whole tooth", true)
 	whole.pressed.connect(pick_surface.bind(""))
 	surface_buttons[""] = whole
 	pad_text.add_child(whole)
 
-	assess_button = pill("Assess tooth", false, true)
+	assess_button = pill("Record treatment", false, true)
 	assess_button.custom_minimum_size = Vector2(0, 96)
 	assess_button.add_theme_font_size_override("font_size", 30)
 	assess_button.pressed.connect(edit_selected)
@@ -886,8 +925,8 @@ func select_tooth(body: Node3D) -> void:
 	# Gently bring the tooth toward the centre without losing arch context.
 	target = body.global_position * 0.45
 	distance = min(distance, 10.5)
-	badge_label.text = selected
-	name_label.text = tooth_name(selected)
+	badge_label.text = notation_label(selected)
+	name_label.text = tooth_name(selected) + ("" if notation == "fdi" else "  (FDI " + selected + ")")
 	status_label.text = str(state.get("assessment", "not_assessed")).replace("_", " ").capitalize() + "  ·  " + str(state.get("presence", "unknown")).replace("_", " ")
 	if state.get("replacement", "none") not in ["none", ""]:
 		status_label.text += "  ·  " + str(state.get("replacement")).replace("_", " ")
@@ -958,9 +997,9 @@ func refresh_details(state: Dictionary) -> void:
 		surface_hint.text = "Whole tooth selected. Tap a surface on the pad to assess it individually."
 	else:
 		surface_hint.text = surface_name(selected_surface) + " surface · " + str(facts.get("assessment", "not_assessed")).replace("_", " ")
-	assess_button.text = "Assess tooth " + selected + ("" if selected_surface == "" else "  ·  " + surface_name(selected_surface))
+	assess_button.text = "Record treatment  ·  " + notation_label(selected) + ("" if selected_surface == "" else "  ·  " + surface_name(selected_surface))
 	assess_button.disabled = read_only
-	if read_only: assess_button.text = "Historical chart · read only"
+	if read_only: assess_button.text = "View only"
 
 func surface_name(surface: String) -> String:
 	var anterior := selected != "" and int(selected[1]) <= 3
@@ -973,6 +1012,27 @@ func surface_name(surface: String) -> String:
 		"I": return "Incisal"
 		"O": return "Occlusal"
 	return surface
+
+## Display numbering (stored keys stay FDI). Palmer: 1-8 / A-E per quadrant; Universal: 1-32 / A-T.
+func notation_short(key: String) -> String:
+	var quadrant := int(key[0])
+	var position := int(key[1])
+	match notation:
+		"fdi": return key
+		"universal":
+			var codes := {1: 9 - position, 2: 8 + position, 3: 25 - position, 4: 24 + position}
+			if codes.has(quadrant): return str(codes[quadrant])
+			var letters := "ABCDEFGHIJKLMNOPQRST"
+			var index := {5: 5 - position, 6: 4 + position, 7: 15 - position, 8: 14 + position}
+			return letters[index[quadrant]]
+	return str(position) if quadrant <= 4 else "ABCDE"[position - 1]
+
+func notation_label(key: String) -> String:
+	match notation:
+		"fdi": return key
+		"universal": return "#" + notation_short(key)
+	var prefix := {1: "UR", 2: "UL", 3: "LL", 4: "LR", 5: "UR", 6: "UL", 7: "LL", 8: "LR"}
+	return prefix[int(key[0])] + notation_short(key)
 
 func tooth_name(key: String) -> String:
 	var quadrant := int(key[0])
@@ -1055,6 +1115,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch and not event.pressed: fingers.erase(event.index)
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if selected != "": clear_selection()
+		else: go_back()
+		return
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		fingers.clear()
 		moved = true

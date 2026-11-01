@@ -12,6 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -76,11 +83,11 @@ fun chartCounts(chart: JSONObject?): ChartCounts {
         val surfaces = tooth.optJSONObject("surfaces")
         var toothFinding = (tooth.optJSONArray("findings")?.length() ?: 0) > 0
         var toothRestoration = false
-        surfaces?.keys()?.forEach { surface ->
+        surfaces?.let { surfaces -> surfaces.keys().forEach { surface ->
             val observation = surfaces.optJSONObject(surface)
             if ((observation?.optJSONArray("findings")?.length() ?: 0) > 0) toothFinding = true
             if ((observation?.optJSONArray("restorations")?.length() ?: 0) > 0) toothRestoration = true
-        }
+        } }
         if (toothFinding) findings++
         if (toothRestoration) restorations++
         if ((tooth.optJSONArray("treatmentStates")?.length() ?: 0) > 0) planned++
@@ -114,7 +121,7 @@ private class Vec(val x: Float, val y: Float, val z: Float) {
 /** One selectable slot: anchor points for badges/picking and its rendering facts. */
 private class SlotInfo(
     val key: String, val tip: Vec, val cervical: Vec, val facial: Vec,
-    val lost: Boolean, val planned: Boolean, val finding: Boolean, val restoration: Boolean,
+    val lost: Boolean, val planned: Boolean, val finding: Boolean, val restoration: Boolean, val treated: Boolean,
 )
 
 private class DentalScene(
@@ -123,6 +130,7 @@ private class DentalScene(
     val vertexNormals: FloatArray, // 9 floats per triangle (smoothed, used for shading)
     val colors: IntArray,      // base ARGB per triangle
     val owners: IntArray,      // slot index, or -1 for gingiva
+    val occlusion: FloatArray, // 3 floats per triangle: soft darkening toward the gumline
     val triangles: Int,
     val slots: List<SlotInfo>,
 )
@@ -138,6 +146,7 @@ private object Palette {
     const val GUM = 0xFFEAA2A5.toInt()
     const val GUM_DEEP = 0xFFD9868C.toInt()
     const val SELECT = 0xFF14B8A6.toInt()
+    const val TREATED = 0xFF60A5FA.toInt()
 }
 
 private class SceneBuilder {
@@ -145,6 +154,10 @@ private class SceneBuilder {
     val normals = FloatBuffer(40_000)
     val colors = IntBuffer(14_000)
     val owners = IntBuffer(14_000)
+    val occlusion = FloatBuffer(42_000)
+    /** When set, vertices near the cervical line are darkened (cheap ambient occlusion). */
+    var aoCervicalY = 0f; var aoSign = 0f; var aoHeight = 0f
+    private fun ao(p: Vec): Float = if (aoHeight <= 0f) 1f else 0.74f + 0.26f * (((p.y - aoCervicalY) * aoSign) / aoHeight).coerceIn(0f, 1f)
 
     /** Adds a triangle whose normal faces away from [inside]. */
     fun triangle(a: Vec, b: Vec, c: Vec, inside: Vec, color: Int, owner: Int) {
@@ -155,7 +168,7 @@ private class SceneBuilder {
         val outward = n.dot(centroid - inside) >= 0f
         val v = if (outward) arrayOf(a, b, c) else arrayOf(a, c, b)
         if (!outward) n = n * -1f
-        for (p in v) { vertices.add(p.x); vertices.add(p.y); vertices.add(p.z) }
+        for (p in v) { vertices.add(p.x); vertices.add(p.y); vertices.add(p.z); occlusion.add(ao(p)) }
         normals.add(n.x); normals.add(n.y); normals.add(n.z)
         colors.add(color); owners.add(owner)
     }
@@ -251,6 +264,7 @@ private fun buildScene(chart: JSONObject?): DentalScene {
     return DentalScene(
         builder.vertices.data.copyOf(builder.vertices.size), builder.normals.data.copyOf(builder.normals.size),
         builder.smoothNormals(), builder.colors.data.copyOf(builder.colors.size), builder.owners.data.copyOf(builder.owners.size),
+        builder.occlusion.data.copyOf(builder.occlusion.size),
         builder.colors.size, slots,
     )
 }
@@ -305,16 +319,18 @@ private fun buildQuadrant(builder: SceneBuilder, slots: MutableList<SlotInfo>, t
         fun codes(obj: JSONObject?, name: String) = (obj?.optJSONArray(name)?.length() ?: 0) > 0
         val surfaceFinding = HashMap<String, Boolean>()
         val surfaceRestoration = HashMap<String, Boolean>()
-        surfaces?.keys()?.forEach { s ->
+        surfaces?.let { surfaces -> surfaces.keys().forEach { s ->
             surfaceFinding[s] = codes(surfaces.optJSONObject(s), "findings")
             surfaceRestoration[s] = codes(surfaces.optJSONObject(s), "restorations")
-        }
+        } }
         val wholeFinding = codes(state, "findings")
         val planned = codes(state, "treatmentStates")
+        val treated = state?.optBoolean("treated") == true
         val slotIndex = slots.size
         slots.add(SlotInfo(key, world(0f, sy * 1.02f, 0f), world(0f, -0.05f, 0f), facial, lost && !showCrown, planned,
-            wholeFinding || surfaceFinding.values.any { it }, surfaceRestoration.values.any { it }))
+            wholeFinding || surfaceFinding.values.any { it }, surfaceRestoration.values.any { it }, treated))
         if (!showCrown) continue
+        builder.aoCervicalY = cervical.y; builder.aoSign = occlusal; builder.aoHeight = sy * 0.45f
 
         var base = when {
             lost && replacement == "implant" -> Palette.IMPLANT
@@ -324,6 +340,7 @@ private fun buildQuadrant(builder: SceneBuilder, slots: MutableList<SlotInfo>, t
             assessment == "assessed" -> Palette.ENAMEL
             else -> Palette.UNASSESSED
         }
+        if (treated) base = mix(base, Palette.TREATED, 0.22f)
         if (wholeFinding) base = mix(base, Palette.FINDING, 0.28f)
         fun surfaceColor(surface: String): Int = when {
             surfaceFinding[surface] == true -> mix(base, Palette.FINDING, 0.78f)
@@ -335,8 +352,8 @@ private fun buildQuadrant(builder: SceneBuilder, slots: MutableList<SlotInfo>, t
         val hx = sx * 0.5f; val hz = sz * 0.5f
         val tipW = if (kind == Kind.INCISOR) 0.88f else 0.90f
         val tipD = when (kind) { Kind.INCISOR -> 0.46f; Kind.CANINE -> 0.80f; else -> 0.88f }
-        val segments = 14
-        val levels = 6
+        val segments = 18
+        val levels = 7
         val inside = world(0f, sy * 0.45f, 0f)
 
         fun sidePoint(angle: Float, level: Float): Vec {
@@ -386,7 +403,8 @@ private fun buildQuadrant(builder: SceneBuilder, slots: MutableList<SlotInfo>, t
 }
 
 private fun buildGum(builder: SceneBuilder, upper: Boolean, factor: Float, wide: Boolean) {
-    val sections = 56
+    builder.aoHeight = 0f
+    val sections = 64
     val ringSegments = 12
     val sign = if (upper) 1f else -1f
     val jaw = if (upper) 1f else 0.96f
@@ -445,7 +463,7 @@ private class FrameBuffers(triangles: Int) {
     val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
 }
 
-private fun shadeColor(base: Int, nx: Float, ny: Float, nz: Float): Int {
+private fun shadeColor(base: Int, nx: Float, ny: Float, nz: Float, occlusion: Float = 1f): Int {
     // Camera-space lighting: soft key from upper left, cool fill, specular glint and rim.
     val key = max(0f, nx * -0.38f + ny * 0.62f + nz * 0.69f)
     val fill = max(0f, nx * 0.55f + ny * -0.15f + nz * 0.82f)
@@ -454,7 +472,7 @@ private fun shadeColor(base: Int, nx: Float, ny: Float, nz: Float): Int {
     val spec = h16 * h8 * h4 * 0.42f
     val edge = 1f - abs(nz)
     val rim = edge * edge * edge * 0.12f
-    val light = 0.40f + key * 0.50f + fill * 0.18f
+    val light = (0.40f + key * 0.50f + fill * 0.18f) * occlusion
     fun ch(shift: Int, rimTint: Float): Int {
         val c = ((base shr shift) and 0xFF) / 255f
         return ((c * light + spec + rim * rimTint) * 255f).toInt().coerceIn(0, 255)
@@ -473,12 +491,21 @@ private fun shadeColor(base: Int, nx: Float, ny: Float, nz: Float): Int {
 fun Teeth3DView(
     chart: JSONObject?,
     modifier: Modifier = Modifier,
-    selectedTooth: String? = null,
+    selectedTeeth: Set<String> = emptySet(),
     showLabels: Boolean = false,
     onToothTap: ((String) -> Unit)? = null,
 ) {
     val signature = chart?.optJSONObject("teeth")?.toString().orEmpty() + "|" + chart?.optString("dentition").orEmpty()
-    val scene = remember(signature) { buildScene(chart) }
+    // Geometry (~10–20k triangles) is built off the main thread so opening a profile never stutters;
+    // the previous model stays on screen while a changed chart rebuilds.
+    val sceneState = produceState<DentalScene?>(initialValue = null, signature) { value = withContext(Dispatchers.Default) { buildScene(chart) } }
+    val scene = sceneState.value
+    if (scene == null) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("Loading 3D model…", color = Color(0xFF0F766E), fontSize = 13.sp)
+        }
+        return
+    }
     val buffers = remember(scene) { FrameBuffers(scene.triangles) }
     val density = LocalDensity.current
     var yaw by remember { mutableFloatStateOf(-0.75f) }
@@ -535,7 +562,7 @@ fun Teeth3DView(
         val r00 = cosY; val r01 = 0f; val r02 = sinY
         val r10 = sinP * sinY; val r11 = cosP; val r12 = -sinP * cosY
         val r20 = -cosP * sinY; val r21 = sinP; val r22 = cosP * cosY
-        val selectedIndex = scene.slots.indexOfFirst { it.key == selectedTooth }
+        val selectedIndices = scene.slots.indices.filter { scene.slots[it].key in selectedTeeth }.toHashSet()
 
         // Backdrop: soft studio floor shadow.
         drawOval(
@@ -567,13 +594,13 @@ fun Teeth3DView(
             if (facing <= 0f) continue
             val owner = scene.owners[t]
             var base = scene.colors[t]
-            if (owner >= 0 && owner == selectedIndex) base = mix(base, Palette.SELECT, 0.45f)
+            if (owner >= 0 && owner in selectedIndices) base = mix(base, Palette.SELECT, 0.45f)
             for (k in 0 until 3) {
                 val i = t * 9 + k * 3
                 val sx = r00 * vn[i] + r01 * vn[i + 1] + r02 * vn[i + 2]
                 val sy = r10 * vn[i] + r11 * vn[i + 1] + r12 * vn[i + 2]
                 val sz = r20 * vn[i] + r21 * vn[i + 1] + r22 * vn[i + 2]
-                buffers.shade[visible * 3 + k] = shadeColor(base, sx, sy, sz)
+                buffers.shade[visible * 3 + k] = shadeColor(base, sx, sy, sz, scene.occlusion[t * 3 + k])
             }
             // Far triangles first; depth is positive, so sort descending via negation.
             val depthBits = ((100f - depthSum / 3f) * 10_000f).toLong().coerceIn(0, Int.MAX_VALUE.toLong())
@@ -625,7 +652,7 @@ fun Teeth3DView(
                 drawLine(Color.White, at - Offset(badge * 0.5f, 0f), at + Offset(badge * 0.5f, 0f), 1.8f * density.density)
                 drawLine(Color.White, at - Offset(0f, badge * 0.5f), at + Offset(0f, badge * 0.5f), 1.8f * density.density)
             }
-            if (index == selectedIndex) {
+            if (index in selectedIndices) {
                 drawCircle(Color(0xFF14B8A6), badge * 2.2f, point, style = Stroke(2f * density.density))
             }
         }
@@ -634,20 +661,21 @@ fun Teeth3DView(
         // Labels: always for the selection, optionally for every visible tooth.
         drawIntoCanvas { canvas ->
             scene.slots.forEachIndexed { index, slot ->
-                if (!(showLabels || index == selectedIndex)) return@forEachIndexed
+                if (!(showLabels || index in selectedIndices)) return@forEachIndexed
                 if (anchors[index * 3 + 2] <= 0f) return@forEachIndexed
                 val upperSlot = slot.key[0] in "1256"
                 val x = anchors[index * 3]
                 val y = anchors[index * 3 + 1]
-                val selected = index == selectedIndex
+                val selected = index in selectedIndices
+                val text = ToothNotation.short(slot.key)
                 buffers.label.textSize = (if (selected) 13f else 9.5f) * density.density
-                val tw = buffers.label.measureText(slot.key) / 2f + (if (selected) 8f else 4f) * density.density
+                val tw = buffers.label.measureText(text) / 2f + (if (selected) 8f else 4f) * density.density
                 val ty = y + (if (upperSlot) 1f else -1f) * (if (selected) 26f else 14f) * density.density
                 val th = buffers.label.textSize * 0.8f
                 buffers.label.color = if (selected) 0xFF0F766E.toInt() else 0xE6FFFFFF.toInt()
                 canvas.nativeCanvas.drawRoundRect(x - tw, ty - th, x + tw, ty + th * 0.55f, th, th, buffers.label)
                 buffers.label.color = if (selected) android.graphics.Color.WHITE else 0xFF0F766E.toInt()
-                canvas.nativeCanvas.drawText(slot.key, x, ty + th * 0.18f, buffers.label)
+                canvas.nativeCanvas.drawText(text, x, ty + th * 0.18f, buffers.label)
             }
         }
     }

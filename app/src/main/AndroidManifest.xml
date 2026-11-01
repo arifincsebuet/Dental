@@ -19,9 +19,12 @@
         </service>
         <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="clinic-reminders" />
         <meta-data android:name="org.godotengine.plugin.v2.DentalBridge" android:value="com.spala.dental.DentalBridge" />
+        <!-- Godot force-quits its host process when the chart activity is destroyed (one engine
+             per process). A dedicated process keeps the clinic app alive on Back / selection. -->
         <activity android:name=".Dental3DActivity" android:exported="false"
+            android:process=":chart3d"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode"
-            android:theme="@style/Theme.Dental" />
+            android:theme="@style/Theme.Dental.Chart" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
