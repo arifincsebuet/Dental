@@ -90,6 +90,7 @@ var read_only := false
 var notation := "palmer"
 var sounds := true
 var tap_player: AudioStreamPlayer
+var untap_player: AudioStreamPlayer
 var loading_overlay: ColorRect
 
 # UI
@@ -1070,7 +1071,7 @@ func set_arch_visible(arch: Node3D, visible_now: bool) -> void:
 	for child in arch.get_children():
 		if child is StaticBody3D: child.collision_layer = 1 if visible_now else 0
 	if not visible_now and teeth.has(selected) and teeth[selected].get_parent() == arch:
-		clear_selection()
+		clear_selection(false)
 
 func update_camera() -> void:
 	rig.rotation = Vector3(cur_pitch, cur_yaw, 0)
@@ -1101,7 +1102,8 @@ func _process(delta: float) -> void:
 # Selection
 # ==============================================================================================
 
-func clear_selection() -> void:
+func clear_selection(with_sound: bool = true) -> void:
+	if with_sound and selected != "": play_untap()
 	if teeth.has(selected):
 		var body: Node3D = teeth[selected]
 		if body.has_meta("crownMaterial"):
@@ -1137,6 +1139,35 @@ func tap_sound() -> AudioStreamWAV:
 	stream.data = data
 	return stream
 
+## Deselect: softer, lower "tock" gliding 1700 → 1150 Hz (same as res/raw/tooth_untap.wav).
+func untap_sound() -> AudioStreamWAV:
+	var rate := 44100
+	var count := int(rate * 0.08)
+	var data := PackedByteArray()
+	data.resize(count * 2)
+	var phase := 0.0
+	for i in range(count):
+		var t := float(i) / rate
+		phase += TAU * (1150.0 + 550.0 * exp(-t / 0.025)) / rate
+		var attack: float = min(1.0, t / 0.002)
+		var v := 0.55 * sin(phase) * exp(-t / 0.022) + 0.40 * sin(TAU * 140.0 * t) * exp(-t / 0.028)
+		data.encode_s16(i * 2, int(clampf(v * 0.32 * attack, -1.0, 1.0) * 32767.0))
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = false
+	stream.data = data
+	return stream
+
+func play_untap() -> void:
+	if not sounds: return
+	if untap_player == null:
+		untap_player = AudioStreamPlayer.new()
+		untap_player.stream = untap_sound()
+		untap_player.volume_db = -5.0
+		add_child(untap_player)
+	untap_player.play()
+
 func play_tap() -> void:
 	if not sounds: return
 	if tap_player == null:
@@ -1150,7 +1181,7 @@ func select_tooth(body: Node3D) -> void:
 	var key: String = body.get_meta("toothKey")
 	if key == selected: return
 	play_tap()
-	clear_selection()
+	clear_selection(false)
 	selected = key
 	selected_surface = ""
 	var state: Dictionary = chart.get("teeth", {}).get(selected, {})
