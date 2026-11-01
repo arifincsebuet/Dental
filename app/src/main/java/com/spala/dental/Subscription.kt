@@ -219,6 +219,8 @@ fun SubscriptionCard(store: ClinicStore, billing: BillingManager) {
     SurfaceCard {
         Text("Subscription", style = MaterialTheme.typography.titleSmall, color = Ink)
         Text(when {
+            store.isSuperAdmin -> "Super admin · free access, no subscription required."
+            sub.optBoolean("complimentary") -> "Complimentary access (clinic owned by a super admin)."
             BuildConfig.DEBUG && !store.subscriptionActive -> "Debug build: subscription check bypassed for testing."
             store.subscriptionActive && sub.optLong("expiresAt") > 0 -> "Dental Care Pro · active until ${java.text.DateFormat.getDateInstance().format(java.util.Date(sub.optLong("expiresAt")))}" +
                 if (sub.optBoolean("autoRenewing", true)) " (renews automatically)" else " (will not renew)"

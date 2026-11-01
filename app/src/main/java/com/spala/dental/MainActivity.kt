@@ -429,12 +429,12 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                             val copy = JSONObject(patient.toString())
                             copy.array("appointments").put(JSONObject().put("id", uid()).put("date", "${slot.date} ${slot.time}").put("startAt", slot.startAt)
                                 .put("durationMinutes", slot.durationMinutes).put("doctor", slot.doctor).put("room", slot.room).put("reason", reason.trim())
-                                .put("status", "Scheduled").put("bookedBy", "staff").put("consent", consent)
+                                .put("status", "Scheduled").put("bookedBy", "staff").put("slot", true).put("consent", consent)
                                 .put("reminderEnabled", consent && store.config.optBoolean("remindersEnabled")))
                             store.save(copy, "Appointment booked: ${slot.date} ${slot.time} with ${slot.doctor}")
                             store.saveError
                         },
-                        onSaveConfig = { updated -> store.saveConfig(updated) },
+                        onSaveConfig = { updated -> if (store.busy) false else { store.saveConfig(updated); true } },
                         onOpenPatient = { id -> openPatient(id) },
                     ) else SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action) }, { id -> openPatient(id) })
                 }

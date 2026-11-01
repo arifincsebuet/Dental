@@ -77,7 +77,9 @@ object ClinicalRules {
             if (!sameDoctor && !sameRoom) continue
             val otherStart = appointmentMillis(other, config)
             val otherEnd = otherStart + other.optInt("durationMinutes", 30) * 60_000L
-            require(!(start < otherEnd + buffer && otherStart < end + buffer)) {
+            // Back-to-back slot bookings need no buffer: the slots already define the spacing.
+            val gap = if (candidate.optBoolean("slot") && other.optBoolean("slot")) 0L else buffer
+            require(!(start < otherEnd + gap && otherStart < end + gap)) {
                 if (sameDoctor) "Clinician is already booked during this time (including buffer)" else "Room is already booked during this time"
             }
         }

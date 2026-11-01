@@ -198,7 +198,7 @@ fun SlotGrid(slots: List<Slot>, showPatients: Boolean, onSlot: (Slot) -> Unit) {
 fun SlotCalendarScreen(
     patients: List<JSONObject>, config: JSONObject, canManage: Boolean,
     onBook: (patient: JSONObject, slot: Slot, reason: String) -> String?,
-    onSaveConfig: (JSONObject) -> Unit, onOpenPatient: (String) -> Unit,
+    onSaveConfig: (JSONObject) -> Boolean, onOpenPatient: (String) -> Unit,
 ) {
     val zone = runCatching { ClinicalRules.zone(config) }.getOrDefault(java.time.ZoneId.systemDefault())
     val today = LocalDate.now(zone)
@@ -266,7 +266,7 @@ private fun BookSlotDialog(slot: Slot, patients: List<JSONObject>, onClose: () -
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AvailabilityDialog(config: JSONObject, today: LocalDate, onClose: () -> Unit, onSave: (JSONObject) -> Unit) {
+private fun AvailabilityDialog(config: JSONObject, today: LocalDate, onClose: () -> Unit, onSave: (JSONObject) -> Boolean) {
     val sessions = remember { mutableStateListOf<JSONObject>().apply { addAll(config.optJSONArray("availability").objectList().map { JSONObject(it.toString()) }) } }
     var patientBooking by remember { mutableStateOf(config.optBoolean("patientBooking", true)) }
     val clinicians = clinicianRecords(config).filter { it.optBoolean("active", true) }.map { it.optString("name") }.filter { it.isNotBlank() }
@@ -344,7 +344,9 @@ private fun AvailabilityDialog(config: JSONObject, today: LocalDate, onClose: ()
             }
         },
         confirmButton = { Button(onClick = {
-            onSave(JSONObject(config.toString()).put("availability", JSONArray(sessions.toList())).put("patientBooking", patientBooking)); onClose()
+            // Only close when the change was accepted; while a sync is running the save is refused.
+            if (onSave(JSONObject(config.toString()).put("availability", JSONArray(sessions.toList())).put("patientBooking", patientBooking))) onClose()
+            else error = "The app is busy syncing. Wait a moment, then tap Save again; your changes are kept here."
         }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } })
 }

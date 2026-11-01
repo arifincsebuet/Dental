@@ -23,7 +23,7 @@ const modules = {
   "node:crypto": require("node:crypto")
 };
 const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, slotsFor, validateAvailability, entitlement, publicSubscription, staffInvites, applyStaffInvites, patientEmail, randomText};", {
+vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, scheduling, isSuperAdmin, slotsFor, validateAvailability, entitlement, publicSubscription, staffInvites, applyStaffInvites, patientEmail, randomText};", {
   exports: registered, module: { exports: registered }, Buffer, process: { env: {} },
   require(name) { assert.ok(modules[name], `Unexpected dependency ${name}`); return modules[name]; }
 });
@@ -132,4 +132,26 @@ test("availability sessions expand into slots; booked doctor times are unavailab
   assert.equal(JSON.stringify(tuesday.map(s => [s.time, s.available])), JSON.stringify([["09:00", true], ["09:30", false], ["10:00", true]]));
   assert.equal(slotsFor(clinic, "2030-01-02", 0).length, 0); // Wednesday not offered
   assert.throws(() => validateAvailability([{ ...session, end: "08:00" }]));
+});
+
+test("back-to-back slot bookings do not trip the clinic buffer", () => {
+  const { scheduling } = registered.audit;
+  const clinic = { config: { timeZone: "UTC", bufferMinutes: 5 }, scheduleIndex: [
+    { patientId: "p1", appointmentId: "a1", clinician: "Dr Rahman", room: "", startAt: Date.UTC(2030, 0, 1, 9, 0), endAt: Date.UTC(2030, 0, 1, 9, 30), slot: true }] };
+  const next = { id: "p2", appointments: [{ id: "a2", date: "2030-01-01 09:30", durationMinutes: 30, doctor: "Dr Rahman", status: "Scheduled", slot: true }] };
+  assert.doesNotThrow(() => scheduling(next, "c", clinic, Date.UTC(2029, 0, 1)));
+  // A free-form (non-slot) appointment still respects the buffer.
+  const freeForm = { id: "p3", appointments: [{ id: "a3", date: "2030-01-01 09:32", durationMinutes: 20, doctor: "Dr Rahman", status: "Scheduled" }] };
+  assert.throws(() => scheduling(freeForm, "c", clinic, Date.UTC(2029, 0, 1)));
+});
+
+test("super admin emails are free only when verified", () => {
+  const { isSuperAdmin, publicSubscription } = registered.audit;
+  assert.equal(isSuperAdmin({ email: "Dev.Spala@gmail.com", email_verified: true }), true);
+  assert.equal(isSuperAdmin({ email: "spalatechnologies@gmail.com", email_verified: true }), true);
+  assert.equal(isSuperAdmin({ email: "dev.spala@gmail.com", email_verified: false }), false);
+  assert.equal(isSuperAdmin({ email: "someone@gmail.com", email_verified: true }), false);
+  assert.equal(publicSubscription({ complimentary: true }).active, true);
+  assert.equal(publicSubscription(null, true).active, true);
+  assert.equal(publicSubscription(null, false).active, false);
 });
