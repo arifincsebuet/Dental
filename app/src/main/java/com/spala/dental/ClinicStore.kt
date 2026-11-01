@@ -54,6 +54,14 @@ class ClinicStore(private val context: Context) {
     /** One-time credentials to hand to a patient (shown once, never stored). */
     var credentialNotice by mutableStateOf<JSONObject?>(null)
     private var memberRole = ""
+    /** Clinic subscription as last verified by the server ({active, expiresAt, ...}). */
+    var subscription by mutableStateOf(JSONObject()); private set
+    /** Offline (no Firebase) mode: entitlement comes straight from this device's Play purchases. */
+    var deviceEntitled by mutableStateOf(false); private set
+    val subscriptionActive: Boolean get() =
+        (subscription.optBoolean("active") && subscription.optLong("expiresAt") > System.currentTimeMillis()) || (session == "local" && deviceEntitled)
+    /** The clinic a Play purchase is bound to. */
+    val subscriptionClinicId: String get() = workspaceId.ifBlank { cloudIdentity.ifBlank { "local-device" } }
     private var lastPullAt = 0L
     private var localMode = false
     val cloudIdentity: String get() = runCatching { FirebaseAuth.getInstance().currentUser?.uid }.getOrNull().orEmpty()
@@ -95,6 +103,7 @@ class ClinicStore(private val context: Context) {
             memberRole = state.optString("memberRole")
             lastPullAt = state.optLong("lastPullAt")
             localMode = state.optBoolean("localMode")
+            subscription = state.optJSONObject("subscription") ?: JSONObject()
             storageAvailable = true
             resolveSession()
         } catch (e: Exception) { message = "Local records could not be opened. Existing storage is preserved; restore a backup before editing." }
@@ -104,7 +113,7 @@ class ClinicStore(private val context: Context) {
     private suspend fun persist(records: List<JSONObject>) = withContext(Dispatchers.IO) {
         val state = JSONObject().put("version", 2).put("patients", JSONArray(records)).put("config", config)
             .put("workspaceId", workspaceId).put("conflicts", JSONArray(conflicts)).put("pendingExport", pendingExport).put("cloudReminders", cloudReminders).put("reminderRebuildRequired", reminderRebuildRequired)
-            .put("memberRole", memberRole).put("lastPullAt", lastPullAt).put("localMode", localMode)
+            .put("memberRole", memberRole).put("lastPullAt", lastPullAt).put("localMode", localMode).put("subscription", subscription)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
         val bytes = cipher.iv + cipher.doFinal(state.toString().toByteArray(Charsets.UTF_8))
         val out = file.startWrite()
@@ -121,6 +130,7 @@ class ClinicStore(private val context: Context) {
         val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinicId)).await().data as Map<*, *>
         if (config.optBoolean("dirty")) conflicts = conflicts + JSONObject().put("id", uid()).put("name", "Clinic settings draft").put("config", config).put("retainedAt", System.currentTimeMillis())
         reminderRebuildRequired = result["reminderRebuildRequired"] == true
+        (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
         config = JSONObject(result["config"] as Map<*, *>).put("revision", (result["revision"] as? Number)?.toLong() ?: 0)
         persist(patients); message = "Clinic settings refreshed; any local draft was retained"
     }
@@ -250,6 +260,7 @@ class ClinicStore(private val context: Context) {
             val result = functions().getHttpsCallable("updateClinic").call(mapOf("clinicId" to clinicId,
                 "expectedRevision" to config.optLong("revision"), "operationId" to operationId, "config" to toMap(cloudConfig))).await().data as Map<*, *>
             reminderRebuildRequired = result["reminderRebuildRequired"] == true
+        (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
             config = JSONObject(result["config"] as? Map<*, *> ?: toMap(config)).put("revision", (result["revision"] as? Number)?.toLong() ?: config.optLong("revision"))
             config.remove("operationId"); config.remove("dirty"); persist(patients)
         }
@@ -288,6 +299,7 @@ class ClinicStore(private val context: Context) {
         val clinicId = clinic()
         val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinicId)).await().data as Map<*, *>
         reminderRebuildRequired = result["reminderRebuildRequired"] == true
+        (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
         if (!config.optBoolean("dirty")) config = JSONObject(result["config"] as? Map<*, *> ?: emptyMap<String, Any>()).put("revision", (result["revision"] as? Number)?.toLong() ?: 0)
         val records = mutableListOf<JSONObject>()
         var cursor: String? = null
@@ -375,7 +387,7 @@ class ClinicStore(private val context: Context) {
             functions().getHttpsCallable("registerDevice").call(mapOf("clinicId" to clinic(), "token" to token, "enabled" to false)).await()
         }
         patients = emptyList(); config = ClinicalRules.defaults(); workspaceId = ""; pendingExport = JSONObject(); cloudReminders = false
-        memberRole = ""; lastPullAt = 0L
+        memberRole = ""; lastPullAt = 0L; subscription = JSONObject()
         persist(patients); ClinicReminders.schedule(context, this@ClinicStore)
         FirebaseAuth.getInstance().signOut(); session = "login"; message = "Signed out; cloud records are preserved"
     }
@@ -400,6 +412,27 @@ class ClinicStore(private val context: Context) {
     }
 
     /** Offline use on this device only, when no Firebase project is configured. */
+    /** Sends a Play purchase token to the server, which verifies, acknowledges and stores it for the clinic. */
+    fun verifyPurchase(purchaseToken: String) = operation {
+        val result = functions().getHttpsCallable("verifySubscription").call(mapOf("clinicId" to clinic(), "purchaseToken" to purchaseToken)).await().data as Map<*, *>
+        subscription = JSONObject(result["subscription"] as Map<*, *>)
+        persist(patients)
+        message = if (subscriptionActive) "Subscription active · thank you!" else "Google Play reports this subscription is not active"
+    }
+
+    fun refreshSubscription() {
+        if (session == "local") return
+        operation {
+            val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinic())).await().data as Map<*, *>
+            (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
+            persist(patients)
+        }
+    }
+
+    fun markDeviceEntitled() { deviceEntitled = true }
+
+    fun leaveLocalMode() = operation { localMode = false; persist(patients); session = "login" }
+
     fun useLocally() = operation {
         check(!configured()) { "This app is connected to the clinic cloud. Sign in with Google." }
         localMode = true; persist(patients); session = "local"
@@ -522,6 +555,7 @@ class ClinicStore(private val context: Context) {
         val clinicId = clinic()
         val result = functions().getHttpsCallable("getClinic").call(mapOf("clinicId" to clinicId)).await().data as Map<*, *>
         reminderRebuildRequired = result["reminderRebuildRequired"] == true
+        (result["subscription"] as? Map<*, *>)?.let { subscription = JSONObject(it) }
         if (!config.optBoolean("dirty")) config = JSONObject(result["config"] as? Map<*, *> ?: emptyMap<String, Any>()).put("revision", (result["revision"] as? Number)?.toLong() ?: 0)
         val dirty = patients.filter { it.optBoolean("dirty") || it.has("operationId") }
         val records = mutableListOf<JSONObject>()

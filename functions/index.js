@@ -75,6 +75,7 @@ function visibleClinic(clinicId, clinic, uid) {
   const summary = {};
   for (const job of clinic && clinic.reminderJobs || []) summary[job.status] = (summary[job.status] || 0) + 1;
   return { clinicId, revision: clinic ? clinic.revision || 0 : 0, config: clinic ? clinic.config : defaultConfig(uid), reminderSummary: summary,
+    subscription: publicSubscription(clinic),
     reminderRebuildRequired: Boolean(clinic && clinic.reminderRebuildRequired) };
 }
 function normalized(value) { return String(value || "").toLowerCase().replace(/[ -]+/g, "_"); }
@@ -322,8 +323,12 @@ function scheduling(patient, clinicId, clinic, now) {
 exports.getClinic = onCall(callOptions, async request => {
   const uid = actor(request); const clinicId = identifier(request.data.clinicId || uid, "clinic ID");
   const snapshot = await db.doc(`workspaces/${clinicId}`).get();
-  const clinic = snapshot.exists ? snapshot.data() : null;
+  let clinic = snapshot.exists ? snapshot.data() : null;
   roleFor(clinicId, uid, clinic);
+  // Lazy renewal check: only when the stored period has ended (no Pub/Sub, no polling).
+  if (clinic && clinic.billing && clinic.billing.token && (!clinic.subscription || clinic.subscription.expiresAt < Date.now())) {
+    try { clinic = { ...clinic, subscription: await refreshSubscription(snapshot.ref, clinic.billing, clinicId) }; } catch (_) { /* keep last known state */ }
+  }
   return visibleClinic(clinicId, clinic, uid);
 });
 
@@ -745,4 +750,73 @@ exports.getMyRecord = onCall(callOptions, async request => {
   for (const key of keep) if (patient[key] !== undefined) record[key] = clone(patient[key]);
   for (const item of record.treatments || []) { delete item.events; delete item.amendments; }
   return { patient: record, clinic: { name: clinic.exists ? clinic.data().config.name : "Dental Care", currency: clinic.exists ? clinic.data().config.currency : "BDT", timeZone: clinic.exists ? clinic.data().config.timeZone : "Asia/Dhaka" } };
+});
+
+
+// ---------------------------------------------------------------------------------------------
+// Google Play subscription (clinic-level). Prices and offers live in Play Console; the server only
+// verifies purchase tokens with the Play Developer API and stores the entitlement on the clinic
+// document (no extra documents). Renewals are re-checked lazily when the stored period ends.
+// ---------------------------------------------------------------------------------------------
+
+const ANDROID_PACKAGE = process.env.ANDROID_PACKAGE || "com.spala.dental";
+const SUBSCRIPTION_PRODUCTS = (process.env.SUBSCRIPTION_PRODUCTS || "dental_care_pro").split(",");
+const ACTIVE_STATES = ["SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD"];
+
+function publicSubscription(clinic) {
+  const sub = clinic && clinic.subscription;
+  if (!sub) return { active: false };
+  return { active: sub.active === true && sub.expiresAt > Date.now(), expiresAt: sub.expiresAt, state: sub.state, productId: sub.productId, offerId: sub.offerId || null, autoRenewing: sub.autoRenewing === true };
+}
+function accountTag(clinicId) { return createHash("sha256").update(`dental-care:${clinicId}`).digest("hex"); }
+
+let playClient;
+async function play(path, method = "GET") {
+  if (!playClient) {
+    const { GoogleAuth } = require("google-auth-library");
+    playClient = await new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/androidpublisher"] }).getClient();
+  }
+  const response = await playClient.request({ url: `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${ANDROID_PACKAGE}/${path}`, method });
+  return response.data;
+}
+function entitlement(data) {
+  const items = data.lineItems || [];
+  const expiresAt = Math.max(0, ...items.map(item => Date.parse(item.expiryTime) || 0));
+  const item = items.find(entry => SUBSCRIPTION_PRODUCTS.includes(entry.productId)) || items[0] || {};
+  return { active: ACTIVE_STATES.includes(data.subscriptionState) && expiresAt > Date.now(), state: data.subscriptionState || "UNKNOWN", expiresAt,
+    productId: item.productId || "", offerId: item.offerDetails && item.offerDetails.offerId || null, basePlanId: item.offerDetails && item.offerDetails.basePlanId || null,
+    autoRenewing: Boolean(item.autoRenewingPlan && item.autoRenewingPlan.autoRenewEnabled), verifiedAt: Date.now() };
+}
+async function refreshSubscription(ref, billing, clinicId) {
+  const data = await play(`purchases/subscriptionsv2/tokens/${encodeURIComponent(billing.token)}`);
+  const sub = entitlement(data);
+  await ref.update({ subscription: { ...sub, linkedBy: billing.linkedBy } });
+  return sub;
+}
+
+/** Owner/admin links a Play purchase to the clinic; the purchase must have been made for this clinic. */
+exports.verifySubscription = onCall(callOptions, async request => {
+  const uid = actor(request);
+  const clinicId = identifier(request.data.clinicId || uid, "clinic ID");
+  const token = text(request.data.purchaseToken, "purchase token", 4096); assert(token.length >= 20, "Invalid purchase token");
+  const ref = db.doc(`workspaces/${clinicId}`);
+  const snapshot = await ref.get();
+  const member = roleFor(clinicId, uid, snapshot.exists ? snapshot.data() : null);
+  assert(["owner", "admin"].includes(member.role), "Only the clinic owner or an administrator can manage the subscription", "permission-denied");
+  let data;
+  try { data = await play(`purchases/subscriptionsv2/tokens/${encodeURIComponent(token)}`); }
+  catch (error) { fail("Google Play could not confirm this purchase. Try Restore purchase in a moment.", "failed-precondition"); }
+  const external = data.externalAccountIdentifiers && data.externalAccountIdentifiers.obfuscatedExternalAccountId;
+  assert(!external || external === accountTag(clinicId), "This purchase belongs to a different clinic", "permission-denied");
+  const sub = entitlement(data);
+  assert(SUBSCRIPTION_PRODUCTS.includes(sub.productId), "Unknown subscription product");
+  if (data.acknowledgementState === "ACKNOWLEDGEMENT_STATE_PENDING" && sub.active) {
+    // Unacknowledged purchases are refunded by Google after 3 days.
+    await play(`purchases/subscriptions/${encodeURIComponent(sub.productId)}/tokens/${encodeURIComponent(token)}:acknowledge`, "POST");
+  }
+  const billing = { token, linkedBy: uid, linkedAt: Date.now(), tokenHash: fingerprint(token) };
+  const subscription = { ...sub, linkedBy: uid };
+  if (snapshot.exists) await ref.update({ billing, subscription });
+  else await ref.set({ config: defaultConfig(clinicId), revision: 0, billing, subscription });
+  return { subscription: publicSubscription({ subscription }) };
 });

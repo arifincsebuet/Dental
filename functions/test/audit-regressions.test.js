@@ -23,7 +23,7 @@ const modules = {
   "node:crypto": require("node:crypto")
 };
 const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, staffInvites, applyStaffInvites, patientEmail, randomText};", {
+vm.runInNewContext(source + "\nmodule.exports.audit = {stampNewEntries, validateClinical, validateChart, rebuildClinicReminders, hasReminderMetadata, entitlement, publicSubscription, staffInvites, applyStaffInvites, patientEmail, randomText};", {
   exports: registered, module: { exports: registered }, Buffer, process: { env: {} },
   require(name) { assert.ok(modules[name], `Unexpected dependency ${name}`); return modules[name]; }
 });
@@ -108,4 +108,15 @@ test("patient login identifiers are short, unambiguous and map to a synthetic em
   const id = randomText("ABCDEFGHJKMNPQRSTUVWXYZ23456789", 8);
   assert.match(id, /^[A-HJ-KM-NP-Z2-9]{8}$/);
   assert.equal(patientEmail("AB23CD45"), "ab23cd45@patient.dentalcare.local");
+});
+
+test("Play subscription state maps to a clinic entitlement", () => {
+  const { entitlement, publicSubscription } = registered.audit;
+  const future = new Date(Date.now() + 86400000).toISOString();
+  const active = entitlement({ subscriptionState: "SUBSCRIPTION_STATE_ACTIVE", lineItems: [{ productId: "dental_care_pro", expiryTime: future, offerDetails: { basePlanId: "monthly", offerId: "launch-5" }, autoRenewingPlan: { autoRenewEnabled: true } }] });
+  assert.equal(active.active, true); assert.equal(active.offerId, "launch-5"); assert.equal(active.autoRenewing, true);
+  const lapsed = entitlement({ subscriptionState: "SUBSCRIPTION_STATE_EXPIRED", lineItems: [{ productId: "dental_care_pro", expiryTime: "2020-01-01T00:00:00Z" }] });
+  assert.equal(lapsed.active, false);
+  assert.equal(publicSubscription({ subscription: { ...active, expiresAt: Date.now() - 1 } }).active, false);
+  assert.equal(publicSubscription(null).active, false);
 });

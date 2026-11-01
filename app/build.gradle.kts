@@ -16,6 +16,8 @@ android {
         versionCode = 1
         versionName = "1.0"
         buildConfigField("boolean", "GOOGLE_LOGIN_ENABLED", "true")
+        // Google Play subscription product (Play Console › Monetize › Subscriptions).
+        buildConfigField("String", "SUBSCRIPTION_PRODUCT_ID", "\"dental_care_pro\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -50,6 +52,7 @@ dependencies {
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("org.godotengine:godot:4.5.1.stable")
+    implementation("com.android.billingclient:billing:8.0.0")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
