@@ -113,3 +113,11 @@ How it works:
 - **The calendar:** a month calendar marks days with free slots (green) and fully booked days (grey). Picking a day lists its slots by doctor. Staff see who booked each slot and can tap a free slot to book any patient, searching by name, phone or Patient ID.
 - **Patient booking:** patients book from the patient app (`getSlots` makes 1 read; `bookSlot` is one transaction on the clinic and patient documents). The server re-checks the slot is still free, so two people can't take the same time. Patients may hold up to 3 upcoming bookings and can cancel up to 2 hours before (`cancelMyAppointment`). Online booking can be turned off in Manage slots (`config.patientBooking`).
 - **After changing availability,** Sync so patients see it.
+
+## Super admins
+
+`dev.spala@gmail.com` and `spalatechnologies@gmail.com` are platform super admins:
+- They use the app without a subscription.
+- Clinics they own are marked `complimentary`, so their doctors and staff aren't asked to pay either.
+- The server accepts only verified Google emails from the Firebase ID token.
+- To change the list, set `SUPER_ADMINS` (comma-separated) in the Functions environment and `SUPER_ADMIN_EMAILS` in `app/build.gradle.kts`.

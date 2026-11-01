@@ -71,11 +71,16 @@ function has(member, category) {
 function defaultConfig(uid) {
   return { name: "Dental Care", timeZone: "Asia/Dhaka", currency: "BDT", members: { [uid]: { role: "owner", active: true } }, staff: [], services: [], settings: { remindersEnabled: false, reminderLeadMinutes: 1440 } };
 }
-function visibleClinic(clinicId, clinic, uid) {
+// Platform super admins (verified Google emails) use the app free of charge, and so do clinics they own.
+const SUPER_ADMINS = (process.env.SUPER_ADMINS || "dev.spala@gmail.com,spalatechnologies@gmail.com").split(",").map(email => email.trim().toLowerCase()).filter(Boolean);
+function isSuperAdmin(token) {
+  return Boolean(token && typeof token.email === "string" && token.email_verified === true && SUPER_ADMINS.includes(token.email.toLowerCase()));
+}
+function visibleClinic(clinicId, clinic, uid, superAdmin = false) {
   const summary = {};
   for (const job of clinic && clinic.reminderJobs || []) summary[job.status] = (summary[job.status] || 0) + 1;
   return { clinicId, revision: clinic ? clinic.revision || 0 : 0, config: clinic ? clinic.config : defaultConfig(uid), reminderSummary: summary,
-    subscription: publicSubscription(clinic),
+    subscription: publicSubscription(clinic, superAdmin),
     reminderRebuildRequired: Boolean(clinic && clinic.reminderRebuildRequired) };
 }
 function normalized(value) { return String(value || "").toLowerCase().replace(/[ -]+/g, "_"); }
@@ -309,9 +314,15 @@ function scheduling(patient, clinicId, clinic, now) {
     const reminderConsent = !revoked && (appointment.consent === true || patient.communicationConsent === true || patient.reminderConsent === true || patient.consent && patient.consent.reminders === true);
     if (appointment.reminderHours !== undefined) assert(Number.isInteger(appointment.reminderHours) && appointment.reminderHours >= 1 && appointment.reminderHours <= 168, "Reminder hours must be 1–168");
     const candidate = { patientId: patient.id, appointmentId: appointment.id, clinician, room, startAt, endAt,
-      reminderEnabled: appointment.reminderEnabled === true, reminderConsent: Boolean(reminderConsent), reminderHours: appointment.reminderHours ?? null };
+      reminderEnabled: appointment.reminderEnabled === true, reminderConsent: Boolean(reminderConsent), reminderHours: appointment.reminderHours ?? null,
+      slot: appointment.slot === true };
     const buffer = Number(clinicSetting(clinic, "bufferMinutes", 0) || 0) * 60000;
-    const conflict = [...oldIndex, ...additions].find(item => item.startAt < endAt + buffer && startAt < item.endAt + buffer && (item.clinician.toLowerCase() === clinician.toLowerCase() || (room && item.room.toLowerCase() === room.toLowerCase())));
+    // Slots already define their spacing, so the clinic buffer only applies when a free-form
+    // appointment is involved (otherwise back-to-back slots could never both be booked).
+    const conflict = [...oldIndex, ...additions].find(item => {
+      const gap = item.slot === true && candidate.slot ? 0 : buffer;
+      return item.startAt < endAt + gap && startAt < item.endAt + gap && (item.clinician.toLowerCase() === clinician.toLowerCase() || (room && item.room.toLowerCase() === room.toLowerCase()));
+    });
     assert(!conflict, "Clinician or room overlaps another appointment", "already-exists", conflict ? { appointmentId: conflict.appointmentId, startAt: conflict.startAt } : undefined);
     additions.push(candidate);
   }
@@ -325,11 +336,16 @@ exports.getClinic = onCall(callOptions, async request => {
   const snapshot = await db.doc(`workspaces/${clinicId}`).get();
   let clinic = snapshot.exists ? snapshot.data() : null;
   roleFor(clinicId, uid, clinic);
+  const superAdmin = isSuperAdmin(request.auth.token);
+  // A super admin's own clinic is complimentary for all of its staff (one write, once).
+  if (superAdmin && clinicId === uid && clinic && clinic.complimentary !== true) {
+    await snapshot.ref.update({ complimentary: true }); clinic = { ...clinic, complimentary: true };
+  }
   // Lazy renewal check: only when the stored period has ended (no Pub/Sub, no polling).
-  if (clinic && clinic.billing && clinic.billing.token && (!clinic.subscription || clinic.subscription.expiresAt < Date.now())) {
+  if (clinic && clinic.complimentary !== true && clinic.billing && clinic.billing.token && (!clinic.subscription || clinic.subscription.expiresAt < Date.now())) {
     try { clinic = { ...clinic, subscription: await refreshSubscription(snapshot.ref, clinic.billing, clinicId) }; } catch (_) { /* keep last known state */ }
   }
-  return visibleClinic(clinicId, clinic, uid);
+  return visibleClinic(clinicId, clinic, uid, superAdmin);
 });
 
 exports.getPatient = onCall(callOptions, async request => {
@@ -405,11 +421,12 @@ exports.updateClinic = onCall(callOptions, async request => {
     };
     // Rebuild from the bounded schedule index; configuration changes need no patient scan.
     applyStaffInvites(next, clinicId);
+    if (isSuperAdmin(request.auth.token) && clinicId === uid) next.complimentary = true;
     next.reminderJobs = rebuildClinicReminders(next, now);
     next.nextReminderAt = nextReminder(next.reminderJobs);
     next.reminderRebuildRequired = (next.scheduleIndex || []).some(item => item.startAt > now && !hasReminderMetadata(item));
     sizeGuard(next); tx.set(ref, next);
-    return visibleClinic(clinicId, next, uid);
+    return visibleClinic(clinicId, next, uid, isSuperAdmin(request.auth.token));
   });
 });
 
@@ -764,7 +781,8 @@ const ANDROID_PACKAGE = process.env.ANDROID_PACKAGE || "com.spala.dental";
 const SUBSCRIPTION_PRODUCTS = (process.env.SUBSCRIPTION_PRODUCTS || "dental_care_pro").split(",");
 const ACTIVE_STATES = ["SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD"];
 
-function publicSubscription(clinic) {
+function publicSubscription(clinic, superAdmin = false) {
+  if (superAdmin || (clinic && clinic.complimentary === true)) return { active: true, complimentary: true, expiresAt: 8640000000000000, state: "COMPLIMENTARY", productId: "", offerId: null, autoRenewing: false };
   const sub = clinic && clinic.subscription;
   if (!sub) return { active: false };
   return { active: sub.active === true && sub.expiresAt > Date.now(), expiresAt: sub.expiresAt, state: sub.state, productId: sub.productId, offerId: sub.offerId || null, autoRenewing: sub.autoRenewing === true };
@@ -910,7 +928,7 @@ exports.bookSlot = onCall(callOptions, async request => {
     assert(upcoming.length < 3, "You already have 3 upcoming appointments. Contact the clinic to book more.", "resource-exhausted");
     const appointment = { id: `apt-${createHash("sha256").update(`${caller.patientId}:${startAt}:${now}`).digest("hex").slice(0, 20)}`,
       date: `${slot.date} ${slot.time}`, startAt: slot.startAt, durationMinutes: slot.durationMinutes, doctor: slot.doctor, room: slot.room,
-      reason, status: "Scheduled", bookedBy: "patient", bookedAt: now, reminderEnabled: clinicSetting(clinic, "remindersEnabled", false) === true, consent: patient.communicationConsent === true };
+      reason, status: "Scheduled", bookedBy: "patient", bookedAt: now, slot: true, reminderEnabled: clinicSetting(clinic, "remindersEnabled", false) === true, consent: patient.communicationConsent === true };
     patient.appointments = [...(patient.appointments || []), appointment];
     return commitSelfService(tx, clinicRef, patientRef, clinic, patient, caller, now, `Appointment booked by patient: ${slot.date} ${slot.time} with ${slot.doctor}`, { appointment });
   });

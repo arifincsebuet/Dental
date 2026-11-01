@@ -58,7 +58,13 @@ class ClinicStore(private val context: Context) {
     var subscription by mutableStateOf(JSONObject()); private set
     /** Offline (no Firebase) mode: entitlement comes straight from this device's Play purchases. */
     var deviceEntitled by mutableStateOf(false); private set
-    val subscriptionActive: Boolean get() =
+    /** Signed in with one of the platform super-admin Google accounts (free, no paywall). */
+    val isSuperAdmin: Boolean get() = runCatching {
+        val user = FirebaseAuth.getInstance().currentUser
+        val email = user?.email?.lowercase()
+        user != null && !user.isAnonymous && email != null && email in BuildConfig.SUPER_ADMIN_EMAILS.split(',').map { it.trim().lowercase() }
+    }.getOrDefault(false)
+    val subscriptionActive: Boolean get() = isSuperAdmin ||
         (subscription.optBoolean("active") && subscription.optLong("expiresAt") > System.currentTimeMillis()) || (session == "local" && deviceEntitled)
     /** The clinic a Play purchase is bound to. */
     val subscriptionClinicId: String get() = workspaceId.ifBlank { cloudIdentity.ifBlank { "local-device" } }

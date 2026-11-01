@@ -18,6 +18,8 @@ android {
         buildConfigField("boolean", "GOOGLE_LOGIN_ENABLED", "true")
         // Google Play subscription product (Play Console › Monetize › Subscriptions).
         buildConfigField("String", "SUBSCRIPTION_PRODUCT_ID", "\"dental_care_pro\"")
+        // Platform super admins: free access (the server enforces the same list; see functions SUPER_ADMINS).
+        buildConfigField("String", "SUPER_ADMIN_EMAILS", "\"dev.spala@gmail.com,spalatechnologies@gmail.com\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
