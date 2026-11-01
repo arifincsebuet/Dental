@@ -4,7 +4,9 @@ This directory contains deployable Cloud Functions source and restrictive Firest
 
 ## Cloud setup
 
-1. Create/register the Android app in your Firebase project and fill in the Android Firebase resources from `firebase/firebase.xml.example`.
+1. The Android app is registered in the Firebase project **`dental-sm`**. Its `app/google-services.json` is committed, and the Google services Gradle plugin (4.5.0) turns it into the Firebase resources at build time, including `default_web_client_id` for Google sign-in. Don't also add a `res/values/firebase.xml`, because duplicate resources break the build. `firebase/firebase.xml.example` is only kept for builds without the plugin.
+   - The API key in `google-services.json` is an identifier, not a secret. Restrict it to this Android app (package plus SHA-1) in Google Cloud Console › APIs & Services › Credentials.
+   - Analytics (BoM 35.1.0) is included without the advertising ID or ad personalisation. The app logs no clinical data as events.
    - **Google** sign-in provider: required for clinic staff. Register the app's SHA-1/SHA-256 signing fingerprints and put the web OAuth client ID in `default_web_client_id`.
    - **Email/Password** provider: required for patient logins. Patients use synthetic `<PatientID>@patient.dentalcare.local` addresses, which never receive mail.
    - Anonymous auth is only needed for older device-only workspaces.

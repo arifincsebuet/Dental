@@ -24,9 +24,29 @@ import com.spala.dental.ui.theme.*
  * dragging the 3D model never pulls it out); Back or a tap outside closes it.
  */
 
+private val activeAppointmentStates = setOf("Requested", "Scheduled", "Confirmed", "Checked in", "In progress")
+
+/** Active appointments starting between now and [days] days ahead (clinic time). */
+fun upcomingAppointments(patients: List<org.json.JSONObject>, config: org.json.JSONObject, days: Int = 7): Int {
+    val now = System.currentTimeMillis(); val end = now + days * 86_400_000L
+    return patients.filterNot { it.optBoolean("archived") }.sumOf { patient ->
+        patient.optJSONArray("appointments").objectList().count { a ->
+            a.optString("status") in activeAppointmentStates &&
+                (runCatching { ClinicalRules.appointmentMillis(a, config) }.getOrNull() ?: -1L) in now until end
+        }
+    }
+}
+
+/** ☰ button with a notification dot/count for upcoming appointments. */
 @Composable
-fun MenuButton(onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.semantics { contentDescription = "Open menu" }) { GlyphIcon(Glyph.Menu, Ink, 24.dp) }
+fun MenuButton(badgeCount: Int = 0, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.semantics {
+        contentDescription = if (badgeCount > 0) "Open menu, $badgeCount upcoming appointments" else "Open menu"
+    }) {
+        BadgedBox(badge = { if (badgeCount > 0) Badge(containerColor = Rose600, contentColor = Color.White) { Text(if (badgeCount > 99) "99+" else "$badgeCount") } }) {
+            GlyphIcon(Glyph.Menu, Ink, 24.dp)
+        }
+    }
 }
 
 @Composable
@@ -53,11 +73,13 @@ private fun DrawerSection(label: String) {
 }
 
 @Composable
-private fun DrawerEntry(label: String, glyph: Glyph, selected: Boolean = false, tint: Color = Teal700, badge: String? = null, onClick: () -> Unit) {
+private fun DrawerEntry(label: String, glyph: Glyph, selected: Boolean = false, tint: Color = Teal700, badge: String? = null, alert: Int = 0, onClick: () -> Unit) {
     NavigationDrawerItem(
         label = { Text(label, style = MaterialTheme.typography.labelLarge) },
         icon = { GlyphIcon(glyph, if (selected) Teal700 else tint, 22.dp) },
-        badge = if (badge != null) { { Text(badge, style = MaterialTheme.typography.labelSmall, color = InkMuted) } } else null,
+        // A count needing attention shows as a filled notification badge; otherwise plain info text.
+        badge = if (alert > 0) { { Badge(containerColor = Rose600, contentColor = Color.White) { Text(if (alert > 99) "99+" else "$alert", modifier = Modifier.semantics { contentDescription = "$alert upcoming" }) } } }
+            else if (badge != null) { { Text(badge, style = MaterialTheme.typography.labelSmall, color = InkMuted) } } else null,
         selected = selected, onClick = onClick,
         colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = Teal50, selectedTextColor = Teal700, unselectedTextColor = Ink),
         modifier = Modifier.padding(horizontal = 12.dp),
@@ -81,7 +103,7 @@ fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (Str
             DrawerSection("Clinic")
             DrawerEntry("Home", Glyph.Home, currentPage == "Home") { onNavigate("Home") }
             DrawerEntry("Patients", Glyph.Person, currentPage == "Patients", badge = store.patients.count { !it.optBoolean("archived") }.toString()) { onNavigate("Patients") }
-            DrawerEntry("Appointments", Glyph.Calendar, currentPage == "Schedule") { onNavigate("Schedule") }
+            DrawerEntry("Appointments", Glyph.Calendar, currentPage == "Schedule", alert = upcomingAppointments(store.patients, store.config)) { onNavigate("Schedule") }
             DrawerEntry("Reports", Glyph.Bars, currentPage == "Reports") { onNavigate("Reports") }
             DrawerSection("Quick actions")
             DrawerEntry("Register patient", Glyph.Plus) { onAction("register") }
@@ -114,7 +136,7 @@ fun PatientDrawerContent(store: ClinicStore, onSection: (String) -> Unit, onActi
             DrawerSection("My care")
             DrawerEntry("My teeth (3D)", Glyph.Tooth) { onSection("teeth") }
             DrawerEntry("Treatment history", Glyph.Clipboard) { onSection("treatments") }
-            DrawerEntry("My appointments", Glyph.Calendar) { onSection("appointments") }
+            DrawerEntry("My appointments", Glyph.Calendar, alert = record?.let { upcomingAppointments(listOf(it), store.portalClinic, days = 365) } ?: 0) { onSection("appointments") }
             DrawerEntry("Book appointment", Glyph.Plus, tint = Blue600) { onSection("book") }
             if ((record?.optJSONArray("invoices")?.length() ?: 0) > 0) DrawerEntry("Billing", Glyph.Card) { onSection("billing") }
             DrawerSection("Account")

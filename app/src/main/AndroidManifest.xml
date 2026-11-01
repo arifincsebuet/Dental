@@ -18,6 +18,9 @@
             <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>
         <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="clinic-reminders" />
+        <!-- Health app: no advertising ID or ad personalisation signals from Analytics. -->
+        <meta-data android:name="google_analytics_adid_collection_enabled" android:value="false" />
+        <meta-data android:name="google_analytics_default_allow_ad_personalization_signals" android:value="false" />
         <meta-data android:name="org.godotengine.plugin.v2.DentalBridge" android:value="com.spala.dental.DentalBridge" />
         <!-- Godot force-quits its host process when the chart activity is destroyed (one engine
              per process). A dedicated process keeps the clinic app alive on Back / selection. -->
