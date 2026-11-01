@@ -1,6 +1,10 @@
 package com.spala.dental
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -132,8 +136,30 @@ fun PatientPortalScreen(store: ClinicStore) {
     var focus by rememberSaveable { mutableStateOf<String?>(null) }
     var changing by remember { mutableStateOf(false) }
     var cancelling by remember { mutableStateOf<JSONObject?>(null) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
+    val sections = remember { mutableStateMapOf<String, Int>() }
+    fun mark(key: String) = Modifier.onGloballyPositioned { sections[key] = it.positionInParent().y.toInt() }
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = drawerState.isOpen,
+        drawerContent = {
+            PatientDrawerContent(store, onSection = { key ->
+                scope.launch { drawerState.close(); sections[key]?.let { scroll.animateScrollTo(it) } }
+            }) { action ->
+                scope.launch { drawerState.close() }
+                when (action) {
+                    "password" -> changing = true
+                    "refresh" -> store.refreshMyRecord()
+                    "signout" -> store.patientSignOut()
+                }
+            }
+        },
+    ) {
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
-        TopAppBar(title = {
+        TopAppBar(navigationIcon = { MenuButton { scope.launch { drawerState.open() } } }, title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DentalAppLogo(Modifier.size(36.dp))
                 Column {
@@ -144,7 +170,7 @@ fun PatientPortalScreen(store: ClinicStore) {
         }, actions = { TextButton(onClick = { store.patientSignOut() }) { Text("Sign out") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceWhite))
     }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp),
+        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (record == null) {
                 SurfaceCard {
@@ -159,6 +185,7 @@ fun PatientPortalScreen(store: ClinicStore) {
             val records = remember(signature) { toothRecords(record) }
             Text("Hello, ${record.optString("name").substringBefore(' ')}", style = MaterialTheme.typography.headlineSmall, color = Ink)
             Teeth3DHeroCard(
+                modifier = mark("teeth"),
                 chart = view, title = "Your teeth", subtitle = "${records.count { it.completed > 0 }} treated · ${records.count { it.open > 0 }} planned",
                 selectedTeeth = setOfNotNull(focus), onToothTap = { key -> focus = if (focus == key) null else key },
                 banner = { HeroHint(focus?.let { "${ToothNotation.label(it)} · ${toothName(it)}" } ?: "Tap a tooth to see its treatment", highlight = focus != null) },
@@ -167,12 +194,13 @@ fun PatientPortalScreen(store: ClinicStore) {
                 Text("This view shows treatment recorded by your clinic. Ask your dentist about anything you don't understand.",
                     style = MaterialTheme.typography.bodySmall, color = InkMuted)
             }
+            Spacer(mark("treatments"))
             ToothHistoryList(records, store.portalClinic, focus, canEdit = false,
                 onToggle = { key -> focus = if (focus == key) null else key }, onRecord = {}, onEditStatus = {})
             val now = System.currentTimeMillis()
             val upcoming = record.optJSONArray("appointments").objectList()
                 .filter { a -> a.optString("status") !in ClinicalRules.terminalAppointments && (runCatching { ClinicalRules.appointmentMillis(a, store.portalClinic) }.getOrNull() ?: 0L) >= now }
-            SectionHeader("Upcoming appointments")
+            SectionHeader("Upcoming appointments", mark("appointments"))
             if (upcoming.isEmpty()) SurfaceCard(background = SurfaceTint) { Text("No upcoming appointments.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
             upcoming.forEach { a ->
                 val startAt = runCatching { ClinicalRules.appointmentMillis(a, store.portalClinic) }.getOrDefault(0L)
@@ -186,13 +214,14 @@ fun PatientPortalScreen(store: ClinicStore) {
                     }
                 }
             }
+            Spacer(mark("book"))
             PatientBookingSection(store)
             val invoices = record.optJSONArray("invoices").objectList()
             if (invoices.isNotEmpty()) {
                 val currency = store.portalClinic.optString("currency", "BDT")
                 val due = invoices.filter { it.optString("status").lowercase() !in setOf("void", "voided") }
                     .sumOf { runCatching { ClinicalRules.invoiceTotal(it) - (ClinicalRules.paid(it) - ClinicalRules.refunded(it)) }.getOrDefault(0L) }
-                SectionHeader("Billing")
+                SectionHeader("Billing", mark("billing"))
                 SurfaceCard { InfoRow(Glyph.Clipboard, "Balance due", runCatching { ClinicalRules.money(due, currency) }.getOrDefault("$due")) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -201,6 +230,7 @@ fun PatientPortalScreen(store: ClinicStore) {
             }
         }
     }
+    } // ModalNavigationDrawer
     cancelling?.let { appointment ->
         AlertDialog(onDismissRequest = { cancelling = null }, title = { Text("Cancel appointment?") },
             text = { Text("${appointment.optString("date")} with ${appointment.optString("doctor")}. The slot becomes free for others.") },

@@ -41,7 +41,7 @@ import org.json.JSONObject
 // Glyphs: crisp line icons drawn on Canvas (no icon font dependency).
 // ---------------------------------------------------------------------------------------------
 
-enum class Glyph { Back, Chevron, Sync, Plus, Cube, Phone, Calendar, Alert, Tooth, Edit, Export, Image, Archive, Person, Clipboard, Check, Expand, Labels }
+enum class Glyph { Back, Chevron, Sync, Plus, Cube, Phone, Calendar, Alert, Tooth, Edit, Export, Image, Archive, Person, Clipboard, Check, Expand, Labels, Menu, Home, Bars, Gear, Help, Lock, Card, Logout, Shield }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, tint: Color, size: Dp = 20.dp, modifier: Modifier = Modifier) {
@@ -126,6 +126,46 @@ fun GlyphIcon(glyph: Glyph, tint: Color, size: Dp = 20.dp, modifier: Modifier = 
             Glyph.Labels -> {
                 drawRoundRect(tint, p(.12f, .28f), Size(w * .76f, h * .44f), CornerRadius(w * .22f), style = s)
                 line(p(.32f, .5f), p(.68f, .5f))
+            }
+            Glyph.Menu -> { line(p(.18f, .28f), p(.82f, .28f)); line(p(.18f, .5f), p(.82f, .5f)); line(p(.18f, .72f), p(.82f, .72f)) }
+            Glyph.Home -> {
+                val roof = Path().apply { moveTo(w * .14f, h * .48f); lineTo(w * .5f, h * .16f); lineTo(w * .86f, h * .48f) }
+                drawPath(roof, tint, style = s)
+                drawRoundRect(tint, p(.24f, .44f), Size(w * .52f, h * .42f), CornerRadius(w * .05f), style = s)
+                line(p(.44f, .86f), p(.44f, .64f)); line(p(.44f, .64f), p(.56f, .64f)); line(p(.56f, .64f), p(.56f, .86f))
+            }
+            Glyph.Bars -> { line(p(.24f, .82f), p(.24f, .52f)); line(p(.5f, .82f), p(.5f, .22f)); line(p(.76f, .82f), p(.76f, .4f)) }
+            Glyph.Gear -> {
+                drawCircle(tint, w * .17f, p(.5f, .5f), style = s)
+                for (i in 0 until 8) {
+                    val a = i * Math.PI / 4
+                    line(Offset(w * (.5f + .27f * kotlin.math.cos(a).toFloat()), h * (.5f + .27f * kotlin.math.sin(a).toFloat())),
+                        Offset(w * (.5f + .38f * kotlin.math.cos(a).toFloat()), h * (.5f + .38f * kotlin.math.sin(a).toFloat())))
+                }
+            }
+            Glyph.Help -> {
+                drawCircle(tint, w * .36f, p(.5f, .5f), style = s)
+                drawArc(tint, 200f, 230f, false, p(.38f, .28f), Size(w * .24f, h * .22f), style = s)
+                line(p(.5f, .5f), p(.5f, .58f)); drawCircle(tint, w * .035f, p(.5f, .7f))
+            }
+            Glyph.Lock -> {
+                drawRoundRect(tint, p(.22f, .46f), Size(w * .56f, h * .4f), CornerRadius(w * .06f), style = s)
+                drawArc(tint, 180f, 180f, false, p(.32f, .2f), Size(w * .36f, h * .52f), style = s)
+            }
+            Glyph.Card -> {
+                drawRoundRect(tint, p(.12f, .24f), Size(w * .76f, h * .52f), CornerRadius(w * .08f), style = s)
+                line(p(.12f, .4f), p(.88f, .4f)); line(p(.24f, .62f), p(.44f, .62f))
+            }
+            Glyph.Logout -> {
+                line(p(.46f, .18f), p(.2f, .18f)); line(p(.2f, .18f), p(.2f, .82f)); line(p(.2f, .82f), p(.46f, .82f))
+                line(p(.42f, .5f), p(.86f, .5f)); line(p(.7f, .34f), p(.86f, .5f)); line(p(.86f, .5f), p(.7f, .66f))
+            }
+            Glyph.Shield -> {
+                val shield = Path().apply {
+                    moveTo(w * .5f, h * .12f); lineTo(w * .82f, h * .24f); lineTo(w * .78f, h * .56f)
+                    quadraticTo(w * .7f, h * .78f, w * .5f, h * .9f); quadraticTo(w * .3f, h * .78f, w * .22f, h * .56f); lineTo(w * .18f, h * .24f); close()
+                }
+                drawPath(shield, tint, style = s)
             }
         }
     }

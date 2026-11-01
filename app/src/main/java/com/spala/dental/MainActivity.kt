@@ -162,8 +162,27 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
         return
     }
     BackHandler(enabled = patient != null || doctor != null) { if (patient != null) patientId = null else doctorId = null }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    fun go(target: String) { page = target; patientId = null; doctorId = null; scope.launch { drawerState.close() } }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = drawerState.isOpen, // open from ☰ only, so 3D drags never pull the drawer
+        drawerContent = {
+            StaffDrawerContent(store, if (patient == null && doctor == null) page else "", onNavigate = { go(it) }) { action ->
+                scope.launch { drawerState.close() }
+                when (action) {
+                    "register" -> addPatient()
+                    "book" -> { go("Schedule"); scheduleView = "Calendar" }
+                    "sync" -> store.sync()
+                    "howto" -> showHowTo = true
+                    "signout" -> if (store.session == "local") store.leaveLocalMode() else store.signOut()
+                }
+            }
+        },
+    ) {
     Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
-        TopAppBar(title = {
+        TopAppBar(navigationIcon = { MenuButton { scope.launch { drawerState.open() } } }, title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DentalAppLogo(Modifier.size(38.dp))
                 Column {
@@ -487,6 +506,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
             }
         }
     }
+    } // ModalNavigationDrawer
     if (explanation && patient != null) PatientExplanationDialog(patient, { explanation = false }) { chart -> open3D(patient, chart) }
     preview?.let { bitmap -> AlertDialog(onDismissRequest = { preview = null }, title = { Text("Clinical image") }, text = { androidx.compose.foundation.Image(bitmap.asImageBitmap(), "Clinical attachment", Modifier.fillMaxWidth().heightIn(max = 480.dp)) }, confirmButton = { TextButton(onClick = { preview = null }) { Text("Close") } }) }
     store.credentialNotice?.let { notice -> CredentialDialog(notice) { store.credentialNotice = null } }
