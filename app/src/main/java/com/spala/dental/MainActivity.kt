@@ -100,6 +100,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     var selecting by rememberSaveable(patientId) { mutableStateOf(false) }
     val selection = remember(patientId) { mutableStateListOf<String>() }
     var recordTeeth by remember { mutableStateOf<List<String>?>(null) }
+    var editTreatmentId by remember { mutableStateOf<String?>(null) }
     var recordSurface by remember { mutableStateOf("") }
     var chartPatientId by rememberSaveable { mutableStateOf<String?>(null) }
     var chartToken by rememberSaveable { mutableStateOf("") }
@@ -278,10 +279,16 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     }
                     if (p.optString("allergies").isNotBlank()) AlertBanner("Medical alerts", p.optString("allergies"))
                     if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy, modifier = Modifier.fillMaxWidth()) { Text("Review conflict · retain draft and load server version") }
+                    // Actions for the tooth picked on the model sit outside the treatment history list.
+                    if (canEdit && !selecting) focusTooth?.let { key ->
+                        SelectedToothActions(key,
+                            onRecord = { recordTeeth = listOf(it); recordSurface = "" },
+                            onEditStatus = { tooth = it; toothSurface = "" },
+                            onClose = { focusTooth = null })
+                    }
                     ToothHistoryList(records, store.config, focusTooth, canEdit,
                         onToggle = { key -> focusTooth = if (focusTooth == key) null else key },
-                        onRecord = { key -> recordTeeth = listOf(key); recordSurface = "" },
-                        onEditStatus = { key -> tooth = key; toothSurface = "" })
+                        onEdit = { id -> editTreatmentId = id })
                 } else {
                     PatientHeader(p)
                     if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy, modifier = Modifier.fillMaxWidth()) { Text("Review conflict · retain draft and load server version") }
@@ -522,6 +529,15 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
         store.save(changed, action)
         store.saveError ?: run { selecting = false; selection.clear(); focusTooth = teeth.first(); null }
     } }
+    editTreatmentId?.let { id ->
+        val item = patient?.optJSONArray("treatments").objectList().firstOrNull { it.optString("id") == id }
+        if (patient != null && item != null && canEditClinical(store.currentRole)) key(id) { RecordTreatmentDialog(
+            patient, listOf(item.optString("tooth")), "",
+            clinicianRecords(store.config).filter { it.optBoolean("active", true) }.map { it.optString("name") }.filter { it.isNotBlank() },
+            store.config, onDismiss = { editTreatmentId = null }, editing = item,
+        ) { changed, action -> store.save(changed, action); store.saveError } }
+        else LaunchedEffect(id) { editTreatmentId = null }
+    }
     tooth?.let { number -> if (patient != null && canEditClinical(store.currentRole)) ToothEditor(number, patient, toothSurface, { tooth = null; toothSurface = "" }) { changed, action -> store.save(changed, action); if (store.saveError == null) tooth = null } }
 }
 

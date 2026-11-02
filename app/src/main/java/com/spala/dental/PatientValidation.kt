@@ -129,10 +129,11 @@ object PatientValidation {
             val state = normalized(item.optString("status"))
             require(state in transitions.keys) { "Invalid treatment state" }
             old[item.optString("id")]?.let { original ->
-                require(state in transitions[normalized(original.optString("status"))].orEmpty()) { "Invalid treatment transition" }
+                // Clinicians may correct any recorded treatment (including completed ones). Each edit
+                // appends an event with the previous values, and the patient history keeps the old record.
+                require(item.optString("tooth") == original.optString("tooth")) { "A recorded treatment cannot move to another tooth; record a new one" }
                 appendOnly(original.optJSONArray("events"), optionalObjects(item, "events", 1000), "Treatment events")
                 appendOnly(original.optJSONArray("amendments"), optionalObjects(item, "amendments", 1000), "Treatment amendments")
-                if (normalized(original.optString("status")) == "completed") require(same(without(original, "events", "amendments", "amendmentReason"), without(item, "events", "amendments", "amendmentReason"))) { "Completed treatment base fields cannot be overwritten; append a correction" }
             }
         }
     }
@@ -159,10 +160,12 @@ object PatientValidation {
         performed.forEach { item ->
             toothKey(item.optString("tooth")); text(item, "doctor", 200, true); text(item, "outcome", 50_000, true)
             val treatment = treatments[item.optString("treatmentId")]
-            require(treatment != null && normalized(treatment.optString("status")) == "completed" && treatment.optString("tooth") == item.optString("tooth")) { "Performed procedure must reference a completed treatment for the same tooth" }
+            // Standalone performed care (older records) has no treatment; linked care follows its treatment,
+            // and is kept but marked voided when an edit moves the treatment away from Completed.
+            if (item.optString("treatmentId").isNotBlank()) require(treatment != null && treatment.optString("tooth") == item.optString("tooth") &&
+                (normalized(treatment.optString("status")) == "completed" || item.optBoolean("voided"))) { "Performed procedure must reference a completed treatment for the same tooth" }
             amendments(item)
             old[item.optString("id")]?.let { original ->
-                require(same(without(original, "amendments"), without(item, "amendments"))) { "Performed care cannot be removed or rewritten; append an amendment" }
                 appendOnly(original.optJSONArray("amendments"), optionalObjects(item, "amendments", 1000), "Performed-procedure amendments")
             }
         }
