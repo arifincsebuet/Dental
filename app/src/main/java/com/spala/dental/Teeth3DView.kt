@@ -10,6 +10,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -615,6 +617,8 @@ fun Teeth3DView(
     showLabels: Boolean = false,
     showRoots: Boolean = false,
     onToothTap: ((String) -> Unit)? = null,
+    /** Slowly turns the model after it loads; pauses while touched or while a tooth is selected. */
+    autoRotate: Boolean = true,
 ) {
     val signature = chart?.optJSONObject("teeth")?.toString().orEmpty() + "|" + chart?.optString("dentition").orEmpty()
     // Geometry is built off the main thread; the previous model stays visible while a changed chart rebuilds.
@@ -631,7 +635,35 @@ fun Teeth3DView(
     var pitch by remember { mutableFloatStateOf(0f) }
     var zoom by remember { mutableFloatStateOf(1f) }
     val intro = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { intro.animateTo(1f, tween(1400, easing = FastOutSlowInEasing)) { yaw = -0.6f + 0.6f * value } }
+    // Last touch (uptime ms): auto-rotation waits a few seconds after the user lets go.
+    var lastTouch by remember { mutableLongStateOf(0L) }
+    val selectionNow by rememberUpdatedState(selectedTeeth)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Respect "Remove animations" (animator duration scale 0) in Android accessibility settings.
+    val motionAllowed = remember {
+        runCatching { android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) }.getOrDefault(1f) > 0f
+    }
+    LaunchedEffect(Unit) {
+        intro.animateTo(1f, tween(1400, easing = FastOutSlowInEasing)) { yaw = -0.6f + 0.6f * value }
+        if (!autoRotate || !motionAllowed) return@LaunchedEffect
+        // Turntable: one full turn about every 30 s, eased in after each pause. Runs only while the
+        // model is on screen (frames stop when the page is hidden).
+        var previous = withFrameNanos { it }
+        var speed = 0f
+        val fullSpeed = (2f * Math.PI.toFloat()) / 30f
+        while (true) {
+            val now = withFrameNanos { it }
+            val dt = ((now - previous) / 1_000_000_000f).coerceIn(0f, 0.1f)
+            previous = now
+            val idle = android.os.SystemClock.uptimeMillis() - lastTouch > 4_000L
+            val target = if (idle && selectionNow.isEmpty()) fullSpeed else 0f
+            speed += (target - speed) * (dt * 2.5f).coerceAtMost(1f)
+            if (speed > 0.0001f) {
+                yaw += speed * dt
+                if (yaw > Math.PI.toFloat()) yaw -= 2f * Math.PI.toFloat()
+            }
+        }
+    }
     val summary = remember(signature) { chartCounts(chart) }
     val description = "Interactive 3D dental model. ${summary.recorded} recorded teeth, ${summary.findings} with findings, " +
         "${summary.restorations} with restorations, ${summary.planned} with planned care. Drag to rotate, pinch to zoom" +
@@ -663,6 +695,7 @@ fun Teeth3DView(
             .semantics { contentDescription = description }
             .pointerInput(scene) {
                 detectTransformGestures { _, pan, gestureZoom, _ ->
+                    lastTouch = android.os.SystemClock.uptimeMillis()
                     yaw += pan.x * 0.006f
                     pitch = (pitch + pan.y * 0.005f).coerceIn(-1.35f, 1.35f)
                     zoom = (zoom * gestureZoom).coerceIn(0.75f, 2.4f)
@@ -670,7 +703,8 @@ fun Teeth3DView(
             }
             .pointerInput(scene) {
                 detectTapGestures(
-                    onDoubleTap = { yaw = 0f; pitch = 0f; zoom = 1f },
+                    onPress = { lastTouch = android.os.SystemClock.uptimeMillis() },
+                    onDoubleTap = { yaw = 0f; pitch = 0f; zoom = 1f; lastTouch = android.os.SystemClock.uptimeMillis() },
                     onTap = { position ->
                         val callback = tapCallback ?: return@detectTapGestures
                         val anchors = holder.anchors
