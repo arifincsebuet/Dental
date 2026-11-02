@@ -69,11 +69,24 @@ class SlotCalendar(private val config: JSONObject, patients: List<JSONObject>) {
         config.optJSONArray("busy").objectList().map { it.optString("d").trim().lowercase() to Booking(it.optLong("s"), it.optLong("e"), "", "", "Scheduled") }
     ).groupBy({ it.first }, { it.second })
 
+    /** Sessions that offer slots on [date] (for the day editor). */
+    fun sessionsOn(date: LocalDate): List<JSONObject> = config.optJSONArray("availability").objectList().filter { s ->
+        if (!s.optBoolean("active", true)) return@filter false
+        val first = runCatching { LocalDate.parse(s.optString("startDate")) }.getOrNull() ?: return@filter false
+        val last = runCatching { LocalDate.parse(s.optString("endDate")) }.getOrNull() ?: return@filter false
+        val weekdays = s.optJSONArray("weekdays")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
+        val closed = s.optJSONArray("exceptDates")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        !date.isBefore(first) && !date.isAfter(last) && (weekdays.isEmpty() || date.dayOfWeek.value in weekdays) && date.toString() !in closed
+    }
+
     fun slots(date: LocalDate, now: Long = System.currentTimeMillis()): List<Slot> = sessions.flatMap { session ->
         val first = runCatching { LocalDate.parse(session.optString("startDate")) }.getOrNull() ?: return@flatMap emptyList()
         val last = runCatching { LocalDate.parse(session.optString("endDate")) }.getOrNull() ?: return@flatMap emptyList()
         val weekdays = session.optJSONArray("weekdays")?.let { a -> (0 until a.length()).map { a.optInt(it) } }.orEmpty()
         if (date.isBefore(first) || date.isAfter(last) || (weekdays.isNotEmpty() && date.dayOfWeek.value !in weekdays)) return@flatMap emptyList()
+        // Days closed individually inside a repeating session.
+        val closed = session.optJSONArray("exceptDates")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        if (date.toString() in closed) return@flatMap emptyList()
         val step = session.optInt("slotMinutes", 30).coerceIn(5, 240)
         val from = runCatching { LocalTime.parse(session.optString("start")) }.getOrNull() ?: return@flatMap emptyList()
         val to = runCatching { LocalTime.parse(session.optString("end")) }.getOrNull() ?: return@flatMap emptyList()
@@ -195,9 +208,9 @@ fun SlotGrid(slots: List<Slot>, showPatients: Boolean, onSlot: (Slot) -> Unit) {
 
 @Composable
 fun SlotCalendarScreen(
-    patients: List<JSONObject>, config: JSONObject, canManage: Boolean,
+    patients: List<JSONObject>, config: JSONObject, canManage: Boolean, canBook: Boolean, busy: Boolean,
     onBook: (patient: JSONObject, slot: Slot, reason: String) -> String?,
-    onSaveConfig: (JSONObject) -> Boolean, onOpenPatient: (String) -> Unit,
+    onSaveConfig: (config: JSONObject, success: String, done: (String?) -> Unit) -> Unit, onOpenPatient: (String) -> Unit,
 ) {
     val zone = runCatching { ClinicalRules.zone(config) }.getOrDefault(java.time.ZoneId.systemDefault())
     val today = LocalDate.now(zone)
@@ -205,25 +218,157 @@ fun SlotCalendarScreen(
     val selected = LocalDate.parse(selectedText)
     var month by remember { mutableStateOf(YearMonth.from(selected)) }
     var booking by remember { mutableStateOf<Slot?>(null) }
+    var opening by remember { mutableStateOf(false) }
     var managing by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf("") }
     val engine = remember(config.toString(), patients) { SlotCalendar(config, patients) }
     val monthInfo = remember(engine, month) { (1..month.lengthOfMonth()).associate { d -> val s = engine.slots(month.atDay(d)); month.atDay(d) to (s.count { it.available } to s.size) } }
+    fun save(updated: JSONObject, success: String) { problem = ""; onSaveConfig(updated, success) { error -> problem = error.orEmpty() } }
 
+    if (canManage) SurfaceCard(padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Online booking by patients", style = MaterialTheme.typography.titleSmall, color = Ink)
+                Text("Patients book free slots in the patient app", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+            }
+            Switch(config.optBoolean("patientBooking", true), { on -> save(JSONObject(config.toString()).put("patientBooking", on), if (on) "Online booking turned on" else "Online booking turned off") }, enabled = !busy)
+        }
+    }
     if (engine.sessions.isEmpty()) SurfaceCard(background = Amber100) {
         Text("No appointment slots yet", style = MaterialTheme.typography.titleSmall, color = Ink)
-        Text(if (canManage) "Create availability for each doctor (days, hours and slot length). Patients and staff can then book free slots."
-            else "Ask an administrator to create appointment availability.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
-    }
-    if (canManage) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { managing = true }, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f)) { GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); Text("Manage slots") }
+        Text(if (canManage) "Pick a day below and tap \"Open slots\" to choose a doctor and hours. Patients and staff can then book."
+            else "Ask your admin to open appointment slots (or give you \"Open & close appointment slots\" access).", style = MaterialTheme.typography.bodySmall, color = InkMuted)
     }
     MonthCalendar(month, selected, today, { monthInfo[it] ?: (0 to 0) }, { month = it }) { selectedText = it.toString(); month = YearMonth.from(it) }
-    SectionHeader(selected.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())))
-    SlotGrid(engine.slots(selected), showPatients = true) { slot ->
-        if (slot.available) booking = slot else slot.patientId?.let(onOpenPatient)
+
+    SectionHeader(selected.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())),
+        action = if (canManage && engine.sessions.isNotEmpty()) "All availability" else null, onAction = { managing = true })
+    if (canManage) {
+        Button(onClick = { opening = true }, enabled = !busy && !selected.isBefore(today), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(50.dp)) {
+            GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp))
+            Text(if (selected.isBefore(today)) "Past day" else "Open slots on ${selected.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))}")
+        }
+        engine.sessionsOn(selected).forEach { session ->
+            val repeating = session.optString("startDate") != session.optString("endDate")
+            SurfaceCard(padding = 12.dp, background = Teal50) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${session.optString("doctor")} · ${session.optString("start")}–${session.optString("end")}", style = MaterialTheme.typography.titleSmall, color = Ink)
+                        Text("${session.optInt("slotMinutes")} min slots" + (if (repeating) " · every ${selected.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())} until ${session.optString("endDate")}" else " · this day only") +
+                            session.optString("room").takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (repeating) TextButton(enabled = !busy, onClick = {
+                        val updated = JSONObject(config.toString())
+                        updated.optJSONArray("availability").objectList().firstOrNull { it.optString("id") == session.optString("id") }?.array("exceptDates")?.put(selected.toString())
+                        save(updated, "Slots closed for ${selected}")
+                    }) { Text("Close this day") }
+                    TextButton(enabled = !busy, onClick = {
+                        val updated = JSONObject(config.toString())
+                        updated.put("availability", JSONArray(updated.optJSONArray("availability").objectList().filter { it.optString("id") != session.optString("id") }))
+                        save(updated, "Slots removed")
+                    }) { Text(if (repeating) "Delete all repeats" else "Remove", color = Rose600) }
+                }
+            }
+        }
     }
+    if (problem.isNotBlank()) Text(problem, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    SlotGrid(engine.slots(selected), showPatients = true) { slot ->
+        if (slot.available) { if (canBook) booking = slot else problem = "You don't have access to book appointments. Ask your admin (Team & roles)." }
+        else slot.patientId?.takeIf { it.isNotBlank() }?.let(onOpenPatient)
+    }
+    if (canBook) Text("Tap a free (outlined) time to book it for a patient. Booked times show the patient's name.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
     booking?.let { slot -> BookSlotDialog(slot, patients.filterNot { it.optBoolean("archived") }, { booking = null }) { patient, reason -> onBook(patient, slot, reason) } }
-    if (managing) AvailabilityDialog(config, today, onClose = { managing = false }, onSave = onSaveConfig)
+    if (opening) OpenDayDialog(config, selected, busy, onClose = { opening = false }) { updated, success, done -> onSaveConfig(updated, success, done) }
+    if (managing) AvailabilityDialog(config, today, onClose = { managing = false }, onSave = { updated -> save(updated, "Availability saved"); true })
+}
+
+/**
+ * Open slots on one day in a few taps: doctor, hours (or a preset), slot length, and optionally
+ * repeat the same hours every week on that weekday.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OpenDayDialog(config: JSONObject, day: LocalDate, busy: Boolean, onClose: () -> Unit, onSave: (JSONObject, String, (String?) -> Unit) -> Unit) {
+    val clinicians = clinicianRecords(config).filter { it.optBoolean("active", true) && it.optString("role") !in setOf("cashier", "receptionist", "auditor") }
+        .map { it.optString("name") }.filter { it.isNotBlank() }
+    var doctor by remember { mutableStateOf(clinicians.firstOrNull().orEmpty()) }
+    var start by remember { mutableStateOf("09:00") }
+    var end by remember { mutableStateOf("13:00") }
+    var slotMinutes by remember { mutableStateOf(30) }
+    var weeks by remember { mutableStateOf(0) } // 0 = this day only
+    var room by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    val dayName = day.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
+    val times = runCatching {
+        val from = LocalTime.parse(start); val to = LocalTime.parse(end)
+        generateSequence(from) { it.plusMinutes(slotMinutes.toLong()) }.takeWhile { !it.plusMinutes(slotMinutes.toLong()).isAfter(to) && !it.isBefore(from) }.toList()
+    }.getOrDefault(emptyList())
+    AlertDialog(onDismissRequest = { if (!saving) onClose() }, shape = RoundedCornerShape(28.dp),
+        title = { Column {
+            Text("Open slots")
+            Text(day.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.getDefault())), style = MaterialTheme.typography.bodySmall, color = InkMuted)
+        } },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Doctor", style = MaterialTheme.typography.labelLarge, color = Ink)
+                if (clinicians.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    clinicians.forEach { name -> FilterChip(selected = doctor == name, onClick = { doctor = name }, label = { Text(name) }) }
+                }
+                OutlinedTextField(doctor, { doctor = it }, label = { Text(if (clinicians.isEmpty()) "Doctor's name (add doctors in Team & roles)" else "Doctor") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+                Text("Hours", style = MaterialTheme.typography.labelLarge, color = Ink)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Morning" to ("09:00" to "13:00"), "Afternoon" to ("14:00" to "18:00"), "Evening" to ("17:00" to "21:00"), "Full day" to ("09:00" to "17:00")).forEach { (label, range) ->
+                        FilterChip(selected = start == range.first && end == range.second, onClick = { start = range.first; end = range.second }, label = { Text(label) })
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TimeField(start, { start = it }, "From", Modifier.weight(1f))
+                    TimeField(end, { end = it }, "To", Modifier.weight(1f))
+                }
+                Text("Each appointment", style = MaterialTheme.typography.labelLarge, color = Ink)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(15, 20, 30, 45, 60).forEach { m -> FilterChip(selected = slotMinutes == m, onClick = { slotMinutes = m }, label = { Text("$m min") }) }
+                }
+                Text("Repeat", style = MaterialTheme.typography.labelLarge, color = Ink)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0 to "This day only", 4 to "Every $dayName · 4 weeks", 12 to "12 weeks", 26 to "6 months", 52 to "1 year").forEach { (w, label) ->
+                        FilterChip(selected = weeks == w, onClick = { weeks = w }, label = { Text(label) })
+                    }
+                }
+                OutlinedTextField(room, { room = it }, label = { Text("Room / chair (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+                SurfaceCard(padding = 12.dp, background = SurfaceTint) {
+                    Text(if (times.isEmpty()) "No slots fit these hours" else "${times.size} slots: " + times.take(6).joinToString(", ") + if (times.size > 6) " …" else "",
+                        style = MaterialTheme.typography.bodySmall, color = if (times.isEmpty()) Rose600 else Ink)
+                    if (weeks > 0) Text("Repeats every $dayName until ${day.plusWeeks(weeks.toLong() - 1)}", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                }
+                if (saving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = { Button(enabled = !saving && !busy && times.isNotEmpty() && doctor.isNotBlank(), onClick = {
+            error = runCatching {
+                val name = doctor.trim()
+                val from = LocalTime.parse(start); val to = LocalTime.parse(end)
+                val endDate = if (weeks > 0) day.plusWeeks(weeks.toLong() - 1) else day
+                // The same doctor cannot have overlapping hours on this day.
+                val engine = SlotCalendar(config, emptyList())
+                val clash = engine.sessionsOn(day).firstOrNull { s -> s.optString("doctor").trim().equals(name, true) &&
+                    LocalTime.parse(s.optString("start")) < to && from < LocalTime.parse(s.optString("end")) }
+                require(clash == null) { "$name already has slots ${clash?.optString("start")}–${clash?.optString("end")} on this day" }
+                val session = JSONObject().put("id", uid()).put("doctor", name).put("startDate", day.toString()).put("endDate", endDate.toString())
+                    .put("weekdays", if (weeks > 0) JSONArray(listOf(day.dayOfWeek.value)) else JSONArray()).put("start", start).put("end", end)
+                    .put("slotMinutes", slotMinutes).put("active", true).apply { if (room.isNotBlank()) put("room", room.trim()) }
+                val updated = JSONObject(config.toString())
+                updated.array("availability").put(session)
+                saving = true
+                onSave(updated, "${times.size} slots opened for $name") { problem -> saving = false; if (problem == null) onClose() else error = problem }
+            }.exceptionOrNull()?.localizedMessage.orEmpty()
+        }) { Text("Open ${times.size} slots") } },
+        dismissButton = { TextButton(enabled = !saving, onClick = onClose) { Text("Cancel") } })
 }
 
 @Composable
@@ -339,13 +484,12 @@ private fun AvailabilityDialog(config: JSONObject, today: LocalDate, onClose: ()
                     }.exceptionOrNull()?.localizedMessage.orEmpty()
                 }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("+ Add to list") }
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                Text("Save, then Sync so patients see the new slots.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                Text("Saved changes are shared with patients right away.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
             }
         },
         confirmButton = { Button(onClick = {
             // Only close when the change was accepted; while a sync is running the save is refused.
             if (onSave(JSONObject(config.toString()).put("availability", JSONArray(sessions.toList())).put("patientBooking", patientBooking))) onClose()
-            else error = "The app is busy syncing. Wait a moment, then tap Save again; your changes are kept here."
         }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } })
 }

@@ -6,9 +6,12 @@ rules_version = '2';
 //   workspaces/{clinic}                 clinic settings, members, invites, subscription
 //   workspaces/{clinic}/public/info     patient-visible: name, time zone, availability, busy times
 //   workspaces/{clinic}/patients/{id}   one document per patient (all of that patient's lists)
+//   portals/{key}                       patient app copy of one patient's record. key =
+//                                       sha256(Patient ID + password), so knowing the key is the
+//                                       login. Patients do not use Firebase Authentication.
 //
 // Clinic id = the owner's Firebase uid. Staff join by being listed (by Google email) in the
-// clinic's staff list: invites {email: role} + inviteEmails [email].
+// clinic's staff list: invites {email: {role, permissions}} + inviteEmails [email].
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -16,118 +19,159 @@ service cloud.firestore {
     function email() { return request.auth.token.get('email', '').lower(); }
     function verifiedEmail() { return signedIn() && request.auth.token.get('email_verified', false) == true; }
     function superAdmin() { return verifiedEmail() && email() in ['dev.spala@gmail.com', 'spalatechnologies@gmail.com']; }
+    // Patient Firebase accounts from older versions never act as staff.
     function patientAccount() { return signedIn() && email().matches('.*@patient[.]dentalcare[.]local$'); }
+    function staffUser() { return signedIn() && !patientAccount(); }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
 
-    // ---- membership from a clinic document's data ----
+    // ---- membership and permissions from a clinic document's data ----
     function memberIn(data) { return data.config.members.get(request.auth.uid, {}); }
-    function activeIn(data) { return memberIn(data).get('active', true) != false; }
+    function activeIn(data) { return memberIn(data).get('active', true) != false && memberIn(data).get('role', '') != ''; }
     function roleIn(data, clinic, roles) {
-      return signedIn() && !patientAccount() &&
-        ((request.auth.uid == clinic && 'owner' in roles) || (activeIn(data) && memberIn(data).get('role', '') in roles));
+      return staffUser() && ((request.auth.uid == clinic && 'owner' in roles) || (activeIn(data) && memberIn(data).get('role', '') in roles));
+    }
+    // A permission toggled by the admin wins; otherwise the role's default applies.
+    function permIn(data, clinic, name) {
+      return staffUser() && (request.auth.uid == clinic || (activeIn(data) && (
+        memberIn(data).get('permissions', {}).get(name, null) == true ||
+        (memberIn(data).get('permissions', {}).get(name, null) == null && memberIn(data).get('role', '') in defaultRoles(name)))));
+    }
+    function defaultRoles(name) {
+      return {
+        'viewClinical': ['admin', 'administrator', 'dentist', 'assistant', 'auditor'],
+        'recordTreatment': ['admin', 'administrator', 'dentist'],
+        'managePatients': ['admin', 'administrator', 'dentist', 'assistant', 'receptionist'],
+        'manageAppointments': ['admin', 'administrator', 'dentist', 'assistant', 'receptionist'],
+        'manageSlots': ['admin', 'administrator', 'dentist', 'receptionist'],
+        'billing': ['admin', 'administrator', 'cashier'],
+        'patientLogins': ['admin', 'administrator', 'dentist', 'receptionist'],
+        'reports': ['admin', 'administrator', 'dentist', 'cashier', 'auditor'],
+        'manageTeam': ['admin', 'administrator']
+      }.get(name, []);
     }
     function clinicData(clinic) { return get(/databases/$(database)/documents/workspaces/$(clinic)).data; }
-    function hasRole(clinic, roles) {
-      return signedIn() && !patientAccount() &&
-        ((request.auth.uid == clinic && 'owner' in roles) || roleIn(clinicData(clinic), clinic, roles));
-    }
+    function hasRole(clinic, roles) { return staffUser() && ((request.auth.uid == clinic && 'owner' in roles) || roleIn(clinicData(clinic), clinic, roles)); }
+    function can(clinic, name) { return staffUser() && (request.auth.uid == clinic || permIn(clinicData(clinic), clinic, name)); }
     function anyStaff() { return ['owner', 'admin', 'administrator', 'dentist', 'assistant', 'receptionist', 'cashier', 'auditor']; }
     function writers() { return ['owner', 'admin', 'administrator', 'dentist', 'assistant', 'receptionist', 'cashier']; }
-    function admins() { return ['owner', 'admin', 'administrator']; }
+
+    // The joining member entry must equal the invitation (role + optional permissions).
+    function invitedEntry(inv, m) {
+      return m.active == true && m.email == email() && (
+        (inv is string && m.role == inv && m.keys().hasOnly(['role', 'active', 'email'])) ||
+        (inv is map && m.role == inv.role && m.get('permissions', null) == inv.get('permissions', null)
+          && m.keys().hasOnly(['role', 'active', 'email', 'permissions'])));
+    }
 
     match /workspaces/{clinic} {
       // Owner, active members, and staff invited by their verified Google email (to join).
-      allow get: if signedIn() && !patientAccount() &&
+      allow get: if staffUser() &&
         (request.auth.uid == clinic || roleIn(resource.data, clinic, anyStaff()) || (verifiedEmail() && email() in resource.data.get('inviteEmails', [])));
       // The invitation lookup: where('inviteEmails', 'array-contains', <own email>).
       allow list: if verifiedEmail() && !patientAccount() && email() in resource.data.get('inviteEmails', []);
 
-      allow create: if signedIn() && !patientAccount() && request.auth.uid == clinic
+      allow create: if staffUser() && request.auth.uid == clinic
         && request.resource.data.revision == 1
         && (!('complimentary' in request.resource.data) || superAdmin())
         && !('subscription' in request.resource.data);
 
       allow update: if
-        // Owner / admin save settings with the next revision (optimistic concurrency).
-        (roleIn(resource.data, clinic, admins())
+        // Settings, team and roles: owner / admins / "manage team" permission, with the next revision.
+        (permIn(resource.data, clinic, 'manageTeam')
           && request.resource.data.revision == resource.data.revision + 1
           && !changed().hasAny(['subscription'])
           && (!changed().hasAny(['complimentary']) || (superAdmin() && request.auth.uid == clinic))
           && (request.auth.uid == clinic || request.resource.data.config.members.get(clinic, null) == resource.data.config.members.get(clinic, null)))
+        // Appointment slots only: "manage slots" permission.
+        || (permIn(resource.data, clinic, 'manageSlots')
+          && request.resource.data.revision == resource.data.revision + 1
+          && changed().hasOnly(['config', 'revision', 'updatedAt', 'updatedBy'])
+          && request.resource.data.config.diff(resource.data.config).affectedKeys().hasOnly(['availability', 'patientBooking']))
         // Owner / admin record the clinic's Google Play subscription (from the purchasing device).
-        || (roleIn(resource.data, clinic, admins()) && changed().hasOnly(['subscription']))
-        // An invited staff member joins: adds only their own member entry, with the invited role.
+        || (roleIn(resource.data, clinic, ['owner', 'admin', 'administrator']) && changed().hasOnly(['subscription']))
+        // An invited staff member joins: adds only their own member entry, exactly as invited.
         || (verifiedEmail() && !patientAccount() && email() in resource.data.get('inviteEmails', [])
           && changed().hasOnly(['config'])
           && request.resource.data.config.diff(resource.data.config).affectedKeys().hasOnly(['members'])
           && request.resource.data.config.members.diff(resource.data.config.members).affectedKeys().hasOnly([request.auth.uid])
-          && request.resource.data.config.members[request.auth.uid] == {'role': resource.data.invites[email()], 'active': true, 'email': email()});
+          && invitedEntry(resource.data.invites[email()], request.resource.data.config.members[request.auth.uid]));
 
       allow delete: if false;
 
-      // Patient-visible clinic info. Any signed-in account may read it (no personal data).
+      // Patient-visible clinic info (no personal data): readable by the patient app without sign-in.
       match /public/{doc} {
-        allow get: if signedIn() && doc == 'info';
-        allow create, update: if doc == 'info' && (
-          hasRole(clinic, writers())
-          // A patient booking adds one busy time, or a cancellation removes one; nothing else.
-          || (patientAccount() && exists(/databases/$(database)/documents/workspaces/$(clinic)/public/info)
-            && changed().hasOnly(['busy'])
-            && ((request.resource.data.busy.hasAll(resource.data.get('busy', [])) && request.resource.data.busy.size() == resource.data.get('busy', []).size() + 1)
-              || (resource.data.get('busy', []).hasAll(request.resource.data.busy) && request.resource.data.busy.size() == resource.data.get('busy', []).size() - 1))));
+        allow get: if doc == 'info';
+        allow create, update: if doc == 'info' && (hasRole(clinic, writers()) || portalBooking(clinic));
         allow delete: if false;
+
+        // A patient booking adds one busy time (cancellation removes one) in the same transaction
+        // that appends a request to their portal document.
+        function portalBooking(clinic) {
+          return resource != null && changed().hasOnly(['busy', 'lastPortal'])
+            && portalRequestAdded(request.resource.data.lastPortal, clinic)
+            && ((request.resource.data.busy.hasAll(resource.data.get('busy', [])) && request.resource.data.busy.size() == resource.data.get('busy', []).size() + 1)
+              || (resource.data.get('busy', []).hasAll(request.resource.data.busy) && request.resource.data.busy.size() == resource.data.get('busy', []).size() - 1));
+        }
+        function portalRequestAdded(key, clinic) {
+          return key is string
+            && getAfter(/databases/$(database)/documents/portals/$(key)).data.clinicId == clinic
+            && getAfter(/databases/$(database)/documents/portals/$(key)).data.requests.size()
+              == get(/databases/$(database)/documents/portals/$(key)).data.get('requests', []).size() + 1;
+        }
       }
 
       match /patients/{patient} {
         allow get, list: if hasRole(clinic, anyStaff());
 
-        allow create: if hasRole(clinic, writers())
+        allow create: if hasRole(clinic, writers()) && can(clinic, 'managePatients')
           && request.resource.data.revision == 1
           && request.resource.data.syncedAt == request.time
           && request.resource.data.id == patient
-          && !('portal' in request.resource.data);
+          && (!('portal' in request.resource.data) || can(clinic, 'patientLogins'));
 
-        allow update: if (hasRole(clinic, writers())
-            && request.resource.data.revision == resource.data.revision + 1
-            && request.resource.data.syncedAt == request.time
-            && request.resource.data.id == resource.data.id
-            && clinicalAllowed(clinic) && billingAllowed(clinic) && portalAllowed(clinic))
-          || patientSelfService();
+        allow update: if hasRole(clinic, writers())
+          && request.resource.data.revision == resource.data.revision + 1
+          && request.resource.data.syncedAt == request.time
+          && request.resource.data.id == resource.data.id
+          && (!changed().hasAny(clinicalFields()) || can(clinic, 'recordTreatment') || legacyClinicalWrite(clinic))
+          && (!changed().hasAny(['invoices']) || can(clinic, 'billing'))
+          && (!changed().hasAny(['portal']) || can(clinic, 'patientLogins'));
 
         allow delete: if false;
 
         function clinicalFields() {
           return ['story', 'chart', 'treatments', 'encounters', 'performedProcedures', 'notes', 'medicalAlerts', 'images', 'allergies', 'medicalHistory', 'medications'];
         }
-        function clinicalAllowed(clinic) {
-          return !changed().hasAny(clinicalFields()) || hasRole(clinic, ['owner', 'admin', 'administrator', 'dentist'])
-            || (hasRole(clinic, ['assistant']) && memberIn(clinicData(clinic)).get('permissions', {}).get('clinicalWrite', false) == true);
-        }
-        function billingAllowed(clinic) { return !changed().hasAny(['invoices']) || hasRole(clinic, ['owner', 'admin', 'administrator', 'cashier']); }
-        function portalAllowed(clinic) { return !changed().hasAny(['portal']) || hasRole(clinic, ['owner', 'admin', 'administrator', 'dentist']); }
-
-        // The signed-in patient (record's portal.uid) may only finish the forced password change,
-        // or book / cancel: change appointments and append exactly one history line.
-        function patientSelfService() {
-          return signedIn() && resource.data.portal.uid == request.auth.uid && (
-            (changed().hasOnly(['portal'])
-              && request.resource.data.portal.diff(resource.data.portal).affectedKeys().hasOnly(['mustChange'])
-              && request.resource.data.portal.mustChange == false)
-            || (changed().hasOnly(['appointments', 'history', 'revision', 'updatedAt', 'updatedBy', 'syncedAt'])
-              && request.resource.data.revision == resource.data.revision + 1
-              && request.resource.data.syncedAt == request.time
-              && request.resource.data.updatedBy == request.auth.uid
-              && request.resource.data.history.size() == resource.data.get('history', []).size() + 1
-              && request.resource.data.history.hasAll(resource.data.get('history', []))
-              && request.resource.data.appointments.size() >= resource.data.get('appointments', []).size()
-              && request.resource.data.appointments.size() <= resource.data.get('appointments', []).size() + 1));
+        function legacyClinicalWrite(clinic) {
+          return hasRole(clinic, ['assistant']) && memberIn(clinicData(clinic)).get('permissions', {}).get('clinicalWrite', false) == true;
         }
       }
     }
 
-    // A patient finds and reads their own record: collectionGroup('patients').where('portal.uid', '==', uid).
-    match /{path=**}/patients/{patient} {
-      allow get, list: if signedIn() && resource.data.portal.uid == request.auth.uid;
+    // Patient app documents. The document id is derived from the Patient ID and password, so only
+    // someone who knows both can read it; listing is limited to the clinic's own staff.
+    match /portals/{key} {
+      allow get: if true;
+      allow list: if signedIn() && hasRole(resource.data.clinicId, anyStaff());
+
+      allow create: if can(request.resource.data.clinicId, 'patientLogins')
+        && request.resource.data.patientId is string && request.resource.data.get('requests', []).size() == 0;
+      allow delete: if can(resource.data.clinicId, 'patientLogins');
+
+      allow update: if
+        // Staff refresh the copy after a sync and clear processed requests.
+        (hasRole(resource.data.clinicId, writers())
+          && request.resource.data.clinicId == resource.data.clinicId
+          && request.resource.data.patientId == resource.data.patientId)
+        // The patient (knows the key) books or cancels: one new request, appointments shown at once.
+        || (changed().hasOnly(['requests', 'record', 'pending', 'updatedAt'])
+          && request.resource.data.record.diff(resource.data.record).affectedKeys().hasOnly(['appointments'])
+          && request.resource.data.requests.size() == resource.data.get('requests', []).size() + 1
+          && request.resource.data.requests.hasAll(resource.data.get('requests', []))
+          && request.resource.data.requests.size() <= 30
+          && request.resource.data.pending == true
+          && request.resource.data.record.appointments.size() >= resource.data.record.get('appointments', []).size()
+          && request.resource.data.record.appointments.size() <= resource.data.record.get('appointments', []).size() + 1);
     }
   }
 }

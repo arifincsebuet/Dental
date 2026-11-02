@@ -3,7 +3,7 @@
 Firebase holds all clinic data:
 - **Firestore:** patients, staff/doctors, clinic settings, appointments, billing and treatment history.
 - **Cloud Storage:** clinical images.
-- **Firebase Authentication:** Google sign-in for the clinic team, and Patient ID + password for patients.
+- **Firebase Authentication:** Google sign-in for the clinic team. Patients sign in with a Patient ID + password checked against Firestore (no Firebase account).
 - **App Check (Play Integrity):** only the genuine app from Google Play can call Firebase.
 
 There are **no Cloud Functions**. The Android app reads and writes Firestore directly. Security
@@ -30,7 +30,7 @@ flowchart LR
   end
 
   subgraph Firebase["Firebase project dental-sm"]
-    Auth["Authentication<br/>Google (staff) · Email/Password (patients, synthetic email)"]
+    Auth["Authentication<br/>Google (staff only)"]
     Rules{{"Security rules<br/>firestore.rules · storage.rules"}}
     FS[("Firestore<br/>workspaces/{clinicId}<br/>workspaces/{clinicId}/public/info<br/>workspaces/{clinicId}/patients/{patientId}")]
     ST[("Cloud Storage<br/>workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png")]
@@ -49,6 +49,7 @@ flowchart LR
 ```mermaid
 erDiagram
   WORKSPACE ||--|| PUBLIC_INFO : "public/info"
+  PATIENT ||--o| PORTAL : "portals/{key} (patient app copy)"
   WORKSPACE ||--o{ PATIENT : "patients"
   WORKSPACE {
     string id "clinicId = owner's Firebase UID"
@@ -76,7 +77,7 @@ erDiagram
     array invoices "payments/refunds embedded"
     array images "gs:// references"
     array history "append-only"
-    map portal "loginId, uid, mustChange"
+    map portal "loginId, key"
     int revision
     timestamp syncedAt "server time, for incremental sync"
   }
@@ -84,10 +85,11 @@ erDiagram
 
 - **Why one document per patient, not one for all?** Rules protect whole documents. A patient who can
   read a shared list document would see every other patient in it, and one document holds at most 1 MiB.
-- **Patient logins** are Firebase Auth accounts; the patient document's `portal.uid` links them, so no
-  login or index documents are needed.
+- **Patient logins** don't use Firebase Authentication. Each patient with an app login has one
+  `portals/{key}` document (key = SHA-256 of Patient ID + password) with a read-only copy of their
+  record and their booking requests. Staff roles and access toggles live in the clinic document.
 - **Large arrays and maps are exempt from indexing.** Only `inviteEmails`, `syncedAt` and
-  `portal.uid` (collection group) are queried.
+  portal `clinicId` + `pending` are queried.
 
 ## 3. Key flows
 
@@ -111,23 +113,22 @@ sequenceDiagram
   A->>DB: get clinic + all patients (first time only)
 ```
 
-### Patient login created on the admin's phone
+### Patient login (no Firebase Authentication)
 
 ```mermaid
 sequenceDiagram
-  participant Ad as Admin app
-  participant Auth2 as Firebase Auth (sign-up endpoint)
+  participant Ad as Staff app
   participant DB as Firestore (rules)
   participant P as Patient app
-  Ad->>Auth2: accounts:signUp(ID@patient.dentalcare.local, password chosen by admin) + App Check token
-  Note over Ad,Auth2: nobody is signed in on the admin's phone; the admin stays signed in
-  Ad->>DB: transaction: patient.portal = {loginId, uid, mustChange: true}
+  Ad->>Ad: admin types Patient ID + password; key = SHA-256(ID + password)
+  Ad->>DB: transaction: create portals/{key} (read-only copy of the record), patient.portal = {loginId, key}
   Ad-->>Ad: Patient ID + password shown once → share
-  P->>DB: signIn, then collectionGroup('patients').where('portal.uid','==',uid) (1 read)
-  P->>P: forced "Choose your password" (reauthenticate + updatePassword)
-  P->>DB: portal.mustChange = false
-  P->>DB: read own record + public/info (2 reads), schedule reminders on the phone
-  Note over Ad,DB: Reset = new Patient ID + password chosen by the admin; the old ID loses access
+  P->>P: patient types the same ID + password → same key
+  P->>DB: get portals/{key} + public/info (2 reads, no sign-in)
+  P->>DB: book: transaction appends a request to portals/{key} + busy time to public/info
+  Ad->>DB: next sync: query portals where clinicId == C and pending == true
+  Ad->>DB: requests become appointments in the patient doc; portal copy refreshed, requests cleared
+  Note over Ad,DB: Change ID / password = new portal doc, old one deleted (old password stops working)
 ```
 
 ### Save and sync (offline-first, incremental)
@@ -162,7 +163,7 @@ sequenceDiagram
 | Sync | Write dirty patients; read `syncedAt > lastPull` | Routine sync reads only changed patients |
 | Listeners | None | No continuous read charges |
 | Indexes | Large fields exempt; 3 queried fields | Lower index storage and write cost |
-| Patient logins | Auth accounts linked by `portal.uid` | No login documents |
+| Patient logins | One portal doc per patient with app access; no Auth accounts | Patient sign-in = 2 reads |
 | Images | Lossless WebP ≤ 512 KB, SHA-256 names (deduplicated), private refs | Small storage and egress, no duplicate uploads |
 | Reminders | WorkManager on each phone | No scheduled jobs, no push costs |
 | Subscription | Play purchase acknowledged on the device; entitlement on the clinic doc | No Play API calls or extra documents |
