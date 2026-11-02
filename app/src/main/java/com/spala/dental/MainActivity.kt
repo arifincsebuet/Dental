@@ -108,7 +108,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     val chartLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK && patientId == chartPatientId) {
             val token = result.data?.getStringExtra("sessionToken")
-            if (token == chartToken && canEditClinical(store.currentRole) && result.data?.getLongExtra("chartVersion", -1) == store.patients.firstOrNull { it.optString("id") == patientId }?.optJSONObject("chart")?.optLong("chartVersion")) {
+            if (token == chartToken && store.can("recordTreatment") && result.data?.getLongExtra("chartVersion", -1) == store.patients.firstOrNull { it.optString("id") == patientId }?.optJSONObject("chart")?.optLong("chartVersion")) {
                 // A tooth chosen in the full 3D chart opens the treatment recorder for it.
                 result.data?.getStringExtra("tooth")?.let { key -> recordTeeth = listOf(key); recordSurface = result.data?.getStringExtra("surface").orEmpty(); focusTooth = key }
             }
@@ -148,13 +148,13 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) error = "Notifications are disabled in Android settings. Appointments remain available in Schedule." }
     var imagePatientId by rememberSaveable { mutableStateOf<String?>(null) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null && imagePatientId != null) store.attach(imagePatientId!!, uri) }
-    fun addPatient() { if (store.currentRole in listOf("cashier", "auditor", "unknown")) { error = "Your current role cannot register patients"; return }; form = Form("New patient", listOf(Field("name", "Full name", required = true), Field("phone", "Phone"), Field("dob", "Date of birth"), Field("allergies", "Allergies / medical alerts"))) { values -> store.create(values["name"]!!, values["phone"]!!, values["dob"]!!, values["allergies"]!!) } }
+    fun addPatient() { if (!store.can("managePatients")) { error = "You don't have access to register patients. Ask your admin (Team & roles)."; return }; form = Form("New patient", listOf(Field("name", "Full name", required = true), Field("phone", "Phone"), Field("dob", "Date of birth"), Field("allergies", "Allergies / medical alerts"))) { values -> store.create(values["name"]!!, values["phone"]!!, values["dob"]!!, values["allergies"]!!) } }
     fun editRecord(p: JSONObject, action: String, edit: (JSONObject) -> Unit) { val copy = JSONObject(p.toString()); edit(copy); store.save(copy, action) }
     /** Every 3D launch gets a fresh session token so stale results from an earlier chart are ignored. */
     fun open3D(p: JSONObject, chart: JSONObject) {
         chartPatientId = p.optString("id"); chartToken = uid()
         chart.put("notation", ToothNotation.current).put("sounds", TapSound.enabled)
-        if (!canEditClinical(store.currentRole)) chart.put("readOnly", true)
+        if (!store.can("recordTreatment")) chart.put("readOnly", true)
         chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
     }
     fun openPatient(id: String) { patientId = id; tab = "Overview" }
@@ -222,13 +222,14 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
             }
             if (patient != null) {
                 val p = patient
-                val patientTabs = if (p.has("chart")) listOf("Overview", "Chart", "Encounters", "Treatments", "Billing", "History") else if (p.has("invoices")) listOf("Overview", "Billing") else listOf("Overview")
+                val clinicalView = p.has("chart") && store.can("viewClinical")
+                val patientTabs = if (clinicalView) listOf("Overview", "Chart", "Encounters", "Treatments", "Billing", "History") else if (p.has("invoices")) listOf("Overview", "Billing") else listOf("Overview")
                 TextButton(onClick = { patientId = null }, contentPadding = PaddingValues(horizontal = 4.dp)) {
                     GlyphIcon(Glyph.Back, Teal700, 18.dp); Spacer(Modifier.width(4.dp)); Text(if (doctor != null) "Back to ${doctor.optString("name")}" else "Patients")
                 }
-                val canEdit = canEditClinical(store.currentRole)
+                val canEdit = store.can("recordTreatment")
                 // First view: the patient's 3D dentition, coloured by their full treatment history.
-                if (p.has("chart")) {
+                if (clinicalView) {
                     val signature = p.toString() + ToothNotation.current
                     val view = remember(signature) { displayChart(p) }
                     val records = remember(signature) { toothRecords(p) }
@@ -300,8 +301,8 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                 SegmentedPills(patientTabs, tab.takeIf { it in patientTabs } ?: "Overview", Modifier.fillMaxWidth()) { tab = it }
                 when (tab.takeIf { it in patientTabs } ?: "Overview") {
                     "Overview" -> {
-                        if (p.has("chart")) PatientHeader(p, showAlert = false)
-                        if (canEdit || store.currentRole in listOf("owner", "admin", "administrator")) PatientAccessCard(p, store)
+                        if (clinicalView) PatientHeader(p, showAlert = false)
+                        if (store.can("patientLogins")) PatientAccessCard(p, store)
                         SectionHeader("Profile")
                         SurfaceCard {
                             InfoRow(Glyph.Calendar, "Date of birth", p.optString("dob").ifBlank { "Not recorded" } + (ageText(p.optString("dob"))?.let { " · $it" } ?: ""))
@@ -450,7 +451,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     Heading("Appointments", "Pick a date to see and book its slots")
                     SegmentedPills(listOf("Calendar", "List"), scheduleView, Modifier.fillMaxWidth()) { scheduleView = it }
                     if (scheduleView == "Calendar") SlotCalendarScreen(
-                        store.patients, store.config, canManage = store.currentRole in listOf("owner", "admin", "administrator"),
+                        store.patients, store.config, canManage = store.can("manageSlots"), canBook = store.can("manageAppointments"), busy = store.busy,
                         onBook = { patient, slot, reason ->
                             val consent = patient.optBoolean("communicationConsent")
                             val copy = JSONObject(patient.toString())
@@ -459,13 +460,16 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                                 .put("status", "Scheduled").put("bookedBy", "staff").put("slot", true).put("consent", consent)
                                 .put("reminderEnabled", consent && store.config.optBoolean("remindersEnabled")))
                             store.save(copy, "Appointment booked: ${slot.date} ${slot.time} with ${slot.doctor}")
-                            store.saveError
+                            // Share the booking at once so the slot shows as taken everywhere.
+                            store.saveError ?: run { store.syncSoon(); null }
                         },
-                        onSaveConfig = { updated -> if (store.busy) false else { store.saveConfig(updated); true } },
+                        onSaveConfig = { updated, success, done -> store.saveConfig(updated, success, done) },
                         onOpenPatient = { id -> openPatient(id) },
-                    ) else SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action) }, { id -> openPatient(id) })
+                    ) else SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action); if (store.saveError == null) store.syncSoon() }, { id -> openPatient(id) })
                 }
-                "Reports" -> AdvancedReportsScreen(store.patients, store.config)
+                "Reports" -> if (store.can("reports")) AdvancedReportsScreen(store.patients, store.config)
+                    else CardBlock("Reports", "You don't have access to reports. Ask your admin (Team & roles).")
+                "Team" -> TeamScreen(store.config, store.can("manageTeam"), store.busy, onBack = { page = "Settings" }) { updated, action -> store.saveConfig(updated, action) }
                 "Settings" -> {
                     Heading("Settings", "Storage and account preferences")
                     SubscriptionCard(store, billing)
@@ -492,7 +496,17 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     OutlinedButton(onClick = { form = Form("Clinic workspace", listOf(Field("workspace", "Workspace ID (blank for personal)", store.workspaceId))) { v -> store.setWorkspace(v["workspace"].orEmpty()) } }) { Text("Choose cloud workspace") }
                     OutlinedButton(onClick = { form = Form("Close device workspace", listOf(Field("confirm", "Type CLOSE to remove synchronized local records"))) { v -> require(v["confirm"] == "CLOSE") { "Enter CLOSE" }; store.closeWorkspace() } }) { Text("Close synchronized device workspace") }
                     if (android.os.Build.VERSION.SDK_INT >= 33) OutlinedButton(onClick = { notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) }) { Text("Allow appointment notifications") }
-                    if (store.currentRole in listOf("owner", "admin", "administrator")) ClinicManagementScreen(store.config) { updated -> store.saveConfig(updated) }
+                    SurfaceCard(onClick = { page = "Team" }) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            GlyphIcon(Glyph.Shield, Teal700, 22.dp)
+                            Column(Modifier.weight(1f)) {
+                                Text("Team & roles", style = MaterialTheme.typography.titleSmall, color = Ink)
+                                Text("${clinicianRecords(store.config).count { it.optBoolean("active", true) }} active staff · roles and access", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                            }
+                            GlyphIcon(Glyph.Chevron, InkSubtle, 18.dp)
+                        }
+                    }
+                    if (store.can("manageTeam")) ClinicManagementScreen(store.config) { updated -> store.saveConfig(updated) }
                     if (store.conflicts.isNotEmpty()) {
                         Text("Conflict drafts", style = MaterialTheme.typography.titleLarge)
                         store.conflicts.forEach { draft ->
@@ -531,14 +545,14 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     } }
     editTreatmentId?.let { id ->
         val item = patient?.optJSONArray("treatments").objectList().firstOrNull { it.optString("id") == id }
-        if (patient != null && item != null && canEditClinical(store.currentRole)) key(id) { RecordTreatmentDialog(
+        if (patient != null && item != null && store.can("recordTreatment")) key(id) { RecordTreatmentDialog(
             patient, listOf(item.optString("tooth")), "",
             clinicianRecords(store.config).filter { it.optBoolean("active", true) }.map { it.optString("name") }.filter { it.isNotBlank() },
             store.config, onDismiss = { editTreatmentId = null }, editing = item,
         ) { changed, action -> store.save(changed, action); store.saveError } }
         else LaunchedEffect(id) { editTreatmentId = null }
     }
-    tooth?.let { number -> if (patient != null && canEditClinical(store.currentRole)) ToothEditor(number, patient, toothSurface, { tooth = null; toothSurface = "" }) { changed, action -> store.save(changed, action); if (store.saveError == null) tooth = null } }
+    tooth?.let { number -> if (patient != null && store.can("recordTreatment")) ToothEditor(number, patient, toothSurface, { tooth = null; toothSurface = "" }) { changed, action -> store.save(changed, action); if (store.saveError == null) tooth = null } }
 }
 
 private fun todaysVisits(store: ClinicStore): Int = runCatching {

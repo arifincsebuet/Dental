@@ -95,7 +95,7 @@ fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (Str
         store.session == "local" -> "Offline · this device"
         else -> store.currentRole.replaceFirstChar { it.uppercase() }
     }
-    val admin = store.isSuperAdmin || store.currentRole in listOf("owner", "admin", "administrator")
+    val admin = store.can("manageTeam")
     val clinicName = store.config.optString("name").ifBlank { "Dental Care" }
     ModalDrawerSheet(drawerContainerColor = SurfaceWhite, modifier = Modifier.widthIn(max = 320.dp)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
@@ -112,7 +112,8 @@ fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (Str
             DrawerEntry("Sync now", Glyph.Sync, badge = if (pending > 0) "$pending pending" else null) { onAction("sync") }
             if (admin) {
                 DrawerSection("Administration")
-                DrawerEntry("Clinic settings & staff", Glyph.Shield) { onNavigate("Settings") }
+                DrawerEntry("Team & roles", Glyph.Shield, currentPage == "Team", badge = clinicianRecords(store.config).count { it.optBoolean("active", true) }.toString()) { onNavigate("Team") }
+                DrawerEntry("Clinic settings", Glyph.Gear) { onNavigate("Settings") }
                 DrawerEntry("Subscription", Glyph.Card, badge = if (store.isSuperAdmin) "Free" else if (store.subscriptionActive) "Active" else null) { onNavigate("Settings") }
             }
             DrawerSection("Help")
@@ -124,12 +125,12 @@ fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (Str
     }
 }
 
-/** Patient drawer. [onSection] receives: teeth, treatments, appointments, book, billing. [onAction]: password, refresh, signout. */
+/** Patient drawer. [onSection] receives: teeth, treatments, appointments, book, billing. [onAction]: refresh, signout. */
 @Composable
 fun PatientDrawerContent(store: ClinicStore, onSection: (String) -> Unit, onAction: (String) -> Unit) {
     val record = store.portalRecord
     val name = record?.optString("name").orEmpty().ifBlank { "Patient" }
-    val loginId = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email?.substringBefore('@')?.uppercase() }.getOrNull()
+    val loginId = store.portalLoginId.ifBlank { null }
     ModalDrawerSheet(drawerContainerColor = SurfaceWhite, modifier = Modifier.widthIn(max = 320.dp)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
             DrawerHeader(name, store.portalClinic.optString("name").ifBlank { "Dental Care" }, loginId?.let { "Patient ID $it" }, name)
@@ -140,7 +141,6 @@ fun PatientDrawerContent(store: ClinicStore, onSection: (String) -> Unit, onActi
             DrawerEntry("Book appointment", Glyph.Plus, tint = Blue600) { onSection("book") }
             if ((record?.optJSONArray("invoices")?.length() ?: 0) > 0) DrawerEntry("Billing", Glyph.Card) { onSection("billing") }
             DrawerSection("Account")
-            DrawerEntry("Change password", Glyph.Lock) { onAction("password") }
             DrawerEntry("Refresh my record", Glyph.Sync) { onAction("refresh") }
             HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 12.dp), color = Hairline)
             DrawerEntry("Sign out", Glyph.Logout, tint = Rose600) { onAction("signout") }

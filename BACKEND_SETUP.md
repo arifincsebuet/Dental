@@ -15,17 +15,13 @@ See [Docs/firebase_architecture.md](Docs/firebase_architecture.md) for diagrams.
 1. **Project:** `dental-sm`. `app/google-services.json` is committed and the Google services Gradle
    plugin turns it into resources. Restrict the API key to this Android app (package + SHA-1) in
    Google Cloud Console › APIs & Services › Credentials.
-2. **Authentication providers** (Firebase console › Authentication › Sign-in method):
-   - **Google**: clinic staff. Register the app's SHA-1 and SHA-256 fingerprints (debug, upload and
-     Play app-signing keys) in Project settings › Your apps.
-   - **Email/Password**: patient logins. Patients use synthetic `<PatientID>@patient.dentalcare.local`
-     addresses that never receive mail. The admin's phone creates these accounts (keep "Enable create
-     (sign-up)" on under Authentication › Settings › User actions).
+2. **Authentication** (Firebase console › Authentication › Sign-in method): only **Google**, for
+   clinic staff. Register the app's SHA-1 and SHA-256 fingerprints (debug, upload and Play
+   app-signing keys) in Project settings › Your apps. Patients do **not** use Firebase
+   Authentication (see Patient logins below), so Email/Password can stay disabled.
 3. **Deploy rules and indexes:** double-click `deploy.bat` (or `.\deploy.bat` in PowerShell). It
    deploys `firestore:rules`, `firestore:indexes` and `storage`. Partial: `.\deploy.bat rules` or
    `.\deploy.bat indexes`. Equivalent: `firebase deploy --project dental-sm --only firestore:rules,firestore:indexes,storage`.
-   - The `portal.uid` collection-group index must finish building (Firestore › Indexes ›
-     Single field) before patients can sign in.
    - Storage rules read Firestore to check membership; accept the cross-service access prompt.
 4. **Delete the old Cloud Functions** if an earlier version deployed them (they are no longer used):
    ```
@@ -56,70 +52,79 @@ The "No AppCheckProvider installed" log line from earlier versions disappears wi
 ## Data layout and cost
 
 ```text
-workspaces/{clinicId}                       clinic: config (staff, members, services, availability,
-                                            reminder settings…), revision, invites, subscription
+workspaces/{clinicId}                       clinic: config (staff + roles + access toggles, members,
+                                            services, availability…), revision, invites, subscription
 workspaces/{clinicId}/public/info           patient-visible: name, time zone, currency, availability,
                                             busy times {s,e,d} (no names)
 workspaces/{clinicId}/patients/{patientId}  one per patient: profile, chart, treatments, appointments,
                                             invoices, history, image refs, portal login
+portals/{key}                               only for patients with an app login: their read-only copy
+                                            + booking requests (key = SHA-256 of Patient ID + password)
 Storage: workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png   (≤ 512 KB, lossless, deduplicated)
 ```
 
-- **Two documents per clinic plus one per patient.** Every list lives inside one of these documents:
+- **Two documents per clinic, one per patient, plus one per patient who uses the patient app.** Every list lives inside one of these documents:
   staff, doctors, services, availability, members, invitations and busy times in the clinic documents;
   appointments, treatments, invoices, payments, history and images inside the patient document.
-  There are no per-appointment, per-login, per-device, per-job or per-slot documents.
+  There are no per-appointment, per-device, per-job or per-slot documents.
 - **Why not all patients in one document?** Firestore rules protect whole documents. A patient who can
   read a shared document can read everyone in it, so each patient needs their own document for the
   patient app. A single document is also capped at 1 MiB.
 - **Reads:** the staff app keeps an encrypted local copy and syncs on demand. A sync writes only
   changed patients and reads only patients changed since the last sync (`syncedAt` query). No live
-  listeners. The patient app reads 2 documents when it opens.
+  listeners. The patient app reads 2 documents when it opens (its portal document + public/info).
 - **Writes:** saving a patient is 1 write. Clinic settings are 2 writes (clinic + public/info). Busy
   times are rewritten only when appointments change.
-- **Indexes:** large fields are exempt; only `inviteEmails`, `syncedAt` and `portal.uid` are queried.
+- **Indexes:** large fields are exempt; only `inviteEmails`, `syncedAt` and portal `clinicId` + `pending` are queried.
 - **Size guard:** the app refuses to save a patient document above ~750 KB.
 
 ## Accounts
 
 - **Clinic owner:** the first Google account to sign in owns a new clinic (clinic ID = their uid).
-- **Staff:** add them in Settings › Clinic › Staff with their Google email, then Sync. When they sign
-  in with Google the app finds the invitation (`inviteEmails`) and adds them to `config.members` with
-  the role from the staff list. The rules allow only that exact self-entry. Removing or deactivating
-  the staff entry deactivates them at the next settings sync.
-- **Patient logins:** an admin or dentist opens a patient › Overview › **Patient app access** ›
-  **Create patient login**, and types the **Patient ID** (6–12 letters/numbers) and **password**
-  (8+ characters, letters and numbers). Suggestions are prefilled and can be changed. An unsynced
-  patient is saved to the cloud first. The app creates the Email/Password account through Firebase
-  Auth's sign-up endpoint (this signs nobody in on the admin's phone and carries the App Check token),
-  then stores `portal {loginId, uid, mustChange}` in the patient document. The patient app finds its
-  record with `collectionGroup('patients').where('portal.uid', '==', uid)`.
-  - Needs Authentication › Sign-in method › **Email/Password** enabled, and under Settings › User
-    actions, **Enable create (sign-up)** left on.
-  - If the API key has *API restrictions*, allow **Identity Toolkit API**; if it has an *Android app*
-    restriction, list package `com.spala.dental` with the SHA-1 of every signing key you use.
-- **Reset password:** changing another user's password needs a server, so **Reset** sets a *new
-  Patient ID and password* chosen by the admin. The old Patient ID can no longer open the record
-  because the record now names the new account.
-- **First sign-in:** the patient must choose a new password; the app then clears `portal.mustChange`.
+- **Team & roles** (drawer › Team & roles, or Settings › Team & roles): the admin adds each staff
+  member with their Google email, chooses a role (Admin, Dentist, Assistant, Receptionist, Cashier,
+  Auditor) and switches individual access items on or off:
+  view charts, record/edit treatment, register patients, book appointments, open/close slots,
+  billing, patient app logins, reports, clinic settings & team. The role only fills in the starting
+  toggles. Saving shares it with the clinic at once. When the person signs in with Google the app
+  finds the invitation (`inviteEmails`) and adds them to `config.members` with that role and access;
+  the rules allow only that exact self-entry. Removing or deactivating them takes access away.
+- **Patient logins (no Firebase Authentication):** anyone with "Patient app logins" access opens a
+  patient › Overview › **Patient app access** › **Create patient login** and types a simple
+  **Patient ID** (4–12 letters/numbers) and **password** (6+ characters). The app writes
+  `portals/{key}`, where key = SHA-256 of the Patient ID and password, holding a read-only copy of
+  that patient's record, and stores `portal {loginId, key}` in the patient document.
+  - The patient app signs in by computing the same key and reading that one document. Without the
+    exact Patient ID and password the document cannot be found; portals cannot be listed except by
+    the clinic's own staff.
+  - **Change ID / password** writes a new portal document and deletes the old one, so the old
+    password stops working at once. **Turn off** deletes it.
+  - Patients book and cancel by adding a request to their portal document (plus the busy time in
+    public/info, in one transaction). The next staff sync turns requests into real appointments,
+    marks a clash as "Requested" for the front desk, and refreshes every portal copy that changed.
+  - Choose passwords that are not easy to guess, and enforce App Check so only the genuine app can
+    try sign-ins.
 
 ## What the rules enforce
 
 - Clinic document: owner/admins update settings only with `revision + 1`; only the owner can change the
   owner's member entry; subscription is a separate admin-only field; `complimentary` only by a super
   admin owner; invited staff can add only their own member entry with the invited role.
-- Patient documents: any active staff member reads; non-auditor staff write with `revision + 1` and a
-  server timestamp. Clinical fields need owner/admin/dentist (or an assistant with `clinicalWrite`),
-  invoices need owner/admin/cashier, the portal login needs owner/admin/dentist. No deletes.
-- Patients: read only their own record; may only clear `portal.mustChange`, or book/cancel (change
-  `appointments`, append one history line, `revision + 1`).
-- public/info: any signed-in account reads it; staff write it; a patient may add or remove exactly one
-  busy time.
+- Patient documents: any active staff member reads; staff write with `revision + 1` and a server
+  timestamp. The access toggles are enforced: clinical fields need "record treatment", invoices need
+  "billing", the portal login needs "patient app logins", new patients need "register patients".
+  No deletes.
+- Clinic settings and team need "clinic settings & team"; slots only need "open & close slots" (that
+  path may change only `availability` and `patientBooking`).
+- portals/{key}: anyone with the key reads it; the patient may only append one request and show the
+  appointment change; staff of that clinic list, refresh, create and delete them.
+- public/info: readable without sign-in (no personal data); staff write it; a patient booking may add
+  or remove exactly one busy time, only together with a new request in their portal document.
 
 Limits of a server-less design (accepted to save cost):
 - Rules cannot hide fields inside a document. Every active staff role can read full patient records;
-  the app still hides clinical fields from front-desk roles in its screens. A patient can read their
-  whole own record (their own data).
+  the app hides charts from staff without "view charts" access. The patient app copy leaves out staff
+  notes and audit.
 - Clinical and accounting validation (FDI codes, invoice arithmetic, append-only history) runs in the
   app, not on a server. Rules enforce who may write which fields, but not every value.
 - Patient booking checks for a free slot in a transaction on the public busy list. Staff sync rebuilds
@@ -153,10 +158,16 @@ and in `firebase/firestore.rules` (`superAdmin()`); change both together.
 
 ## Appointment slots
 
-- Admins define availability in Schedule › Calendar › **Manage slots** (`config.availability`, copied to
-  public/info on sync). Slots are computed, never stored.
-- Staff see bookings from their local patients. Patients see free slots computed from public/info
-  (availability + anonymous busy times).
-- A patient booking is one transaction: it re-checks the slot is free, appends the appointment to the
-  patient's document and the busy time to public/info. Up to 3 upcoming bookings; cancel up to 2 h
-  before.
+- **Opening slots:** Schedule › Calendar, pick a day, tap **Open slots on …**. Choose the doctor,
+  hours (Morning / Afternoon / Evening / Full day, or exact times), the appointment length and
+  whether it repeats every week on that weekday (4 weeks to 1 year). The preview shows the slots
+  before saving. Saving shares them with staff and patients at once (no separate Sync needed).
+- **On a day:** each doctor's hours are listed with **Close this day** (for repeating hours) and
+  **Remove / Delete all repeats**. **All availability** lists everything, with pause/remove. The
+  switch at the top turns online booking by patients on or off.
+- **Booking by staff:** tap a free (outlined) time, find the patient, book. The booking is synced
+  right away so the time shows as taken in the patient app.
+- Needs "open & close appointment slots" access to open slots and "book & change appointments" to
+  book (Team & roles). Slots are computed from `config.availability`, never stored one by one.
+- **Patients** book from the patient app: free slots come from public/info (availability +
+  anonymous busy times). Up to 3 upcoming bookings; cancel up to 2 hours before.

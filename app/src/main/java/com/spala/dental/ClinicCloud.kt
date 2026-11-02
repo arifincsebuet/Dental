@@ -71,26 +71,33 @@ object ClinicCloud {
     // Clinic
     // --------------------------------------------------------------------------------------
 
-    /** Staff email → role from the clinic's staff list (the invitation list). */
-    fun staffInvites(config: JSONObject): Map<String, String> {
-        val invites = linkedMapOf<String, String>()
+    /** Staff email → invitation {role, permissions?} from the clinic's staff list. */
+    fun staffInvites(config: JSONObject): Map<String, Map<String, Any>> {
+        val invites = linkedMapOf<String, Map<String, Any>>()
         for (person in config.optJSONArray("staff").objectList()) {
             val email = person.optString("email").trim().lowercase()
             if (email.isEmpty() || !email.matches(Regex("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) || !person.optBoolean("active", true)) continue
-            invites[email] = STAFF_ROLE[person.optString("role")] ?: "dentist"
+            val role = STAFF_ROLE[person.optString("role")] ?: "dentist"
+            val invite = mutableMapOf<String, Any>("role" to role)
+            person.optJSONObject("permissions")?.let { perms -> invite["permissions"] = Access.items.associate { it.key to perms.optBoolean(it.key, Access.roleDefault(role, it.key)) } }
+            invites[email] = invite
         }
         return invites
     }
 
-    /** Members who joined by email follow the staff list: removed from it → inactive; role changes apply. */
-    private fun applyStaffInvites(config: JSONObject, clinicId: String, invites: Map<String, String>) {
+    /** Members who joined by email follow the staff list: removed → inactive; role and access changes apply. */
+    private fun applyStaffInvites(config: JSONObject, clinicId: String, invites: Map<String, Map<String, Any>>) {
         val members = config.obj("members")
         for (uid in members.keys().asSequence().toList()) {
             val member = members.optJSONObject(uid) ?: continue
             if (uid == clinicId || member.optString("email").isBlank()) continue
-            val role = invites[member.optString("email")]
-            member.put("active", role != null)
-            if (role != null) member.put("role", role)
+            val invite = invites[member.optString("email")]
+            member.put("active", invite != null)
+            if (invite != null) {
+                member.put("role", invite["role"])
+                @Suppress("UNCHECKED_CAST")
+                (invite["permissions"] as? Map<String, Boolean>)?.let { member.put("permissions", JSONObject(it)) } ?: member.remove("permissions")
+            }
         }
     }
 
@@ -121,11 +128,13 @@ object ClinicCloud {
             if (invited != null) {
                 val role = db.runTransaction { tx ->
                     val snap = tx.get(invited.reference)
-                    val granted = (snap.get("invites") as? Map<*, *>)?.get(email) as? String
-                        ?: throw IllegalStateException("Your clinic invitation is no longer active")
+                    // Invitations are {role, permissions?} (older clinics: just the role name).
+                    val invite = (snap.get("invites") as? Map<*, *>)?.get(email) ?: throw IllegalStateException("Your clinic invitation is no longer active")
+                    val granted = (invite as? String) ?: ((invite as? Map<*, *>)?.get("role") as? String) ?: throw IllegalStateException("Your clinic invitation is invalid")
+                    val entry = mutableMapOf<String, Any>("role" to granted, "active" to true, "email" to email)
+                    ((invite as? Map<*, *>)?.get("permissions") as? Map<*, *>)?.let { entry["permissions"] = it }
                     val member = ((snap.get("config") as? Map<*, *>)?.get("members") as? Map<*, *>)?.get(user.uid) as? Map<*, *>
-                    if (member == null || member["role"] != granted || member["active"] == false || member["email"] != email)
-                        tx.update(invited.reference, FieldPath.of("config", "members", user.uid), mapOf("role" to granted, "active" to true, "email" to email))
+                    if (member != entry) tx.update(invited.reference, FieldPath.of("config", "members", user.uid), entry)
                     granted
                 }.await()
                 return Workspace(invited.id, role)
@@ -145,11 +154,22 @@ object ClinicCloud {
     }
 
     /** Saves clinic settings with a revision check and mirrors the patient-visible part to public/info. */
-    suspend fun commitClinic(clinicId: String, uid: String, config: JSONObject, expectedRevision: Long, superAdminOwner: Boolean): ClinicState =
+    suspend fun commitClinic(clinicId: String, uid: String, config: JSONObject, expectedRevision: Long, superAdminOwner: Boolean, slotsOnly: Boolean = false): ClinicState =
         db.runTransaction { tx ->
             val ref = clinicRef(clinicId)
             val snap = tx.get(ref)
             val serverRevision = snap.getLong("revision") ?: 0L
+            if (slotsOnly) {
+                // Staff with only "manage slots" access change availability on top of the cloud settings.
+                val server = (fromValue(snap.get("config")) as? JSONObject) ?: error("The clinic settings are not set up yet. Ask your admin.")
+                config.optJSONArray("availability")?.let { server.put("availability", it) }
+                if (config.has("patientBooking")) server.put("patientBooking", config.optBoolean("patientBooking"))
+                tx.update(ref, mapOf("config.availability" to toValue(server.optJSONArray("availability") ?: JSONArray()),
+                    "config.patientBooking" to server.optBoolean("patientBooking", true), "revision" to serverRevision + 1,
+                    "updatedAt" to System.currentTimeMillis(), "updatedBy" to uid))
+                tx.set(publicRef(clinicId), publicInfo(server), SetOptions.merge())
+                return@runTransaction ClinicState(server, serverRevision + 1, (fromValue(snap.get("subscription")) as? JSONObject) ?: JSONObject(), snap.getBoolean("complimentary") == true)
+            }
             if (serverRevision != expectedRevision) throw Conflict("Clinic settings changed on another device. Load cloud clinic settings, review, then save again.")
             val next = JSONObject(config.toString())
             listOf("dirty", "revision", "operationId").forEach { next.remove(it) }
@@ -238,188 +258,220 @@ object ClinicCloud {
     // --------------------------------------------------------------------------------------
 
     private const val LOGIN_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-    private const val PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    private const val PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
     private fun randomText(alphabet: String, length: Int) = buildString { repeat(length) { append(alphabet[random.nextInt(alphabet.length)]) } }
-    fun patientEmail(loginId: String) = "${loginId.trim().lowercase()}@$PATIENT_EMAIL_DOMAIN"
+    /** Older versions created Firebase accounts for patients; those never act as staff. */
     fun isPatientAccount(user: FirebaseUser?) = user?.email?.lowercase()?.endsWith("@$PATIENT_EMAIL_DOMAIN") == true
 
-    fun suggestLoginId() = randomText(LOGIN_ALPHABET, 8)
-    fun suggestPassword() = randomText(PASSWORD_ALPHABET, 10)
-    fun validLoginId(value: String) = value.trim().matches(Regex("[A-Za-z0-9]{6,12}"))
+    fun suggestLoginId() = randomText(LOGIN_ALPHABET, 6)
+    fun suggestPassword() = randomText(PASSWORD_ALPHABET, 6)
+    fun normalizeLoginId(value: String) = value.trim().uppercase()
+    fun validLoginId(value: String) = value.trim().matches(Regex("[A-Za-z0-9]{4,12}"))
     fun passwordProblem(value: String): String? = when {
-        value.length < 8 -> "Use at least 8 characters"
-        !(value.any { it.isLetter() } && value.any { it.isDigit() }) -> "Use letters and numbers"
+        value.length < 6 -> "Use at least 6 characters"
         value.any { it.isWhitespace() } -> "Spaces are not allowed"
         else -> null
     }
 
-    /** The chosen Patient ID already belongs to another login. */
-    class LoginTaken : Exception("This Patient ID is already in use. Choose another one.")
+    // --------------------------------------------------------------------------------------
+    // Patient app (no Firebase Authentication)
+    //
+    // A patient's login is a document portals/{key} with key = SHA-256 of the Patient ID and
+    // password. Only someone who knows both can open it. It holds a read-only copy of the patient's
+    // record (refreshed by staff on sync) and the patient's booking/cancel requests, which the next
+    // staff sync applies to the real patient document.
+    // --------------------------------------------------------------------------------------
 
-    /**
-     * Creates the Email/Password account through Firebase Auth's sign-up endpoint. This does not
-     * sign anyone in on this phone, so the admin stays signed in, and it carries this app's App Check
-     * token and Android identity (needed when the API key is restricted to the app).
-     */
-    private suspend fun createAuthAccount(context: Context, email: String, password: String): String {
-        val appCheck = runCatching { com.google.firebase.appcheck.FirebaseAppCheck.getInstance().getAppCheckToken(false).await().token }.getOrNull()
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val key = FirebaseApp.getInstance().options.apiKey
-            val connection = java.net.URL("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$key").openConnection() as java.net.HttpURLConnection
-            try {
-                connection.requestMethod = "POST"; connection.doOutput = true
-                connection.connectTimeout = 20_000; connection.readTimeout = 20_000
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.setRequestProperty("X-Android-Package", context.packageName)
-                signingSha1(context)?.let { connection.setRequestProperty("X-Android-Cert", it) }
-                appCheck?.let { connection.setRequestProperty("X-Firebase-AppCheck", it) }
-                connection.outputStream.use { it.write(JSONObject().put("email", email).put("password", password).put("returnSecureToken", true).toString().toByteArray()) }
-                val ok = connection.responseCode in 200..299
-                val body = (if (ok) connection.inputStream else connection.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
-                if (ok) return@withContext JSONObject(body).getString("localId")
-                val reason = runCatching { JSONObject(body).getJSONObject("error").getString("message") }.getOrDefault("HTTP ${connection.responseCode}")
-                throw when {
-                    reason.startsWith("EMAIL_EXISTS") -> LoginTaken()
-                    reason.startsWith("OPERATION_NOT_ALLOWED") || reason.startsWith("ADMIN_ONLY_OPERATION") ->
-                        IllegalStateException("Patient logins are turned off. In the Firebase console open Authentication → Sign-in method and enable Email/Password (and allow user sign-up).")
-                    reason.startsWith("CONFIGURATION_NOT_FOUND") ->
-                        IllegalStateException("Firebase Authentication is not set up for this project. Open Authentication in the Firebase console, press Get started and enable Email/Password.")
-                    reason.startsWith("WEAK_PASSWORD") -> IllegalArgumentException("The password is too weak. Use at least 8 letters and numbers.")
-                    reason.startsWith("TOO_MANY_ATTEMPTS") -> IllegalStateException("Too many attempts. Wait a few minutes and try again.")
-                    reason.contains("App Check", true) || reason.contains("APP_CHECK", true) ->
-                        IllegalStateException("App Check rejected this request. Add this device's debug token in the Firebase console (App Check → Manage debug tokens), or install the app from Google Play.")
-                    reason.contains("blocked", true) || reason.contains("API_KEY", true) || reason.contains("PERMISSION_DENIED", true) ->
-                        IllegalStateException("The Firebase API key refused this request ($reason). Check the key's Android app restriction (package com.spala.dental and this build's SHA-1) and that the Identity Toolkit API is allowed.")
-                    else -> IllegalStateException("Could not create the patient login: $reason")
-                }
-            } finally { connection.disconnect() }
-        }
+    fun portalKey(loginId: String, password: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest("dental-care-portal:v1:${normalizeLoginId(loginId)}:$password".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    fun portalRef(key: String): DocumentReference = db.document("portals/$key")
+
+    /** What the patient app shows: the patient's own care, without internal staff notes or audit. */
+    fun patientView(patient: JSONObject): JSONObject {
+        val keep = listOf("id", "name", "dob", "phone", "chart", "treatments", "performedProcedures", "appointments", "invoices", "updatedAt")
+        val out = JSONObject(JSONObject(patient.toString()).let { copy -> JSONObject().also { o -> keep.forEach { k -> if (copy.has(k)) o.put(k, copy.get(k)) } } }.toString())
+        out.optJSONArray("treatments").objectList().forEach { it.remove("events"); it.remove("amendments") }
+        if (!out.has("appointments")) out.put("appointments", JSONArray())
+        return out
     }
 
-    /** SHA-1 of this build's signing certificate, as Google API key restrictions expect it. */
-    private fun signingSha1(context: Context): String? = runCatching {
-        val info = context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
-        val signer = info.signingInfo?.apkContentsSigners?.firstOrNull() ?: return null
-        java.security.MessageDigest.getInstance("SHA-1").digest(signer.toByteArray()).joinToString("") { "%02X".format(it) }
-    }.getOrNull()
+    private fun clinicView(config: JSONObject) = mapOf("name" to config.optString("name", "Dental Care"),
+        "timeZone" to config.optString("timeZone", "Asia/Dhaka"), "currency" to config.optString("currency", "BDT"))
 
     data class NewLogin(val loginId: String, val password: String, val portal: JSONObject, val revision: Long)
 
     /**
-     * Creates the Patient ID and password the admin chose and links them to the patient's record.
-     * "Reset" works the same way with a new Patient ID: the previous Patient ID loses access because
-     * the record no longer names its account (changing another user's password needs a server).
+     * Staff create (or replace) the patient's login with the Patient ID and password they chose.
+     * Writes the portal document and the patient's `portal` field; a replaced login's document is
+     * deleted, so the old Patient ID / password stop working at once.
      */
-    suspend fun createPatientLogin(context: Context, clinicId: String, staffUid: String, patientId: String, loginId: String, password: String, reset: Boolean): NewLogin {
-        val id = loginId.trim().uppercase()
-        require(validLoginId(id)) { "Patient ID: 6–12 letters or numbers" }
+    suspend fun createPatientLogin(clinicId: String, staffUid: String, patient: JSONObject, config: JSONObject, loginId: String, password: String): NewLogin {
+        val id = normalizeLoginId(loginId)
+        require(validLoginId(id)) { "Patient ID: 4–12 letters or numbers" }
         passwordProblem(password)?.let { throw IllegalArgumentException("Password: $it") }
+        val key = portalKey(id, password)
+        val patientId = patient.getString("id")
         val ref = patientRef(clinicId, patientId)
-        // Check the record first so a refused write doesn't leave an unlinked account behind.
-        val before = ref.get().await()
-        check(before.exists()) { "Sync this patient to the cloud first, then create the login" }
-        if (!reset) check(before.get("portal") == null) { "This patient already has a login. Use Reset password." }
-        val newUid = createAuthAccount(context, patientEmail(id), password)
         val now = System.currentTimeMillis()
         return db.runTransaction { tx ->
             val snap = tx.get(ref)
+            check(snap.exists()) { "Sync this patient to the cloud first, then create the login" }
+            val existing = tx.get(portalRef(key))
+            if (existing.exists()) throw IllegalArgumentException("This Patient ID and password are already in use. Choose a different Patient ID.")
             val old = fromValue(snap.get("portal")) as? JSONObject
-            val portal = JSONObject().put("loginId", id).put("uid", newUid).put("mustChange", true)
-                .put("createdAt", old?.optLong("createdAt")?.takeIf { it > 0 } ?: now).put("createdBy", old?.optString("createdBy")?.ifBlank { null } ?: staffUid)
-                .put("passwordResetAt", now).put("resetBy", staffUid)
+            val record = patientView(fromDoc(snap))
+            tx.set(portalRef(key), mapOf("clinicId" to clinicId, "patientId" to patientId, "loginId" to id, "record" to toMap(record),
+                "clinic" to clinicView(config), "requests" to emptyList<Any>(), "pending" to false, "createdAt" to now, "createdBy" to staffUid, "updatedAt" to now))
+            old?.optString("key")?.takeIf { it.isNotBlank() && it != key }?.let { tx.delete(portalRef(it)) }
+            val portal = JSONObject().put("loginId", id).put("key", key).put("createdAt", old?.optLong("createdAt")?.takeIf { it > 0 } ?: now)
+                .put("createdBy", old?.optString("createdBy")?.ifBlank { null } ?: staffUid).put("updatedAt", now).put("updatedBy", staffUid)
+                .put("handled", old?.optJSONArray("handled") ?: JSONArray())
             val revision = (snap.getLong("revision") ?: 0L) + 1
             tx.update(ref, mapOf("portal" to toMap(portal), "revision" to revision, "updatedBy" to staffUid, "syncedAt" to FieldValue.serverTimestamp()))
             NewLogin(id, password, portal, revision)
         }.await()
     }
 
-    // --------------------------------------------------------------------------------------
-    // Patient app
-    // --------------------------------------------------------------------------------------
-
-    /** Finds the record whose portal login is this account (one indexed query at sign-in). */
-    suspend fun findMyRecord(uid: String): DocumentReference? =
-        db.collectionGroup("patients").whereEqualTo("portal.uid", uid).limit(1).get().await().documents.firstOrNull()?.reference
-
-    data class MyRecord(val patient: JSONObject, val clinic: JSONObject)
-
-    suspend fun loadMyRecord(path: String): MyRecord {
-        val ref = db.document(path)
-        val clinicId = ref.parent.parent?.id ?: error("Invalid record path")
-        val snap = ref.get().await()
-        check(snap.exists()) { "Your record is not available. Contact the clinic." }
-        val pub = publicRef(clinicId).get().await()
-        return MyRecord(patientView(fromDoc(snap)), if (pub.exists()) fromDoc(pub) else JSONObject().put("name", "Dental Care"))
+    /** Turns off the patient's app access: deletes the portal document and the record's login. */
+    suspend fun removePatientLogin(clinicId: String, staffUid: String, patientId: String): Long {
+        val ref = patientRef(clinicId, patientId)
+        return db.runTransaction { tx ->
+            val snap = tx.get(ref)
+            val old = fromValue(snap.get("portal")) as? JSONObject ?: error("This patient has no app login")
+            old.optString("key").takeIf { it.isNotBlank() }?.let { tx.delete(portalRef(it)) }
+            val revision = (snap.getLong("revision") ?: 0L) + 1
+            tx.update(ref, mapOf("portal" to FieldValue.delete(), "revision" to revision, "updatedBy" to staffUid, "syncedAt" to FieldValue.serverTimestamp()))
+            revision
+        }.await()
     }
 
-    /** What the patient app shows: the patient's own care, without internal staff notes or audit. */
-    private fun patientView(patient: JSONObject): JSONObject {
-        val keep = listOf("id", "name", "dob", "phone", "chart", "treatments", "performedProcedures", "appointments", "invoices", "updatedAt", "portal", "revision")
-        val out = JSONObject()
-        for (key in keep) if (patient.has(key)) out.put(key, patient.get(key))
-        out.optJSONArray("treatments").objectList().forEach { it.remove("events"); it.remove("amendments") }
-        return out
-    }
+    /** Portal documents of this clinic with patient requests waiting for staff. */
+    suspend fun pendingPortals(clinicId: String): List<Pair<String, JSONObject>> =
+        db.collection("portals").whereEqualTo("clinicId", clinicId).whereEqualTo("pending", true).get().await()
+            .documents.map { it.id to fromDoc(it) }
 
-    suspend fun completePasswordChange(path: String) {
-        db.document(path).update(FieldPath.of("portal", "mustChange"), false).await()
-    }
-
-    /** Patient books a free slot: one transaction on the patient's document and public/info. */
-    suspend fun bookSlot(path: String, uid: String, startAt: Long, doctor: String, reason: String) {
-        val patientDoc = db.document(path)
-        val clinicId = patientDoc.parent.parent!!.id
+    /** Rewrites the patient app copy and drops requests that were applied ([handled]). */
+    suspend fun refreshPortal(key: String, patient: JSONObject, config: JSONObject, handled: Set<String>) {
         db.runTransaction { tx ->
-            val pub = tx.get(publicRef(clinicId)); val snap = tx.get(patientDoc)
-            check(pub.exists() && snap.exists()) { "Your record is not available" }
-            val clinic = fromDoc(pub); val patient = fromDoc(snap)
+            val snap = tx.get(portalRef(key))
+            if (!snap.exists()) return@runTransaction
+            val remaining = (snap.get("requests") as? List<*>).orEmpty().filter { (it as? Map<*, *>)?.get("id") !in handled }
+            tx.update(portalRef(key), mapOf("record" to toMap(patientView(patient)), "clinic" to clinicView(config), "requests" to remaining,
+                "pending" to remaining.isNotEmpty(), "loginId" to (patient.optJSONObject("portal")?.optString("loginId") ?: snap.getString("loginId")),
+                "updatedAt" to System.currentTimeMillis()))
+        }.await()
+    }
+
+    data class MyRecord(val loginId: String, val patient: JSONObject, val clinic: JSONObject, val pending: Int)
+
+    /** Patient sign-in and refresh: the portal document plus the clinic's public info (2 reads). */
+    suspend fun loadPortal(key: String): MyRecord? {
+        val snap = portalRef(key).get().await()
+        if (!snap.exists()) return null
+        val doc = fromDoc(snap)
+        val clinicId = doc.getString("clinicId")
+        val pub = publicRef(clinicId).get().await()
+        val clinic = (if (pub.exists()) fromDoc(pub) else JSONObject())
+        doc.optJSONObject("clinic")?.let { c -> c.keys().forEach { k -> if (!clinic.has(k)) clinic.put(k, c.get(k)) } }
+        return MyRecord(doc.optString("loginId"), doc.optJSONObject("record") ?: JSONObject(), clinic.put("clinicId", clinicId), doc.optJSONArray("requests")?.length() ?: 0)
+    }
+
+    /** Patient books a free slot: one transaction on the portal document and public/info. */
+    suspend fun bookSlot(key: String, startAt: Long, doctor: String, reason: String) {
+        db.runTransaction { tx ->
+            val portalSnap = tx.get(portalRef(key))
+            check(portalSnap.exists()) { "Your login has changed. Sign in again." }
+            val portal = fromDoc(portalSnap)
+            val clinicId = portal.getString("clinicId")
+            val pub = tx.get(publicRef(clinicId))
+            check(pub.exists()) { "The clinic has not opened online booking yet" }
+            val clinic = fromDoc(pub)
             check(clinic.optBoolean("patientBooking", true)) { "Online booking is turned off for this clinic" }
             val now = System.currentTimeMillis()
-            val zone = ClinicalRules.zone(clinic)
-            val date = Instant.ofEpochMilli(startAt).atZone(zone).toLocalDate()
+            val date = Instant.ofEpochMilli(startAt).atZone(ClinicalRules.zone(clinic)).toLocalDate()
             val slot = SlotCalendar(clinic, emptyList()).slots(date, now).firstOrNull { it.startAt == startAt && it.doctor.equals(doctor.trim(), true) }
                 ?: error("That slot is not offered")
             check(slot.available) { "That slot was just taken. Please choose another time." }
-            val upcoming = patient.optJSONArray("appointments").objectList().count { it.optString("status") in listOf("Scheduled", "Confirmed") && it.optLong("startAt") > now }
+            val record = portal.optJSONObject("record") ?: JSONObject()
+            val appointments = record.optJSONArray("appointments") ?: JSONArray()
+            val upcoming = appointments.objectList().count { it.optString("status") in listOf("Scheduled", "Confirmed", "Requested") && it.optLong("startAt") > now }
             check(upcoming < 3) { "You already have 3 upcoming appointments. Contact the clinic to book more." }
             val appointment = JSONObject().put("id", "apt-" + java.util.UUID.randomUUID().toString().replace("-", "").take(20)).put("date", "${slot.date} ${slot.time}")
                 .put("startAt", slot.startAt).put("durationMinutes", slot.durationMinutes).put("doctor", slot.doctor).put("room", slot.room)
-                .put("reason", reason.trim().ifBlank { "Check-up" }.take(500)).put("status", "Scheduled").put("bookedBy", "patient").put("bookedAt", now)
-                .put("slot", true).put("reminderEnabled", clinic.optBoolean("remindersEnabled")).put("consent", patient.optBoolean("communicationConsent"))
-            selfService(tx, patientDoc, patient, uid, now, "Appointment booked by patient: ${slot.date} ${slot.time} with ${slot.doctor}") { it.put(appointment) }
-            tx.update(publicRef(clinicId), "busy", FieldValue.arrayUnion(mapOf("s" to slot.startAt, "e" to slot.startAt + slot.durationMinutes * 60_000L, "d" to slot.doctor.lowercase())))
+                .put("reason", reason.trim().ifBlank { "Check-up" }.take(500)).put("status", "Scheduled").put("bookedBy", "patient").put("bookedAt", now).put("slot", true)
+            appointments.put(appointment)
+            val requests = (portalSnap.get("requests") as? List<*>).orEmpty() + mapOf("id" to "req-${java.util.UUID.randomUUID()}", "type" to "book", "at" to now, "appointment" to toMap(appointment))
+            tx.update(portalRef(key), mapOf("requests" to requests, "record.appointments" to toValue(appointments), "pending" to true, "updatedAt" to now))
+            tx.update(publicRef(clinicId), mapOf("busy" to FieldValue.arrayUnion(mapOf("s" to slot.startAt, "e" to slot.startAt + slot.durationMinutes * 60_000L, "d" to slot.doctor.lowercase())), "lastPortal" to key))
         }.await()
     }
 
     /** Patient cancels an upcoming appointment (at least 2 hours ahead). */
-    suspend fun cancelMyAppointment(path: String, uid: String, appointmentId: String) {
-        val patientDoc = db.document(path)
-        val clinicId = patientDoc.parent.parent!!.id
+    suspend fun cancelMyAppointment(key: String, appointmentId: String) {
         db.runTransaction { tx ->
-            val pub = tx.get(publicRef(clinicId)); val snap = tx.get(patientDoc)
-            val patient = fromDoc(snap); val now = System.currentTimeMillis()
-            val appointment = patient.optJSONArray("appointments").objectList().firstOrNull { it.optString("id") == appointmentId && it.optString("status") in listOf("Scheduled", "Confirmed") }
+            val portalSnap = tx.get(portalRef(key))
+            check(portalSnap.exists()) { "Your login has changed. Sign in again." }
+            val portal = fromDoc(portalSnap)
+            val clinicId = portal.getString("clinicId")
+            val pub = tx.get(publicRef(clinicId))
+            val now = System.currentTimeMillis()
+            val appointments = portal.optJSONObject("record")?.optJSONArray("appointments") ?: JSONArray()
+            val appointment = appointments.objectList().firstOrNull { it.optString("id") == appointmentId && it.optString("status") in listOf("Scheduled", "Confirmed", "Requested") }
                 ?: error("Appointment not found")
             check(appointment.optLong("startAt") - now >= 2 * 3_600_000L) { "Appointments can be cancelled in the app up to 2 hours before. Please call the clinic." }
+            appointment.put("status", "Cancelled").put("cancelledBy", "patient").put("cancelledAt", now)
+            val requests = (portalSnap.get("requests") as? List<*>).orEmpty() + mapOf("id" to "req-${java.util.UUID.randomUUID()}", "type" to "cancel", "at" to now, "appointmentId" to appointmentId)
+            tx.update(portalRef(key), mapOf("requests" to requests, "record.appointments" to toValue(appointments), "pending" to true, "updatedAt" to now))
             val entry = mapOf("s" to appointment.optLong("startAt"), "e" to appointment.optLong("startAt") + appointment.optInt("durationMinutes", 30) * 60_000L,
                 "d" to appointment.optString("doctor").trim().lowercase())
-            selfService(tx, patientDoc, patient, uid, now, "Appointment cancelled by patient: ${appointment.optString("date")}") { list ->
-                for (i in 0 until list.length()) { val a = list.getJSONObject(i); if (a.optString("id") == appointmentId) a.put("status", "Cancelled").put("cancelledBy", "patient").put("cancelledAt", now) }
-            }
             val busy = (pub.get("busy") as? List<*>).orEmpty()
             if (busy.any { (it as? Map<*, *>)?.let { m -> (m["s"] as? Number)?.toLong() == entry["s"] && (m["e"] as? Number)?.toLong() == entry["e"] && m["d"] == entry["d"] } == true })
-                tx.update(publicRef(clinicId), "busy", FieldValue.arrayRemove(entry))
+                tx.update(publicRef(clinicId), mapOf("busy" to FieldValue.arrayRemove(entry), "lastPortal" to key))
         }.await()
     }
 
-    /** The only patient-side write besides the password flag: appointments + one history line, revision +1. */
-    private fun selfService(tx: com.google.firebase.firestore.Transaction, ref: DocumentReference, patient: JSONObject, uid: String, now: Long, action: String, change: (JSONArray) -> Unit) {
-        val appointments = patient.optJSONArray("appointments") ?: JSONArray()
-        change(appointments)
-        val revision = patient.optLong("revision") + 1
-        val history = patient.optJSONArray("history") ?: JSONArray()
-        history.put(JSONObject().put("id", "self-$revision-$now").put("at", now).put("text", action).put("actor", uid).put("source", "patient-app"))
-        tx.update(ref, mapOf("appointments" to toValue(appointments), "history" to toValue(history), "revision" to revision,
-            "updatedAt" to now, "updatedBy" to uid, "syncedAt" to FieldValue.serverTimestamp()))
+    /**
+     * Applies a portal's requests to the staff copy of the patient (marks it dirty). Returns the
+     * request ids that were applied. Booking requests become appointments; if the time is no longer
+     * free they are kept as "Requested" for the front desk to confirm.
+     */
+    fun applyPortalRequests(patient: JSONObject, requests: List<JSONObject>, config: JSONObject, patients: List<JSONObject>): Set<String> {
+        val portal = patient.obj("portal")
+        val done = portal.optJSONArray("handled").let { a -> (0 until (a?.length() ?: 0)).map { a!!.optString(it) }.toMutableSet() }
+        val applied = mutableSetOf<String>()
+        val appointments = patient.array("appointments")
+        val now = System.currentTimeMillis()
+        for (request in requests) {
+            val id = request.optString("id")
+            if (id.isBlank()) continue
+            if (id in done) { applied += id; continue }
+            when (request.optString("type")) {
+                "book" -> request.optJSONObject("appointment")?.let { a ->
+                    if (appointments.objectList().none { it.optString("id") == a.optString("id") }) {
+                        val others = patients.filter { it.optString("id") != patient.optString("id") }
+                        val start = a.optLong("startAt"); val end = start + a.optInt("durationMinutes", 30) * 60_000L
+                        val clash = others.any { p -> p.optJSONArray("appointments").objectList().any { o ->
+                            o.optString("status") in setOf("Scheduled", "Confirmed", "Checked in", "In progress") && o.optString("doctor").equals(a.optString("doctor"), true) &&
+                                (runCatching { ClinicalRules.appointmentMillis(o, config) }.getOrNull() ?: -1L).let { s -> s < end && start < s + o.optInt("durationMinutes", 30) * 60_000L }
+                        } }
+                        val consent = patient.optBoolean("communicationConsent")
+                        appointments.put(JSONObject(a.toString()).put("status", if (clash) "Requested" else "Scheduled").put("consent", consent)
+                            .put("reminderEnabled", consent && config.optBoolean("remindersEnabled")))
+                        patient.array("history").put(JSONObject().put("id", uid()).put("at", now)
+                            .put("text", "Patient app: booked ${a.optString("date")} with ${a.optString("doctor")}" + if (clash) " (time no longer free; please confirm)" else ""))
+                    }
+                }
+                "cancel" -> appointments.objectList().firstOrNull { it.optString("id") == request.optString("appointmentId") }?.let { a ->
+                    if (a.optString("status") in setOf("Scheduled", "Confirmed", "Requested")) {
+                        a.put("status", "Cancelled").put("cancelledBy", "patient").put("cancelledAt", request.optLong("at", now))
+                        patient.array("history").put(JSONObject().put("id", uid()).put("at", now).put("text", "Patient app: cancelled ${a.optString("date")}"))
+                    }
+                }
+            }
+            done += id; applied += id
+        }
+        portal.put("handled", JSONArray(done.toList().takeLast(100)))
+        return applied
     }
 }

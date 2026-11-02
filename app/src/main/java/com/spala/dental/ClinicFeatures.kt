@@ -80,8 +80,8 @@ private fun shareText(context: Context, title: String, text: String, type: Strin
 fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
     var section by remember { mutableStateOf("Clinic") }
     var form by remember { mutableStateOf<FeatureForm?>(null) }
-    FeatureHeading("Clinic management", "Configure your workspace, team, services, and reminders")
-    FeatureChoices(listOf("Clinic", "Staff", "Services", "Roles", "Reminders"), section) { section = it }
+    FeatureHeading("Clinic management", "Configure your workspace, services, and reminders. Staff and access are in Team & roles.")
+    FeatureChoices(listOf("Clinic", "Services", "Reminders"), section) { section = it }
     when (section) {
         "Clinic" -> {
             FeaturePanel(config.optString("name", "Dental Care")) {
@@ -101,35 +101,6 @@ fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
                     ClinicalRules.validateConfig(changed); onSave(changed)
                 } }) { Text("Edit clinic settings") }
             }
-        }
-        "Staff" -> {
-            Text("Staff with a Google account email can sign in to this clinic after you Sync. Deactivating a staff member removes their access.", color = Color(0xFF64748B))
-            fun editStaff(staff: JSONObject?) {
-                form = FeatureForm(if (staff == null) "Add staff member" else "Edit staff member", listOf(
-                    FeatureField("name", "Full name", staff?.optString("name").orEmpty()),
-                    FeatureField("role", "Role: ${ClinicalRules.roles.joinToString()}", staff?.optString("role") ?: "dentist"),
-                    FeatureField("email", "Google account email (grants app sign-in)", staff?.optString("email").orEmpty(), false),
-                    FeatureField("phone", "Phone", staff?.optString("phone").orEmpty(), false),
-                    FeatureField("registration", "Professional registration", staff?.optString("registration").orEmpty(), false),
-                    FeatureField("hours", "Working hours / availability", staff?.optString("hours").orEmpty(), false)
-                )) { v ->
-                    require(v.getValue("role") in ClinicalRules.roles) { "Choose a supported role" }
-                    val changed = copyJson(config)
-                    val people = records(changed, "staff").toMutableList()
-                    val entry = JSONObject(v).put("id", staff?.optString("id") ?: uid()).put("active", staff?.optBoolean("active", true) ?: true)
-                    val index = people.indexOfFirst { it.optString("id") == entry.optString("id") }
-                    if (index == -1) people.add(entry) else people[index] = entry
-                    changed.put("staff", JSONArray(people)); onSave(changed)
-                }
-            }
-            Button(onClick = { editStaff(null) }) { Text("+ Add staff member") }
-            records(config, "staff").forEach { staff -> FeaturePanel(staff.optString("name")) {
-                Text("${staff.optString("role")} · ${if (staff.optBoolean("active", true)) "Active" else "Inactive"}")
-                Text(listOf(staff.optString("email"), staff.optString("phone"), staff.optString("registration"), staff.optString("hours")).filter { it.isNotBlank() }.joinToString("\n"))
-                Row { TextButton(onClick = { editStaff(staff) }) { Text("Edit") }; TextButton(onClick = {
-                    val changed = copyJson(config); records(changed, "staff").first { it.optString("id") == staff.optString("id") }.put("active", !staff.optBoolean("active", true)); onSave(changed)
-                }) { Text(if (staff.optBoolean("active", true)) "Deactivate" else "Activate") } }
-            } }
         }
         "Services" -> {
             val currency = currentCurrency(config)
@@ -157,20 +128,6 @@ fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
                 Row { TextButton(onClick = { editService(service) }) { Text("Edit") }; TextButton(onClick = {
                     val changed = copyJson(config); records(changed, "services").first { it.optString("id") == service.optString("id") }.put("active", !service.optBoolean("active", true)); onSave(changed)
                 }) { Text(if (service.optBoolean("active", true)) "Deactivate" else "Activate") } }
-            } }
-        }
-        "Roles" -> {
-            Text("Cloud membership is enforced by the backend. Enter the Firebase UID of the staff account.")
-            Button(onClick = { form = FeatureForm("Assign cloud membership", listOf(FeatureField("uid", "Firebase authentication UID"), FeatureField("role", "Role: ${ClinicalRules.roles.joinToString()}", "dentist"))) { v ->
-                require(v.getValue("role") in ClinicalRules.roles) { "Choose a supported role" }
-                val changed = copyJson(config); val members = membershipRecords(changed).toMutableList()
-                val entry = JSONObject().put("uid", v.getValue("uid")).put("role", v.getValue("role")).put("active", true)
-                val index = members.indexOfFirst { it.optString("uid") == entry.optString("uid") }; if (index == -1) members.add(entry) else members[index] = entry
-                changed.put("members", membershipMap(members)); onSave(changed)
-            } }) { Text("+ Assign member") }
-            membershipRecords(config).forEach { member -> FeaturePanel(member.optString("uid")) {
-                Text("${member.optString("role")} · ${if (member.optBoolean("active", true)) "Active" else "Disabled"}")
-                TextButton(onClick = { val changed = copyJson(config); val members = membershipRecords(changed); members.first { it.optString("uid") == member.optString("uid") }.put("active", !member.optBoolean("active", true)); changed.put("members", membershipMap(members)); onSave(changed) }) { Text(if (member.optBoolean("active", true)) "Disable access" else "Enable access") }
             } }
         }
         "Reminders" -> FeaturePanel("Appointment reminders") {
@@ -355,7 +312,7 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
 }
 
 @Composable private fun AppointmentEditor(patient: JSONObject, appointment: JSONObject?, patients: List<JSONObject>, config: JSONObject, close: () -> Unit, save: (JSONObject) -> Unit) {
-    val clinicians = records(config, "staff").filter { it.optBoolean("active", true) && it.optString("role") in listOf("dentist", "owner", "administrator") }
+    val clinicians = records(config, "staff").filter { it.optBoolean("active", true) && it.optString("role") in listOf("dentist", "owner", "admin", "administrator") }
     var date by remember { mutableStateOf(appointment?.optString("date") ?: "${LocalDate.now(ClinicalRules.zone(config))} 10:00") }
     var doctor by remember { mutableStateOf(appointment?.optString("doctor") ?: clinicians.firstOrNull()?.optString("name").orEmpty()) }
     var duration by remember { mutableStateOf((appointment?.optInt("durationMinutes", 30) ?: 30).toString()) }

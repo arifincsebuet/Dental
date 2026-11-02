@@ -12,7 +12,7 @@ import java.util.Locale
 /** Shared domain rules; the server repeats authoritative validation at cloud commit. */
 object ClinicalRules {
     val roles = listOf("owner", "administrator", "dentist", "assistant", "receptionist", "cashier", "auditor")
-    val appointmentStates = listOf("Scheduled", "Confirmed", "Checked in", "In progress", "Completed", "Cancelled", "No show")
+    val appointmentStates = listOf("Requested", "Scheduled", "Confirmed", "Checked in", "In progress", "Completed", "Cancelled", "No show")
     val treatmentStates = listOf("Planned", "Accepted", "In progress", "Completed", "Deferred", "Declined", "Cancelled", "Referred")
     val terminalAppointments = setOf("Completed", "Cancelled", "No show")
     fun defaults() = JSONObject().put("name", "Dental Care").put("currency", "BDT")

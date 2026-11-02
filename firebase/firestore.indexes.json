@@ -102,18 +102,24 @@
       "indexes": []
     },
     {
+      "collectionGroup": "portals",
+      "fieldPath": "record",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "portals",
+      "fieldPath": "requests",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "portals",
+      "fieldPath": "clinic",
+      "indexes": []
+    },
+    {
       "collectionGroup": "patients",
-      "fieldPath": "portal.uid",
-      "indexes": [
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION"
-        },
-        {
-          "order": "ASCENDING",
-          "queryScope": "COLLECTION_GROUP"
-        }
-      ]
+      "fieldPath": "portal",
+      "indexes": []
     }
   ]
 }

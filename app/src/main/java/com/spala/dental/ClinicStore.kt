@@ -13,6 +13,7 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.first
 import org.json.*
 import java.io.ByteArrayOutputStream
 import java.security.KeyStore
@@ -44,7 +45,10 @@ class ClinicStore(private val context: Context) {
     var session by mutableStateOf("loading"); private set
     var portalRecord by mutableStateOf<JSONObject?>(null); private set
     var portalClinic by mutableStateOf(JSONObject()); private set
-    var mustChangePassword by mutableStateOf(false); private set
+    /** Patient ID shown in the patient app. */
+    var portalLoginId by mutableStateOf(""); private set
+    /** Patient requests (bookings/cancellations) still waiting for the clinic's next sync. */
+    var portalPending by mutableStateOf(0); private set
     /** One-time credentials to hand to a patient (shown once, never stored). */
     var credentialNotice by mutableStateOf<JSONObject?>(null)
     private var memberRole = ""
@@ -52,8 +56,8 @@ class ClinicStore(private val context: Context) {
     var subscription by mutableStateOf(JSONObject()); private set
     /** Clinic owned by a platform super admin: free for all its staff. */
     private var complimentary = false
-    /** Signed-in patient's record path (workspaces/{clinic}/patients/{id}). */
-    private var portalPath = ""
+    /** Signed-in patient's portal key (derived from Patient ID + password; never the password). */
+    private var portalKey = ""
     /** Hash of the busy times last published to public/info (avoids repeated writes). */
     private var busyHash = 0
     /** Offline (no Firebase) mode: entitlement comes straight from this device's Play purchases. */
@@ -105,7 +109,7 @@ class ClinicStore(private val context: Context) {
             conflicts = state.optJSONArray("conflicts")?.objects() ?: emptyList()
             pendingExport = state.optJSONObject("pendingExport") ?: JSONObject()
             complimentary = state.optBoolean("complimentary")
-            portalPath = state.optString("portalPath")
+            portalKey = state.optString("portalKey")
             busyHash = state.optInt("busyHash")
             memberRole = state.optString("memberRole")
             lastPullAt = state.optLong("lastPullAt")
@@ -121,17 +125,56 @@ class ClinicStore(private val context: Context) {
         val state = JSONObject().put("version", 2).put("patients", JSONArray(records)).put("config", config)
             .put("workspaceId", workspaceId).put("conflicts", JSONArray(conflicts)).put("pendingExport", pendingExport)
             .put("memberRole", memberRole).put("lastPullAt", lastPullAt).put("localMode", localMode).put("subscription", subscription)
-            .put("complimentary", complimentary).put("portalPath", portalPath).put("busyHash", busyHash)
+            .put("complimentary", complimentary).put("portalKey", portalKey).put("busyHash", busyHash)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
         val bytes = cipher.iv + cipher.doFinal(state.toString().toByteArray(Charsets.UTF_8))
         val out = file.startWrite()
         try { out.write(bytes); file.finishWrite(out) } catch (e: Exception) { file.failWrite(out); throw e }
     }
-    fun saveConfig(next: JSONObject) = operation {
-        check(!config.has("operationId")) { "Retry the pending settings submission or load cloud settings before editing" }
-        ClinicalRules.validateConfig(next)
-        config = JSONObject(next.toString()).put("dirty", true)
-        persist(patients); ClinicReminders.schedule(context, this@ClinicStore); message = "Clinic settings saved on this device"
+    /**
+     * Saves clinic settings (team, roles, slots…) on this device and, when signed in to the clinic
+     * cloud, sends them right away, so other staff and patients see them without a manual Sync.
+     * Waits for any running operation instead of refusing. [done] receives null or the problem.
+     */
+    fun saveConfig(next: JSONObject, success: String = "Clinic settings saved", done: ((String?) -> Unit)? = null) {
+        scope.launch {
+            snapshotFlow { busy }.first { !it }
+            val error = runCatching {
+                check(storageAvailable) { "Local storage is unavailable" }
+                ClinicalRules.validateConfig(next)
+                busy = true
+                config = JSONObject(next.toString()).put("dirty", true).apply { remove("operationId") }
+                persist(patients); ClinicReminders.schedule(context, this@ClinicStore)
+                if (session == "staff" && configured() && cloudIdentity.isNotBlank()) {
+                    pushConfig()
+                    message = "$success · shared with the clinic"
+                } else message = "$success on this device"
+            }.exceptionOrNull()?.let { e ->
+                val text = friendlyError(e)
+                message = if (config.optBoolean("dirty")) "Saved on this device. Not shared yet: $text" else text
+                text
+            }
+            busy = false
+            done?.invoke(error)
+        }
+    }
+    private suspend fun pushConfig() {
+        val clinicId = clinic(); val me = cloudIdentity
+        val state = ClinicCloud.commitClinic(clinicId, me, config, config.optLong("revision"), isSuperAdmin && clinicId == me, slotsOnly = !can("manageTeam"))
+        applyClinic(state)
+        persist(patients)
+        runCatching { publishBusyTimes(clinicId) }
+    }
+    /** Runs a sync as soon as the current operation finishes (after bookings and similar saves). */
+    fun syncSoon() {
+        if (session != "staff" || !configured()) return
+        scope.launch { snapshotFlow { busy }.first { !it }; sync() }
+    }
+    /** Whether the signed-in staff member may use [permission] (see Access). */
+    fun can(permission: String): Boolean {
+        if (isSuperAdmin || workspaceId.isBlank() || session == "local") return true
+        val member = config.optJSONObject("members")?.optJSONObject(cloudIdentity)
+        return Access.allowed(currentRole, member?.optJSONObject("permissions"), permission)
     }
     fun refreshClinicConfig() = operation {
         val clinicId = clinic()
@@ -262,12 +305,15 @@ class ClinicStore(private val context: Context) {
     fun sync(retryOnly: Boolean = false) = operation {
         val clinicId = clinic()
         val me = cloudIdentity
-        if (config.optBoolean("dirty") && (!retryOnly || config.has("operationId"))) {
-            config.put("operationId", config.optString("operationId").ifBlank { uid() }); persist(patients)
-            val state = ClinicCloud.commitClinic(clinicId, me, config, config.optLong("revision"), isSuperAdmin && clinicId == me)
-            applyClinic(state)
-            persist(patients)
+        if (config.optBoolean("dirty") && (!retryOnly || config.has("operationId"))) pushConfig()
+        // Patient app bookings / cancellations waiting in portal documents become real appointments.
+        val portalUpdates = mutableMapOf<String, Set<String>>() // patientId -> applied request ids
+        if (!retryOnly) {
+            // Work on the latest records so applied requests don't conflict with other devices' edits.
+            runCatching { pullChanges() }
+            runCatching { applyPortalRequests(clinicId, portalUpdates) }.onFailure { message = "Patient app requests: ${friendlyError(it)}" }
         }
+        val committedIds = mutableSetOf<String>()
         val next = patients.toMutableList()
         for (patient in patients.filter { it.optBoolean("dirty") && (!retryOnly || it.has("operationId")) }) {
             check(patient.optString("cloudOwner", clinicId) == clinicId) { "This record belongs to another clinic workspace." }
@@ -277,6 +323,7 @@ class ClinicStore(private val context: Context) {
                 val clean = committed.put("dirty", false).put("remoteVersion", committed.optLong("revision")).put("cloudOwner", clinicId)
                 next[next.indexOfFirst { it.optString("id") == patient.optString("id") }] = clean
                 persist(next); patients = next.toList()
+                committedIds += patient.optString("id")
             } catch (e: Exception) {
                 val conflict = e as? ClinicCloud.Conflict ?: e.cause as? ClinicCloud.Conflict
                 if (conflict != null) { message = conflict.message.orEmpty(); return@operation }
@@ -288,8 +335,34 @@ class ClinicStore(private val context: Context) {
                 throw e
             }
         }
-        if (!retryOnly) { runCatching { pullChanges() }; runCatching { publishBusyTimes(clinicId) } }
+        if (!retryOnly) {
+            runCatching { pullChanges() }
+            runCatching { publishBusyTimes(clinicId) }
+            // Refresh the patient app copy of every patient that changed or had requests.
+            for (patient in patients.filter { it.optJSONObject("portal")?.optString("key").orEmpty().isNotBlank() && (it.optString("id") in committedIds || it.optString("id") in portalUpdates) }) {
+                if (patient.optBoolean("dirty")) continue // not committed (e.g. conflict): its requests stay pending
+                runCatching { ClinicCloud.refreshPortal(patient.getJSONObject("portal").getString("key"), patient, config, portalUpdates[patient.optString("id")].orEmpty()) }
+            }
+        }
         message = if (retryOnly) "Pending cloud submissions confirmed" else "Cloud synchronization complete"
+    }
+    private suspend fun applyPortalRequests(clinicId: String, applied: MutableMap<String, Set<String>>) {
+        val pending = ClinicCloud.pendingPortals(clinicId)
+        if (pending.isEmpty()) return
+        var next = patients
+        for ((key, portal) in pending) {
+            val patientId = portal.optString("patientId")
+            val local = next.firstOrNull { it.optString("id") == patientId } ?: continue
+            if (local.has("operationId") || local.optJSONObject("portal")?.optString("key") != key) continue
+            val copy = JSONObject(local.toString())
+            val ids = ClinicCloud.applyPortalRequests(copy, portal.optJSONArray("requests").objectList(), config, next)
+            if (ids.isEmpty()) continue
+            copy.put("dirty", true).put("updatedAt", System.currentTimeMillis())
+            next = next.map { if (it.optString("id") == patientId) copy else it }
+            applied[patientId] = ids
+        }
+        persist(next); patients = next
+        if (applied.isNotEmpty()) ClinicReminders.schedule(context, this@ClinicStore)
     }
     /** Keeps patient booking's anonymous busy times in step with the clinic's appointments (written only on change). */
     private suspend fun publishBusyTimes(clinicId: String) {
@@ -381,14 +454,15 @@ class ClinicStore(private val context: Context) {
 
     private suspend fun resolveSession() {
         if (!configured()) { session = if (localMode) "local" else "login"; return }
+        // Patients sign in with Patient ID + password only (no Firebase account).
+        if (portalKey.isNotBlank()) { session = "patient"; scope.launch { runCatching { loadMyRecord() } }; return }
         val user = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
+        if (ClinicCloud.isPatientAccount(user)) runCatching { FirebaseAuth.getInstance().signOut() } // older patient logins
         session = when {
-            user == null -> "login"
+            user == null || ClinicCloud.isPatientAccount(user) -> "login"
             user.isAnonymous -> "staff" // legacy device workspaces keep working until linked to Google
-            ClinicCloud.isPatientAccount(user) -> "patient"
             else -> "staff"
         }
-        if (session == "patient") scope.launch { runCatching { loadMyRecord() } }
     }
 
     /**
@@ -448,55 +522,55 @@ class ClinicStore(private val context: Context) {
         pullAll(); message = "Signed in · clinic records loaded"
     }
 
+    /** Patient sign-in: Patient ID + password open the patient's portal document. No Firebase Auth. */
     fun patientSignIn(loginId: String, password: String, done: (String?) -> Unit) {
         if (busy) return
         busy = true
         scope.launch {
             val error = runCatching {
                 check(configured()) { "The clinic cloud is not configured on this device" }
-                require(loginId.trim().matches(Regex("[A-Za-z0-9]{6,12}"))) { "Enter the Patient ID given by your clinic" }
+                require(ClinicCloud.validLoginId(loginId)) { "Enter the Patient ID given by your clinic" }
                 require(password.isNotBlank()) { "Enter your password" }
-                val auth = FirebaseAuth.getInstance()
-                auth.signInWithEmailAndPassword(ClinicCloud.patientEmail(loginId), password).await()
-                val ref = try { ClinicCloud.findMyRecord(auth.currentUser!!.uid) } catch (e: Exception) { auth.signOut(); throw e }
-                if (ref == null) { auth.signOut(); error("This Patient ID is no longer active. Ask the clinic for your current Patient ID.") }
-                portalPath = ref.path; persist(patients)
+                val key = ClinicCloud.portalKey(loginId, password)
+                ClinicCloud.loadPortal(key) ?: error("Patient ID or password is incorrect. Check with your clinic.")
+                portalKey = key; persist(patients)
                 session = "patient"
                 loadMyRecord()
-            }.exceptionOrNull()?.let { e ->
-                if (e is com.google.firebase.auth.FirebaseAuthException) "Patient ID or password is incorrect" else friendlyError(e)
-            }
+            }.exceptionOrNull()?.let { friendlyError(it) }
             busy = false
             done(error)
         }
     }
 
     private suspend fun loadMyRecord() {
-        if (portalPath.isBlank()) {
-            val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-            portalPath = ClinicCloud.findMyRecord(uid)?.path ?: error("Your record is not available. Contact the clinic.")
-            persist(patients)
+        val mine = ClinicCloud.loadPortal(portalKey)
+        if (mine == null) {
+            // The clinic reset or removed this login.
+            portalKey = ""; portalRecord = null; persist(patients); session = "login"
+            message = "Your Patient ID or password was changed by the clinic. Sign in with the new one."
+            PatientReminders.cancelAll(context)
+            return
         }
-        val mine = ClinicCloud.loadMyRecord(portalPath)
         portalRecord = mine.patient
         portalClinic = mine.clinic
+        portalLoginId = mine.loginId
+        portalPending = mine.pending
         clinicInfoAt = System.currentTimeMillis()
-        mustChangePassword = mine.patient.optJSONObject("portal")?.optBoolean("mustChange") == true
         // Reminders are scheduled on this phone from the patient's own appointments (no server pushes).
         PatientReminders.schedule(context, mine.patient, mine.clinic)
     }
 
     private var clinicInfoAt = 0L
-    /** Re-reads the clinic's slots and busy times for booking (at most once a minute). */
+    /** Re-reads the record and the clinic's slots for booking (at most once a minute). */
     fun refreshClinicInfo() {
         if (session != "patient" || busy || System.currentTimeMillis() - clinicInfoAt < 60_000) return
         scope.launch { runCatching { loadMyRecord() } }
     }
 
     fun bookSlot(startAt: Long, doctor: String, reason: String, done: (String?) -> Unit) =
-        selfService("Appointment booked", done) { ClinicCloud.bookSlot(portalPath, cloudIdentity, startAt, doctor, reason) }
+        selfService("Appointment booked", done) { ClinicCloud.bookSlot(portalKey, startAt, doctor, reason) }
     fun cancelMyAppointment(appointmentId: String, done: (String?) -> Unit) =
-        selfService("Appointment cancelled", done) { ClinicCloud.cancelMyAppointment(portalPath, cloudIdentity, appointmentId) }
+        selfService("Appointment cancelled", done) { ClinicCloud.cancelMyAppointment(portalKey, appointmentId) }
     private fun selfService(success: String, done: (String?) -> Unit, block: suspend () -> Unit) {
         if (busy) return
         busy = true
@@ -509,67 +583,67 @@ class ClinicStore(private val context: Context) {
 
     fun refreshMyRecord() = operation { loadMyRecord(); message = "Your record is up to date" }
 
-    /** Patient changes the temporary (or current) password; Firebase requires recent authentication. */
-    fun changePatientPassword(current: String, next: String, done: (String?) -> Unit) {
-        if (busy) return
-        busy = true
-        scope.launch {
-            val error = runCatching {
-                require(next.length >= 8) { "Use at least 8 characters" }
-                require(next.any { it.isDigit() } && next.any { it.isLetter() }) { "Use letters and numbers" }
-                val user = FirebaseAuth.getInstance().currentUser ?: error("Sign in again")
-                user.reauthenticate(com.google.firebase.auth.EmailAuthProvider.getCredential(user.email!!, current)).await()
-                user.updatePassword(next).await()
-                if (mustChangePassword) ClinicCloud.completePasswordChange(portalPath)
-                mustChangePassword = false
-            }.exceptionOrNull()?.let { e ->
-                if (e is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException) "Current password is incorrect" else e.localizedMessage ?: "Password change failed"
-            }
-            busy = false
-            done(error)
-        }
-    }
-
     fun patientSignOut() {
         PatientReminders.cancelAll(context)
         scope.launch {
-            runCatching { FirebaseAuth.getInstance().signOut() }
-            portalRecord = null; mustChangePassword = false; portalPath = ""; persist(patients); session = "login"
+            portalRecord = null; portalKey = ""; portalLoginId = ""; persist(patients); session = "login"
         }
     }
 
-    /** Admin: create the patient's app login. The temporary password is returned once for sharing. */
     /**
-     * Admin/dentist creates the patient's app login with the Patient ID and password they chose.
-     * [reset] issues a new Patient ID + password; the previous Patient ID stops working.
-     * An unsynced patient is saved to the cloud first. [done] gets null on success or the problem.
+     * Staff create the patient's app login with the Patient ID and password they chose (no Firebase
+     * account). [reset] replaces the current login; the old one stops working at once. An unsynced
+     * patient is saved to the cloud first. [done] gets null on success or the problem.
      */
-    fun createPatientLogin(patientId: String, loginId: String, password: String, reset: Boolean, done: (String?) -> Unit) {
+    fun createPatientLogin(patientId: String, loginId: String, password: String, reset: Boolean, done: (String?) -> Unit) =
+        portalAction(done) {
+            val clinicId = clinic()
+            val patient = ensureCommitted(clinicId, patientId)
+            val id = ClinicCloud.normalizeLoginId(loginId)
+            check(patients.none { it.optString("id") != patientId && it.optJSONObject("portal")?.optString("loginId").equals(id, true) }) {
+                "Another patient already uses Patient ID $id"
+            }
+            val login = ClinicCloud.createPatientLogin(clinicId, cloudIdentity, patient, config, id, password)
+            updateLocal(patientId) { it.put("portal", login.portal).put("remoteVersion", login.revision).put("revision", login.revision) }
+            credentialNotice = JSONObject().put("name", patient.optString("name")).put("loginId", login.loginId).put("password", login.password).put("reset", reset)
+            message = if (reset) "New patient login issued" else "Patient login created"
+        }
+
+    /** Turns off the patient's app access. */
+    fun removePatientLogin(patientId: String, done: (String?) -> Unit) = portalAction(done) {
+        val clinicId = clinic()
+        ensureCommitted(clinicId, patientId)
+        val revision = ClinicCloud.removePatientLogin(clinicId, cloudIdentity, patientId)
+        updateLocal(patientId) { it.apply { remove("portal") }.put("remoteVersion", revision).put("revision", revision) }
+        message = "Patient app access turned off"
+    }
+
+    private fun portalAction(done: (String?) -> Unit, block: suspend () -> Unit) {
         if (busy) { done("Please wait for the current operation to finish"); return }
         busy = true
         scope.launch {
             val error = runCatching {
                 check(configured() && session == "staff") { "Patient logins need the clinic cloud. Sign in with Google first." }
-                check(isSuperAdmin || currentRole in listOf("owner", "admin", "administrator", "dentist")) { "Only clinic administrators and dentists manage patient logins" }
-                val clinicId = clinic()
-                var patient = patients.first { it.optString("id") == patientId }
-                check(!patient.has("operationId")) { "This patient has a pending cloud submission. Sync first." }
-                if (patient.optBoolean("dirty") || patient.optLong("remoteVersion") == 0L) {
-                    // Save the patient to the cloud first so the login has a record to open.
-                    val committed = ClinicCloud.commitPatient(clinicId, cloudIdentity, patient)
-                    patient = committed.put("dirty", false).put("remoteVersion", committed.optLong("revision")).put("cloudOwner", clinicId)
-                    val synced = patients.map { if (it.optString("id") == patientId) patient else it }
-                    persist(synced); patients = synced
-                }
-                val login = ClinicCloud.createPatientLogin(context, clinicId, cloudIdentity, patientId, loginId, password, reset)
-                val next = patients.map { if (it.optString("id") == patientId) JSONObject(it.toString()).put("portal", login.portal).put("remoteVersion", login.revision).put("revision", login.revision) else it }
-                persist(next); patients = next
-                credentialNotice = JSONObject().put("name", patient.optString("name")).put("loginId", login.loginId).put("password", login.password).put("reset", reset)
-                message = if (reset) "New patient login issued" else "Patient login created"
+                check(can("patientLogins")) { "You don't have access to patient logins. Ask your admin (Team & roles)." }
+                block()
             }.exceptionOrNull()?.let { friendlyError(it) }
             busy = false
             done(error)
         }
+    }
+    /** Saves an unsynced patient to the cloud first so the login has a record to point at. */
+    private suspend fun ensureCommitted(clinicId: String, patientId: String): JSONObject {
+        val patient = patients.first { it.optString("id") == patientId }
+        check(!patient.has("operationId")) { "This patient has a pending cloud submission. Sync first." }
+        if (!patient.optBoolean("dirty") && patient.optLong("remoteVersion") > 0L) return patient
+        val committed = ClinicCloud.commitPatient(clinicId, cloudIdentity, patient)
+        val clean = committed.put("dirty", false).put("remoteVersion", committed.optLong("revision")).put("cloudOwner", clinicId)
+        updateLocal(patientId) { clean }
+        return clean
+    }
+    private suspend fun updateLocal(patientId: String, change: (JSONObject) -> JSONObject) {
+        val next = patients.map { if (it.optString("id") == patientId) change(JSONObject(it.toString())) else it }
+        persist(next); patients = next
     }
 
     /** Incremental pull: only patient documents changed since the last pull are read. */
