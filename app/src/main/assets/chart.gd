@@ -72,6 +72,12 @@ var cur_pitch := 0.0
 var cur_distance := 16.0
 var yaw_velocity := 0.0
 var pulse := 0.0
+# Turntable auto-rotation: starts after loading, pauses while touched or a tooth is selected,
+# resumes 4 s after the last touch. One full turn about every 30 s.
+const AUTO_ROTATE_SPEED := TAU / 30.0
+const AUTO_ROTATE_DELAY := 4.0
+var idle_time := 0.0
+var auto_speed := 0.0
 
 var selected := ""
 var selected_surface := ""
@@ -299,6 +305,10 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 			tooth_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			tooth_label.modulate = Color("334155")
 			tooth_label.outline_modulate = Color(1, 1, 1, 0.95)
+			# Numbers are drawn on top and faded by depth in _process (update_label_fade), instead of
+			# popping in and out as they pass behind gum and teeth while the model turns.
+			tooth_label.no_depth_test = true
+			tooth_label.render_priority = 2
 			tooth_label.position = Vector3(0, sign_y * (dimensions.y + 0.24), dimensions.z * 0.35)
 			tooth_label.visible = show_labels
 			body.add_child(tooth_label)
@@ -1056,6 +1066,7 @@ func apply_view(view: String) -> void:
 	distance = preset[2]
 	target = Vector3.ZERO
 	yaw_velocity = 0.0
+	idle_time = 0.0
 	set_arch(preset[3])
 	if view_buttons.has(view): view_buttons[view].button_pressed = true
 
@@ -1083,12 +1094,22 @@ func _process(delta: float) -> void:
 	if fingers.is_empty() and abs(yaw_velocity) > 0.001:
 		yaw += yaw_velocity * delta
 		yaw_velocity *= exp(-4.0 * delta)
+	# Auto-rotation (eases in/out so starting and stopping never jerks).
+	if fingers.is_empty() and abs(yaw_velocity) < 0.05: idle_time += delta
+	else: idle_time = 0.0
+	var loaded := not is_instance_valid(loading_overlay)
+	var turning := loaded and selected == "" and idle_time > AUTO_ROTATE_DELAY
+	auto_speed = lerpf(auto_speed, AUTO_ROTATE_SPEED if turning else 0.0, 1.0 - exp(-2.5 * delta))
+	if auto_speed > 0.0001:
+		yaw = wrapf(yaw + auto_speed * delta, -PI, PI)
+		cur_yaw = wrapf(cur_yaw, yaw - PI, yaw + PI) # keep the eased value on the same turn
 	var ease := 1.0 - exp(-10.0 * delta)
 	cur_yaw = lerpf(cur_yaw, yaw, ease)
 	cur_pitch = lerpf(cur_pitch, pitch, ease)
 	cur_distance = lerpf(cur_distance, distance, ease)
 	cur_target = cur_target.lerp(target, ease)
 	update_camera()
+	update_label_fade()
 	if teeth.has(selected):
 		pulse += delta
 		var body: Node3D = teeth[selected]
@@ -1097,6 +1118,21 @@ func _process(delta: float) -> void:
 			material.emission_energy_multiplier = 0.22 + 0.12 * sin(pulse * 3.2)
 		if selected_halo:
 			selected_halo.rotation.y += delta * 0.8
+
+## Tooth numbers fade smoothly with depth: front half fully visible, back half fading out.
+func update_label_fade() -> void:
+	if not show_labels and not teeth.has(selected): return
+	var view := camera.global_transform.affine_inverse()
+	var center_depth := -(view * rig.global_position).z
+	for body in teeth.values():
+		var tooth_label: Label3D = body.get_node("SlotLabel")
+		if not tooth_label.visible: continue
+		var alpha := 1.0
+		if body.get_meta("toothKey") != selected:
+			var depth := -(view * tooth_label.global_position).z
+			alpha = clampf(1.0 - (depth - center_depth + 0.4) / 1.6, 0.0, 1.0)
+		tooth_label.modulate.a = alpha
+		tooth_label.outline_modulate.a = 0.95 * alpha
 
 # ==============================================================================================
 # Selection
@@ -1342,6 +1378,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			fingers[event.index] = event.position
 			touch_origin = event.position
 			yaw_velocity = 0.0
+			idle_time = 0.0
 			if fingers.size() == 1: moved = false
 		else:
 			fingers.erase(event.index)
