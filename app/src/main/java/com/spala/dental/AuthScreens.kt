@@ -168,7 +168,7 @@ fun PatientPortalScreen(store: ClinicStore) {
             }
             Spacer(mark("treatments"))
             ToothHistoryList(records, store.portalClinic, focus, canEdit = false,
-                onToggle = { key -> focus = if (focus == key) null else key }, onRecord = {}, onEditStatus = {})
+                onToggle = { key -> focus = if (focus == key) null else key }, onEdit = {})
             val now = System.currentTimeMillis()
             val upcoming = record.optJSONArray("appointments").objectList()
                 .filter { a -> a.optString("status") !in ClinicalRules.terminalAppointments && (runCatching { ClinicalRules.appointmentMillis(a, store.portalClinic) }.getOrNull() ?: 0L) >= now }
