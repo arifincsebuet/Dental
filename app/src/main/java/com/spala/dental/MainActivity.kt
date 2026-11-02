@@ -211,7 +211,11 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
             }
         }
     }) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // One scroll position per screen: opening a patient (or doctor/page) starts at the top, so the
+        // 3D teeth model is the first thing shown.
+        val pageScroll = rememberScrollState()
+        LaunchedEffect(page, patientId, doctorId) { pageScroll.scrollTo(0) }
+        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(pageScroll).padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (store.message.isNotBlank()) Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Green50).border(1.dp, Green600.copy(alpha = .25f), RoundedCornerShape(16.dp)).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,

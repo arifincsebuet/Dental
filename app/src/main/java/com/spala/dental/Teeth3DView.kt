@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -643,9 +644,16 @@ fun Teeth3DView(
     val motionAllowed = remember {
         runCatching { android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) }.getOrDefault(1f) > 0f
     }
+    val summary = remember(signature) { chartCounts(chart) }
+    val description = "Interactive 3D dental model. ${summary.recorded} recorded teeth, ${summary.findings} with findings, " +
+        "${summary.restorations} with restorations, ${summary.planned} with planned care. Drag to rotate, pinch to zoom" +
+        if (onToothTap != null) ", tap a tooth to open it." else "."
+    val holder = remember(scene) { AnchorHolder() }
+    var fadeTick by remember { mutableIntStateOf(0) }
+    val holderNow by rememberUpdatedState(holder) // the scene (and holder) is rebuilt when the chart changes
     LaunchedEffect(Unit) {
         intro.animateTo(1f, tween(1400, easing = FastOutSlowInEasing)) { yaw = -0.6f + 0.6f * value }
-        if (!autoRotate || !motionAllowed) return@LaunchedEffect
+        val rotate = autoRotate && motionAllowed
         // Turntable: one full turn about every 30 s, eased in after each pause. Runs only while the
         // model is on screen (frames stop when the page is hidden).
         var previous = withFrameNanos { it }
@@ -653,6 +661,9 @@ fun Teeth3DView(
         val fullSpeed = (2f * Math.PI.toFloat()) / 30f
         while (true) {
             val now = withFrameNanos { it }
+            // Keep drawing until tooth-number fades settle, even when the model is still.
+            if (holderNow.fading) fadeTick++
+            if (!rotate) { previous = now; if (!holderNow.fading) kotlinx.coroutines.delay(150); continue }
             val dt = ((now - previous) / 1_000_000_000f).coerceIn(0f, 0.1f)
             previous = now
             val idle = android.os.SystemClock.uptimeMillis() - lastTouch > 4_000L
@@ -664,11 +675,6 @@ fun Teeth3DView(
             }
         }
     }
-    val summary = remember(signature) { chartCounts(chart) }
-    val description = "Interactive 3D dental model. ${summary.recorded} recorded teeth, ${summary.findings} with findings, " +
-        "${summary.restorations} with restorations, ${summary.planned} with planned care. Drag to rotate, pinch to zoom" +
-        if (onToothTap != null) ", tap a tooth to open it." else "."
-    val holder = remember(scene) { AnchorHolder() }
     val tapCallback by rememberUpdatedState(onToothTap)
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val currentSelection by rememberUpdatedState(selectedTeeth)
@@ -813,9 +819,12 @@ fun Teeth3DView(
         // Overlays: planned-care "+" (as in Godot), recorded-loss cross, selection ring.
         val anchors = FloatArray(scene.slots.size * 3)
         val labels = FloatArray(scene.slots.size * 2)
+        val facing = FloatArray(scene.slots.size)
+        fadeTick // redraw while labels are fading
         val badge = 7.5f * density.density
         scene.slots.forEachIndexed { index, slot ->
             val facingZ = r20 * slot.facial.x + r21 * slot.facial.y + r22 * slot.facial.z
+            facing[index] = facingZ
             val anchor = project(if (slot.lost) slot.cervical else slot.tip)
             anchors[index * 3] = anchor.first; anchors[index * 3 + 1] = anchor.second
             anchors[index * 3 + 2] = if (facingZ > -0.55f) 0.0001f + (1f - facingZ) else 0f
@@ -841,26 +850,45 @@ fun Teeth3DView(
         holder.anchors = anchors
 
         // Tooth numbers at the same 3D anchor as the Godot labels (beyond the biting edge).
-        // Front-most labels win; a label too close to one already placed is skipped so numbers never pile up.
+        // To stay calm while the model turns: numbers fade in/out instead of popping, a number that is
+        // already showing keeps its place over a newcomer (no flip-flopping), and numbers turning
+        // away fade gradually with the tooth's angle.
+        if (holder.labelAlpha.size != scene.slots.size) holder.labelAlpha = FloatArray(scene.slots.size)
+        val alpha = holder.labelAlpha
         val placed = ArrayList<Offset>()
         val minGap = 20f * density.density
-        val labelOrder = scene.slots.indices.filter { anchors[it * 3 + 2] > 0f && (showLabels || it in selectedIndices) }
-            .sortedWith(compareBy({ it !in selectedIndices }, { anchors[it * 3 + 2] }))
-        drawIntoCanvas { canvas ->
-            labelOrder.forEach { index ->
-                val slot = scene.slots[index]
+        val target = FloatArray(scene.slots.size)
+        scene.slots.indices.filter { facing[it] > -0.55f && (showLabels || it in selectedIndices) }
+            .sortedWith(compareBy({ it !in selectedIndices }, { alpha[it] < 0.5f }, { anchors[it * 3 + 2] }))
+            .forEach { index ->
                 val at = Offset(labels[index * 2], labels[index * 2 + 1])
-                if (index !in selectedIndices && placed.any { (it - at).getDistance() < minGap }) return@forEach
+                // A wider gap is needed to push out a number that is already visible (hysteresis).
+                val gap = if (alpha[index] >= 0.5f) minGap * 0.8f else minGap
+                if (index !in selectedIndices && placed.any { (it - at).getDistance() < gap }) return@forEach
                 placed += at
+                target[index] = if (index in selectedIndices) 1f else ((facing[index] + 0.55f) / 0.45f).coerceIn(0f, 1f)
+            }
+        var stillFading = false
+        for (i in alpha.indices) {
+            val delta = target[i] - alpha[i]
+            alpha[i] = if (kotlin.math.abs(delta) <= 0.12f) target[i] else alpha[i] + 0.12f * kotlin.math.sign(delta)
+            if (alpha[i] != target[i]) stillFading = true
+        }
+        holder.fading = stillFading
+        fun faded(color: Int, a: Float) = ((((color ushr 24) and 0xFF) * a).toInt() shl 24) or (color and 0xFFFFFF)
+        drawIntoCanvas { canvas ->
+            scene.slots.indices.filter { alpha[it] > 0.02f }.forEach { index ->
+                val slot = scene.slots[index]
                 val selected = index in selectedIndices
+                val a = alpha[index]
                 val text = ToothNotation.short(slot.key)
                 val x = labels[index * 2]; val y = labels[index * 2 + 1]
                 buffers.label.textSize = (if (selected) 13f else 9.5f) * density.density
                 val tw = buffers.label.measureText(text) / 2f + (if (selected) 8f else 4f) * density.density
                 val th = buffers.label.textSize * 0.8f
-                buffers.label.color = if (selected) 0xFF0F766E.toInt() else 0xE6FFFFFF.toInt()
+                buffers.label.color = faded(if (selected) 0xFF0F766E.toInt() else 0xE6FFFFFF.toInt(), a)
                 canvas.nativeCanvas.drawRoundRect(x - tw, y - th, x + tw, y + th * 0.55f, th, th, buffers.label)
-                buffers.label.color = if (selected) android.graphics.Color.WHITE else 0xFF334155.toInt()
+                buffers.label.color = faded(if (selected) android.graphics.Color.WHITE else 0xFF334155.toInt(), a)
                 canvas.nativeCanvas.drawText(text, x, y + th * 0.18f, buffers.label)
             }
         }
@@ -869,7 +897,13 @@ fun Teeth3DView(
 }
 
 /** Screen anchors from the last frame, shared between drawing and tap handling. */
-private class AnchorHolder { var anchors = FloatArray(0) }
+private class AnchorHolder {
+    var anchors = FloatArray(0)
+    /** Current opacity of each tooth number (fades instead of popping). */
+    var labelAlpha = FloatArray(0)
+    /** True while any number is still fading, so frames keep coming. */
+    var fading = false
+}
 
 // ---------------------------------------------------------------------------------------------
 // GPU renderer (OpenGL ES 2.0 on a TextureView)
