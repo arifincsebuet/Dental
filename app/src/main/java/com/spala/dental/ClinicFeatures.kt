@@ -284,6 +284,8 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
         if (appointment.optString("status") !in ClinicalRules.terminalAppointments) {
             val status = appointment.optString("status")
             val next = when (status) {
+                // Patient app booking whose time was taken meanwhile: confirm it (or reschedule) or cancel it.
+                "Requested" -> listOf("Confirmed", "Cancelled")
                 "Scheduled" -> listOf("Confirmed", "Checked in", "Cancelled", "No show")
                 "Confirmed" -> listOf("Checked in", "Cancelled", "No show")
                 "Checked in" -> listOf("In progress", "Cancelled")

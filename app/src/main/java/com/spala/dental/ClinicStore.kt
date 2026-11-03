@@ -222,19 +222,25 @@ class ClinicStore(private val context: Context) {
         if (busy) { rejectSave("Please wait for the current operation."); return }
         val existing = patients.firstOrNull { it.optString("id") == patient.optString("id") }
         if (currentRole in listOf("auditor", "unknown")) { rejectSave("This workspace is read-only for your account"); return }
-        if (currentRole !in listOf("owner", "admin", "administrator")) {
-            val clinical = listOf("allergies", "medicalHistory", "medications", "story", "chart", "treatments", "encounters", "performedProcedures", "images")
-            val member = config.optJSONObject("members")?.optJSONObject(cloudIdentity)
-            val clinicalWrite = currentRole == "dentist" || (currentRole == "assistant" && member?.optJSONObject("permissions")?.optBoolean("clinicalWrite") == true)
-            val deniedClinical = !clinicalWrite && clinical.any { field ->
-                val value = patient.opt(field)
-                val emptyInitial = existing == null && (value == null || value == "" || (value is JSONArray && value.length() == 0) || (field == "chart" && (value as? JSONObject)?.optJSONObject("teeth")?.length() == 0))
-                !emptyInitial && value.toString() != existing?.opt(field).toString()
-            }
-            val deniedBilling = currentRole != "cashier" && patient.opt("invoices").toString() != existing?.opt("invoices").toString()
-            val deniedProfile = currentRole == "cashier" && listOf("name", "phone", "dob", "archived", "communicationConsent", "appointments").any { patient.opt(it).toString() != existing?.opt(it).toString() }
-            if (deniedClinical || deniedBilling || deniedProfile) { rejectSave("Your clinic role does not allow this change"); return }
+        // The Team & roles access toggles decide which parts of a record this person may change
+        // (the same checks the Firestore rules apply when the change is synchronized).
+        fun changed(field: String): Boolean {
+            val value = patient.opt(field)
+            val emptyInitial = existing == null && (value == null || value == "" || (value is JSONArray && value.length() == 0) ||
+                (field == "chart" && (value as? JSONObject)?.optJSONObject("teeth")?.length() == 0))
+            return !emptyInitial && value.toString() != existing?.opt(field).toString()
         }
+        val clinical = listOf("allergies", "medicalHistory", "medications", "story", "chart", "treatments", "encounters", "performedProcedures", "images", "notes", "medicalAlerts")
+        val denied = when {
+            existing == null && !can("managePatients") -> "register patients"
+            // Medical alerts typed at registration are allowed (as in the rules); later clinical edits need access.
+            existing != null && clinical.any(::changed) && !can("recordTreatment") -> "record and edit treatment"
+            changed("invoices") && !can("billing") -> "invoices and payments"
+            changed("appointments") && !can("manageAppointments") -> "book and change appointments"
+            existing != null && listOf("name", "phone", "dob", "archived", "communicationConsent").any(::changed) && !can("managePatients") -> "register and edit patients"
+            else -> null
+        }
+        if (denied != null) { rejectSave("You don't have access to $denied. Ask your admin to turn it on in Team & roles."); return }
         if (existing?.has("operationId") == true) { rejectSave("This patient has a pending cloud submission. Retry sync before editing."); return }
         if (existing != null && patient.optLong("updatedAt") != existing.optLong("updatedAt")) { rejectSave("This record changed while the editor was open. Reopen it before saving."); return }
         val copy = JSONObject(patient.toString())
@@ -289,11 +295,12 @@ class ClinicStore(private val context: Context) {
         require(patients.none { it.optString("name").equals(name.trim(), true) && it.optString("phone") == phone.trim() }) { "A patient with this name and phone already exists" }
         val record = JSONObject().put("id", uid()).put("schemaVersion", 3).put("name", name.trim()).put("phone", phone.trim())
             .put("dob", dob).put("remoteVersion", 0).put("appointments", JSONArray()).put("history", JSONArray())
-        if (currentRole in listOf("owner", "admin", "administrator", "dentist", "assistant")) record
+        // Every new record starts with empty clinical and billing sections so later care can be added.
+        record
             .put("allergies", allergies).put("story", "")
             .put("chart", JSONObject().put("schemaVersion", 2).put("catalogVersion", "fdi-v1").put("dentition", "permanent").put("teeth", JSONObject()))
             .put("treatments", JSONArray()).put("images", JSONArray())
-        if (currentRole in listOf("owner", "admin", "administrator", "cashier")) record.put("invoices", JSONArray())
+        record.put("invoices", JSONArray())
         save(record, "Patient registered")
     }
     private fun configured(): Boolean = FirebaseApp.getApps(context).isNotEmpty()

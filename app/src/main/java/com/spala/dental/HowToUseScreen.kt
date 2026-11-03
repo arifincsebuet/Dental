@@ -29,21 +29,27 @@ private data class GuideArticle(
     val title: String,
     val summary: String,
     val steps: List<String>,
-    val reminder: String? = null
+    val reminder: String? = null,
+    /** "staff" (clinic app) or "patient" (patient app). */
+    val audience: String = "staff",
 ) {
     fun matches(query: String): Boolean = query.isBlank() ||
         (listOf(topic, title, summary) + steps + listOfNotNull(reminder)).any { it.contains(query, ignoreCase = true) }
 }
 
-/** Bundled operational help. It can be opened before an account or clinic is configured. */
+/**
+ * Bundled step-by-step help (Settings › How to use Dental Care, the drawer, and the sign-in screen).
+ * [audience] "staff" shows the clinic guides, "patient" the patient app guides, "all" both.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HowToUseScreen(onBack: () -> Unit) {
+fun HowToUseScreen(onBack: () -> Unit, audience: String = "staff", backLabel: String = "Back") {
     var search by rememberSaveable { mutableStateOf("") }
     var topic by rememberSaveable { mutableStateOf("All topics") }
-    var expanded by rememberSaveable { mutableStateOf("start") }
-    val articles = remember(search, topic) {
-        GuideArticles.filter { (topic == "All topics" || it.topic == topic) && it.matches(search.trim()) }
+    var expanded by rememberSaveable { mutableStateOf(if (audience == "patient") "patient-signin" else "start") }
+    val forAudience = remember(audience) { GuideArticles.filter { audience == "all" || it.audience == audience } }
+    val articles = remember(search, topic, forAudience) {
+        forAudience.filter { (topic == "All topics" || it.topic == topic) && it.matches(search.trim()) }
     }
     BackHandler(onBack = onBack)
     Scaffold(
@@ -51,7 +57,7 @@ fun HowToUseScreen(onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = { Text("How to use", color = GuideSlate, fontWeight = FontWeight.SemiBold) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back to settings") } },
+                navigationIcon = { TextButton(onClick = onBack) { Text(backLabel) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
         }
@@ -62,9 +68,10 @@ fun HowToUseScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text("Make each visit easier", style = MaterialTheme.typography.headlineSmall,
+                Text(if (audience == "patient") "Your dental care, in your pocket" else "Make each visit easier", style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold, color = GuideSlate)
-                Text("Find the steps for patients, dental charts, appointments, and clinic records.",
+                Text(if (audience == "patient") "How to sign in, see your teeth in 3D, read your treatment history and book appointments."
+                    else "Step-by-step guides for every part of the app: 3D teeth, treatment, appointments, team and roles, billing and the patient app.",
                     modifier = Modifier.padding(top = 6.dp), color = GuideSlate.copy(alpha = .75f))
             }
             item {
@@ -72,7 +79,7 @@ fun HowToUseScreen(onBack: () -> Unit) {
                     value = search,
                     onValueChange = { search = it },
                     label = { Text("Search the guide") },
-                    placeholder = { Text("Try 3D chart, refund, or sync") },
+                    placeholder = { Text(if (audience == "patient") "Try book, password, or reminder" else "Try 3D, slots, roles, refund, or sync") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -84,7 +91,7 @@ fun HowToUseScreen(onBack: () -> Unit) {
             item {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    (listOf("All topics") + GuideArticles.map { it.topic }.distinct()).forEach { label ->
+                    (listOf("All topics") + forAudience.map { it.topic }.distinct()).forEach { label ->
                         FilterChip(selected = topic == label, onClick = { topic = label }, label = { Text(label) })
                     }
                 }
@@ -151,216 +158,291 @@ fun HowToUseScreen(onBack: () -> Unit) {
 
 private val GuideArticles = listOf(
     GuideArticle(
-        "start", "Getting started", "Your first patient visit",
-        "A short route from registration to a recorded care plan.",
+        "start", "Getting started", "Sign in and set up your clinic",
+        "The first Google account to sign in creates the clinic and becomes its owner.",
         listOf(
-            "Open Patients and search the name or phone number before creating another profile.",
-            "Choose Register patient, enter the patient's details, and save. Open the profile and confirm the patient identity and medical alerts.",
-            "Use Encounters to record the complaint, examination, diagnosis, and plan. Use Chart to select a tooth and record its assessment.",
-            "Review proposed care in Treatments. Use Schedule for the next appointment and Billing for invoices and payments.",
-            "Read the save message. Device saved · sync pending means the change is on this device. Use Sync when the clinic's cloud workspace is ready."
+            "On the sign-in screen choose Clinic team, then Continue with Google.",
+            "The first account to sign in creates a new clinic and becomes its owner (all access). Staff you add later join this clinic automatically.",
+            "Open the ☰ menu › Clinic settings › Clinic management to set the clinic name, time zone, currency, tax and appointment buffer.",
+            "Open ☰ › Team & roles and add your dentists and staff with their Google email (see the Team & roles guide).",
+            "Choose a subscription in Settings, or continue if your account is free (super admin) or the clinic is complimentary.",
+            "Use the bottom bar (Home, Patients, Schedule, Reports, Settings) or the ☰ menu to move around. The red badge on ☰ counts appointments in the next 7 days."
         ),
-        "Available controls depend on your clinic role. Ask the clinic owner if an expected clinical or billing action is unavailable."
+        "Without a Firebase project (offline build) choose Use offline on this device; records then stay only on this phone."
     ),
     GuideArticle(
-        "patients", "Patients", "Find, update, or archive a patient",
-        "Keep the profile and clinical story with the correct person.",
+        "menu", "Getting started", "Find your way: menu, Sync and messages",
+        "The ☰ menu holds everything important; Sync shares your work with the clinic.",
         listOf(
-            "Open Patients and search by name or phone. Select the patient to open Overview.",
-            "Use Edit profile to correct demographics and medical alerts where your role allows it. Tap Date of birth to pick it from the calendar.",
-            "Use Update clinical story for the patient's clinical narrative. Review the selected name before saving a change.",
-            "Archive patient requires a reason and keeps the record. Use Include archived patients in the patient list to find it again, then Restore patient if appropriate."
+            "Tap ☰ at the top left. Clinic: Home, Patients, Appointments, Reports. Quick actions: Register patient, Book appointment, Sync now. Administration: Team & roles, Clinic settings, Subscription. Help: How to use, Settings, Sign out.",
+            "The Sync button at the top right sends your saved changes to the clinic and fetches others' changes and patient app bookings. Sync now in the menu shows how many changes are waiting.",
+            "Saving a record stores it on this device first (encrypted). Team, slot and settings changes, and appointments you book, are shared right away.",
+            "Green messages under the top bar confirm what happened; tap Dismiss to hide them. Red or amber text explains a problem and what to do."
         ),
-        "If registration reports a duplicate, find the existing patient and review their identity before making another record."
+        "If something is missing from the menu, your role may not include it. Ask your admin to check Team & roles."
     ),
     GuideArticle(
-        "chart", "Dental charts", "Assess a tooth in the 2D chart",
-        "Record assessment, presence, findings, and restorations as separate facts.",
+        "patients", "Patients", "Register, find, edit or archive a patient",
+        "Keep one record per person with correct identity and medical alerts.",
         listOf(
-            "Open a patient, choose Chart, and select permanent, primary, or mixed dentition. Mixed includes both primary and permanent slots.",
-            "Tap the numbered tooth. Choose its assessment and presence, then record a replacement if applicable.",
-            "Choose Whole tooth or a surface before adding a finding. Select a specific surface when recording a restoration.",
-            "Enter an optional planned procedure and a clinical note, then choose Save assessment.",
-            "Review existing facts before adding more. Resolve findings at selected scope only when the clinical finding has actually been resolved."
+            "Open Patients (or ☰ › Register patient). Search by name, phone or ID first so you don't create a duplicate.",
+            "Choose Register patient. Enter the full name, phone, date of birth (tap to pick from the calendar) and medical alerts, then Save.",
+            "Open the patient. The 3D teeth model is shown first, then the tabs: Overview, Chart, Encounters, Treatments, Billing, History.",
+            "On Overview use Edit profile to correct details, Update next to Clinical story for the narrative, and the Appointment reminders switch for consent.",
+            "Archive patient needs a reason and keeps the record. Turn on Include archived in Patients to find it, then choose Restore patient."
         ),
-        "An unrecorded tooth or surface is unassessed. It is never automatically healthy. Record missing, extracted, exfoliated, or congenitally absent teeth explicitly."
+        "Registering and editing patients needs the \"Register & edit patients\" access item."
     ),
     GuideArticle(
-        "numbering", "Dental charts", "Understand tooth numbers and surfaces",
-        "The chart uses FDI numbers and consistent surface letters.",
+        "three-d", "3D teeth", "Read the 3D teeth model on a patient's page",
+        "Every patient page opens with an interactive 3D model coloured by their full treatment history.",
         listOf(
-            "Permanent slots use 11–18, 21–28, 31–38, and 41–48. Primary slots use 51–55, 61–65, 71–75, and 81–85.",
-            "Primary 51 and permanent 11 are separate slots. Choose mixed dentition when both sets need to be represented. Recorded slots are retained when reviewing history.",
-            "M means mesial; D means distal; F means facial (labial or buccal); L means lingual or palatal.",
-            "I is the incisal surface for incisors and canines. O is the occlusal surface for premolars and molars.",
-            "Read the chart legend and the F, R, and P indicators: recorded finding codes, restoration codes, and open treatment states."
+            "Open a patient. The page starts at the top with the 3D model; it loads, swings into view and then turns slowly on its own.",
+            "Drag to rotate, pinch to zoom, double-tap to reset. Touching the model pauses the turning; it resumes 4 seconds after you let go and stays still while a tooth is selected.",
+            "Colours: blue = treated, teal + = planned care, amber = finding, × = recorded loss, grey = not assessed. The counters under the model show Treated, Planned, Findings and Missing.",
+            "Tap a tooth to select it (you hear a soft click; tapping it again deselects it). Its tooth number appears and its history opens in Treatment history below.",
+            "Tooth numbers follow Settings › Tooth numbering (Palmer, FDI or Universal); records are always stored in FDI.",
+            "Turn the tap sound on or off in Settings › Tooth tap sound."
         ),
-        "Assessment of a whole tooth does not automatically mean that every surface was assessed."
+        "Turning is switched off when Android's \"Remove animations\" accessibility setting is on."
     ),
     GuideArticle(
-        "three-d", "Dental charts", "Use the interactive 3D chart",
-        "Inspect the teeth, then return to the native editor to record care.",
+        "record", "3D teeth", "Record treatment for one tooth or several",
+        "Dentists record care straight from the 3D model.",
         listOf(
-            "In Chart, choose Open interactive 3D chart. Drag with one finger to rotate the dentition.",
-            "Use two fingers to pan and pinch to zoom. The + and − controls also change zoom; Reset restores the view.",
-            "Use Upper or Lower to show or hide an arch. Labels and Roots control the corresponding overlays.",
-            "Tap a tooth to see its recorded state. Select a surface if needed, then choose Assess tooth to open the native assessment editor.",
-            "Use Focus to bring the selected tooth into view, or Back to return without making an assessment."
+            "Tap a tooth on the model. A Selected tooth card appears under the model with Record treatment and Chart status.",
+            "For several teeth, choose Record treatment under the model, tap each tooth (tap again to remove it), then Record treatment (n).",
+            "Pick the procedure (or type your own), the status (Completed, In progress or Planned), surfaces if needed, the doctor and the date, and add notes.",
+            "Save. The teeth turn blue (completed) or show + (planned), and the entry appears in Treatment history.",
+            "Chart status on the Selected tooth card records presence (missing, extracted…), findings and restorations for that tooth."
         ),
-        "Historical and patient explanation charts are read-only. The native 2D chart remains available for tooth selection and editing."
+        "Recording treatment needs the \"Record & edit treatment\" access item. Without it the model is view only."
+    ),
+    GuideArticle(
+        "edit-treatment", "3D teeth", "Edit or correct a recorded treatment",
+        "Any recorded treatment can be changed later; the old values are kept.",
+        listOf(
+            "Open the patient and, in Treatment history below the model, tap the tooth to expand its timeline.",
+            "Tap Edit on the entry you want to change.",
+            "Change the procedure, status (including Cancelled), surfaces, doctor, date or notes, then Save.",
+            "The change log of that treatment keeps the previous values, and the patient History shows what changed. Moving a completed treatment to another status removes its 'treated' colour."
+        ),
+        "A treatment can't be moved to another tooth; record a new one for the right tooth and cancel the wrong one."
+    ),
+    GuideArticle(
+        "full-3d", "3D teeth", "Use the full-screen 3D chart",
+        "A larger chart with views, arch filters, roots and surface selection.",
+        listOf(
+            "Tap Full 3D chart under the patient's model (or Open interactive 3D chart in the Chart tab).",
+            "It turns slowly after loading. Drag to rotate, two fingers to pan, pinch or + / − to zoom, double-tap or Reset to return to the front view.",
+            "Choose Front, Upper, Lower, Left or Right views, and Both / Upper / Lower to show arches. 123 shows tooth numbers; Root shows roots inside a see-through gum.",
+            "Tap a tooth to see its record. Pick Whole tooth or a surface on the pad, then Record treatment to open the recorder in the app.",
+            "Press Back to return to the patient. Read-only charts (history, patient app) can't record."
+        ),
+        null
+    ),
+    GuideArticle(
+        "chart", "Clinical care", "Assess teeth in the Chart tab (2D)",
+        "Record assessment, presence, findings and restorations as separate facts.",
+        listOf(
+            "Open a patient › Chart. Choose Permanent, Primary or Mixed dentition.",
+            "Tap a tooth in the odontogram. Choose its assessment and presence, and a replacement if applicable.",
+            "Choose Whole tooth or a surface (M, D, F, L, I/O), then Add finding or Add restoration.",
+            "Optionally enter a Planned procedure and a clinical note, then Save assessment.",
+            "Use Resolve findings at selected scope only when the finding has really been resolved. Patient explanation view shows planned and completed care for a chairside talk."
+        ),
+        "An unrecorded tooth is unassessed, never automatically healthy. Record missing or extracted teeth explicitly."
     ),
     GuideArticle(
         "encounters", "Clinical care", "Write and finalize an encounter",
         "Keep an examination note and preserve later corrections.",
         listOf(
-            "Open Encounters and choose New encounter. Record the clinician, complaint, examination, diagnosis, and plan.",
-            "Use Edit draft while the note is still a draft. Review the note and the patient identity before choosing Finalize.",
-            "To correct a finalized note, choose Amend with reason. Enter both the reason and the correction.",
-            "Review amendments with the original encounter. History records the change."
+            "Open Encounters and choose + New encounter. Record the clinician, complaint, examination, diagnosis and plan.",
+            "Use Edit draft while it is a draft. Review it, then Finalize.",
+            "To correct a finalized note choose Amend with reason and enter the reason and the correction.",
+            "Amendments stay attached to the original note; History records the change."
         ),
-        "A device save and cloud confirmation are different states. Synchronize changes before relying on a shared clinic record."
+        null
     ),
     GuideArticle(
-        "treatments", "Clinical care", "Plan and complete treatment",
-        "Proposed care and performed care remain distinguishable.",
+        "treatments", "Clinical care", "Move treatment through its steps",
+        "The Treatments tab shows every planned and performed item with its status.",
         listOf(
-            "Select a tooth in Chart and enter a Planned procedure to create a treatment item.",
-            "Open Treatments and review the tooth, surface, procedure, notes, and current status.",
-            "Choose an available next state, such as Accepted, In progress, Deferred, Declined, Referred, or Cancelled. Record the decision reason when requested.",
-            "For Completed care, record the clinician and actual outcome. A supported restoration code can be recorded for a specific surface when appropriate.",
-            "Review the separate Performed procedures section. Use Amend with a reason to correct a performed record."
+            "Open Treatments to see the treatment plan for this patient.",
+            "Choose the next state: Accepted, In progress, Completed, Deferred, Declined, Referred or Cancelled. Record the clinician or reason when asked.",
+            "For Completed care record the outcome; the tooth turns blue on the 3D model.",
+            "Use Amend with reason on a performed record to correct it, or Edit in the 3D Treatment history to change any field."
         ),
-        "Completing a procedure does not automatically resolve every finding. Reassess the tooth and resolve the relevant finding explicitly."
+        "Completing care doesn't resolve findings automatically; reassess the tooth in Chart status."
     ),
     GuideArticle(
-        "appointments", "Appointments", "Book or reschedule an appointment",
-        "Use the clinic time zone, duration, clinician, and room to plan the visit.",
+        "history", "Clinical care", "Review history and earlier charts",
+        "Compare previous states and show them in 3D.",
         listOf(
-            "Open Schedule. Choose Day, Week, Month, or All and use the calendar date, Previous, Today, or Next controls.",
-            "Choose Book appointment and select the patient. Enter the clinician, date and time, duration, room if used, and reason or service.",
-            "Tap Date & time to pick the day on the calendar, then the time on the clock (clinic time zone). Review any clinician or room conflict, including the clinic buffer, before saving.",
-            "Choose Reschedule / edit on an active appointment to change its details.",
-            "Use the available status actions to confirm, check in, start, complete, cancel, or record a no-show. Open patient takes you back to the associated record."
+            "Open the History tab to see every change with date and author.",
+            "Use Compare chart on a change to see the earlier and current chart side by side.",
+            "Use View earlier chart in 3D to inspect that earlier state read-only."
         ),
-        "A locally saved appointment may still conflict with a change from another device. Check the synchronization result before treating a shared reservation as confirmed."
+        null
+    ),
+    GuideArticle(
+        "slots", "Appointments", "Open appointment slots for a day",
+        "Make a doctor's times bookable in a few taps.",
+        listOf(
+            "Open Schedule (or ☰ › Appointments) and keep Calendar selected.",
+            "Pick a day on the month calendar (green dot = free slots, grey dot = fully booked).",
+            "Tap Open slots on <day>. Choose the doctor, the hours (Morning, Afternoon, Evening, Full day or exact times), the appointment length, and This day only or every week on that weekday (4 weeks to 1 year).",
+            "Check the preview (e.g. \"8 slots: 09:00, 09:30…\") and tap Open n slots. They are shared with staff and the patient app at once.",
+            "Under the day you see each doctor's hours: Close this day removes one day of a weekly series; Remove / Delete all repeats removes the hours. All availability lists everything with Pause and Remove.",
+            "The Online booking by patients switch at the top turns patient self-booking on or off."
+        ),
+        "Opening slots needs the \"Open & close appointment slots\" access item. Doctors to choose from come from Team & roles."
+    ),
+    GuideArticle(
+        "booking", "Appointments", "Book, reschedule or cancel an appointment",
+        "Book from a free slot, or add any appointment from the list.",
+        listOf(
+            "In Schedule › Calendar, pick a day and tap a free (outlined) time.",
+            "Find the patient by name, phone or patient app ID, enter the reason or service, and tap Book slot. The time shows the patient's name and is taken for everyone at once.",
+            "Tap a booked time to open that patient.",
+            "Schedule › List shows appointments by Day, Week, Month or All. Use + Book appointment for a time outside the slots, Reschedule / edit to change one, and the status buttons (Confirmed, Checked in, In progress, Completed, Cancelled, No show) as the visit goes on.",
+            "Bookings made by patients in the patient app arrive with the next Sync. If the time was taken meanwhile it shows as Requested: tap Confirmed (after rescheduling if needed) or Cancelled, and call the patient."
+        ),
+        "Booking needs the \"Book & change appointments\" access item."
+    ),
+    GuideArticle(
+        "reminders", "Appointments", "Appointment reminders",
+        "Reminders are scheduled on each phone; nothing is sent from a server.",
+        listOf(
+            "In Settings › Clinic management › Reminders, turn on clinic reminders and set the hours before the appointment and quiet hours.",
+            "On a patient's Overview turn on Appointment reminders (patient consent). When booking, keep Schedule appointment reminder on.",
+            "In Settings choose Allow appointment notifications and allow them when Android asks.",
+            "Patients who use the patient app get reminders on their own phone the day before and 2 hours before."
+        ),
+        "Lock screens show only a general reminder. No SMS or email is sent."
+    ),
+    GuideArticle(
+        "team", "Team & roles", "Add staff and set their roles and access",
+        "Each person gets a role and simple on/off access switches.",
+        listOf(
+            "Open ☰ › Team & roles (or Settings › Team & roles).",
+            "Tap Add staff member. Enter the name and the Google email they will sign in with, plus phone and registration if you like.",
+            "Choose a role: Admin, Dentist, Assistant, Receptionist, Cashier or Auditor. This fills in their access.",
+            "Switch any access item on or off: view charts, record & edit treatment, register patients, book appointments, open & close slots, invoices & payments, patient app logins, reports, clinic settings & team.",
+            "Tap Add to team (or Save changes). It is shared with the clinic at once. When the person signs in with Google they join your clinic with exactly that access.",
+            "Turn off Active to remove someone's access, or Remove from team. Their earlier work stays in the records."
+        ),
+        "Only the owner and people with \"Clinic settings, team & roles\" can change the team."
+    ),
+    GuideArticle(
+        "patient-logins", "Team & roles", "Give a patient access to the patient app",
+        "You choose a simple Patient ID and password for the patient.",
+        listOf(
+            "Open the patient › Overview › Patient app access › Create patient login.",
+            "Type a Patient ID (4–12 letters or numbers, e.g. RAHIM01) and a password (6+ characters), or keep the suggestions.",
+            "Tap Create login and share the ID and password with the patient (Copy or Share). The password is shown only once.",
+            "To change the password or ID use Change ID / password; the old password stops working at once. Turn off removes app access.",
+            "The patient's record shows Patient app ID. Use it to find them when booking."
+        ),
+        "Patient logins don't use any Firebase account. Choose passwords that aren't easy to guess. Needs the \"Patient app logins\" access item."
     ),
     GuideArticle(
         "billing", "Billing", "Create an invoice and receive payment",
         "Record line items and distinguish billed amounts from money received.",
         listOf(
-            "Open the patient's Billing tab and choose Create invoice.",
-            "Select an available service or enter a line description, unit price, and quantity. Choose Add line for each item.",
-            "Review the discount, tax, currency, and lines, then choose Issue invoice. Issued prices are retained with that invoice.",
-            "Choose Receive payment on an unpaid invoice. Enter the received amount, payment method, and optional reference. Partial payments leave an outstanding balance.",
-            "Use Share receipt for a payment receipt, or Share invoice for an invoice summary."
+            "Open the patient's Billing tab and choose + Create invoice.",
+            "Pick a service or type a line description, unit price and quantity; choose Add line for each item. Set discount and tax, then Issue invoice.",
+            "Choose Receive payment on an unpaid invoice and enter the amount, method and optional reference. Partial payments leave a balance.",
+            "Use Share receipt or Share invoice to send a copy.",
+            "To correct: Refund a payment (amount, method and reason), or Void an invoice with a reason after refunding its payments."
         ),
-        "Recording a payment records the clinic transaction. It does not charge a payment card or move money through a payment provider."
-    ),
-    GuideArticle(
-        "refunds", "Billing", "Refund a receipt or void an invoice",
-        "Corrections retain their reasons and original records.",
-        listOf(
-            "Find the original payment receipt in Billing and choose Refund.",
-            "Enter the refund amount, method, and required reason. The amount must be within the unrefunded part of that receipt.",
-            "Review the updated received, refunded, and outstanding totals.",
-            "To cancel an issued invoice, refund its receipts first if needed, then choose Void and enter the required reason."
-        ),
-        "A voided invoice keeps its history. Use a corrected invoice rather than rewriting issued prices."
+        "Recording a payment doesn't charge a card. Needs the \"Invoices & payments\" access item."
     ),
     GuideArticle(
         "reports", "Reports", "Review and share practice reports",
-        "Compare activity and finances for the selected reporting period.",
+        "Compare activity and finances for a period.",
         listOf(
-            "Open Reports and choose Day, Week, Month, Custom, or All.",
-            "For Custom, pick the first and last dates on the calendar. The last date is included.",
-            "Read billed amounts, payments received, refunds, net cash, and outstanding balances separately. Currency totals are shown separately.",
-            "Review appointment states, clinician workload, and treatment activity below the financial totals.",
-            "Choose Share financial report CSV to share the displayed financial report."
+            "Open Reports and choose Day, Week, Month, Custom or All (for Custom pick the first and last dates).",
+            "Read billed, received, refunded, net and outstanding amounts, appointment states, clinician workload and treatment activity.",
+            "Choose Share financial report CSV to share it."
         ),
-        "Reports use records available on this device. Restore or synchronize the clinic records as appropriate before preparing a shared report."
+        "Reports use the records on this device; Sync first for the latest. Needs the \"Reports\" access item."
     ),
     GuideArticle(
-        "images", "Records and sync", "Attach and view a clinical image",
-        "Images retain their decoded pixel detail and must fit the size limit.",
+        "images", "Records and sync", "Attach and view clinical images",
+        "Images are stored without losing detail and kept small.",
         listOf(
-            "Open the patient Overview and choose Attach image. Select the image using the device picker.",
-            "The app prepares a lossless PNG image. The resulting file must be within 512 KB; images above 20 megapixels are also rejected.",
-            "If the lossless result is too large, choose a smaller source image. The app does not silently lower image quality or resize it.",
-            "After upload, synchronize the patient record to save its attachment reference with the shared record.",
-            "Use View clinical image on an attachment to open it. Image upload and viewing require the clinic's cloud access to be available."
+            "Open the patient › Overview › Attach image and pick a photo or X-ray.",
+            "The app compresses it losslessly (WebP or PNG) to 512 KB or less, scaling down only if it can't fit otherwise.",
+            "Sync to save the image reference to the shared record.",
+            "Tap an image under Clinical images to view it."
         ),
-        "Confirm the selected patient before launching the image picker."
+        null
     ),
     GuideArticle(
-        "sync", "Records and sync", "Save, synchronize, or resolve a conflict",
-        "Understand what is on this device and what the clinic has confirmed.",
+        "sync", "Records and sync", "Sync, conflicts and restore",
+        "Know what is on this device and what the clinic has.",
         listOf(
-            "Saved on this device or Device saved · sync pending means the edit is stored locally. Cloud synchronized means the cloud save has been acknowledged.",
-            "Choose Sync in the top bar, or Synchronize changes in Settings, to submit local changes to the configured clinic workspace.",
-            "For a temporary connection failure, keep the record and retry Sync. The app can retry an already submitted change without creating it twice.",
-            "If another device changed the record, use Review conflict · retain draft and load server version. Your local draft is kept for comparison.",
-            "Find Conflict drafts in Settings and export the retained draft. Review the server record and reapply the changes you intend through the usual editors. Remove the exported draft only after preserving the copy you need."
+            "Tap Sync at the top. It sends your saved changes, applies patient app bookings, fetches others' changes and updates patients' app copies.",
+            "If another device changed the same patient, use Review conflict · retain draft and load server version. Your draft is kept under Conflict drafts in Settings for export.",
+            "Restore cloud records reloads all clinic records onto this device (sync or resolve your changes first).",
+            "Export care summary PDF or Export JSON from a patient's Overview; Import patient JSON as a new record is in Settings."
         ),
-        "A pending submission may temporarily prevent editing that patient. Read the failure message and resolve it before making another submission."
+        "Exported files contain sensitive patient information; choose the destination carefully."
     ),
     GuideArticle(
-        "history", "Records and sync", "Review history and explain care",
-        "Compare previous observations and present the care plan to the patient.",
+        "subscription", "Settings", "Subscription and account",
+        "One subscription covers the whole clinic; patients never pay.",
         listOf(
-            "Open a patient's History tab to review the clinical timeline and available server audit entries.",
-            "Use Compare chart on a change to review the earlier and current chart states.",
-            "Use View earlier chart in 3D to inspect the earlier state in a read-only view.",
-            "For a discussion with the patient, open Chart and choose Patient explanation view. Proposed care and completed care are shown separately.",
-            "Return to the normal chart and clinical editors when you need to make a change."
+            "Settings › Subscription shows the plan from Google Play (currently a launch offer, then the regular monthly price).",
+            "The owner or an admin subscribes; every staff device of the clinic then unlocks. Use Restore purchase after reinstalling, and Manage in Google Play to cancel.",
+            "Super admin accounts and their clinics are free.",
+            "Sign out from ☰ › Sign out (sync first). Settings also has Tooth numbering, Tooth tap sound and notification permission."
         ),
-        "Explanation mode is a clinician-operated view. Review the selected record before showing it to the patient."
+        null
     ),
     GuideArticle(
-        "export", "Records and sync", "Export, import, and restore records",
-        "Keep an approved copy and understand the difference between import and restore.",
+        "patient-signin", "Patient app", "Sign in to the patient app",
+        "Use the Patient ID and password your clinic gave you.",
         listOf(
-            "In patient Overview, choose Export care summary PDF for a readable summary, or Export JSON for a structured patient copy. Choose its destination in the device picker.",
-            "In Settings, Import patient JSON as a new record creates a separate imported patient. Review their identity and clinical information; private image attachments are not transferred to the new record.",
-            "Restore cloud records loads the shared records into this device. Synchronize or resolve local changes first.",
-            "Cloud restore is different from Restore patient, which brings an archived patient back into the active list.",
-            "Before uninstalling or changing devices, keep the exports and synchronized records required by the clinic."
+            "Open Dental Care and choose Patient on the sign-in screen.",
+            "Type your Patient ID and password exactly as given by the clinic, then Sign in.",
+            "Forgot your password? Ask your clinic; they can set a new one. The old one then stops working.",
+            "Sign out with Sign out at the top right or in the ☰ menu."
         ),
-        "Exported files may contain sensitive patient information. Choose an appropriate destination and recipient."
+        null, "patient"
     ),
     GuideArticle(
-        "team", "Settings", "Configure the clinic, staff, and services",
-        "Owners and administrators prepare the workspace used by day-to-day care.",
+        "patient-teeth", "Patient app", "See your teeth and treatment history",
+        "Your clinic's records shown in 3D, read only.",
         listOf(
-            "Open Settings and Clinic management. In Clinic, review the clinic name, time zone, currency, tax, and appointment buffer.",
-            "In Staff, add staff names, contact and professional details, roles, and availability. Use Activate or Deactivate when staff status changes.",
-            "In Services, enter procedure codes, descriptions, default fees, and duration. Changes affect future selections; issued invoice prices remain retained.",
-            "Roles manages cloud account membership. Staff directory entries and account memberships are separate.",
-            "Synchronize the configuration when the clinic workspace is ready so other authorized devices can use it."
+            "After signing in you see your teeth in 3D. Drag to rotate, pinch to zoom; it turns slowly on its own.",
+            "Blue teeth were treated, + means planned care, amber means a finding.",
+            "Tap a tooth to see its treatment history below the model.",
+            "Use ☰ to jump to My teeth, Treatment history, My appointments, Book appointment or Billing. Refresh my record loads the latest from the clinic."
         ),
-        "If a setting is unavailable, ask the clinic owner or administrator to review your role."
+        null, "patient"
     ),
     GuideArticle(
-        "reminders", "Settings", "Enable appointment reminders",
-        "Consent, reminder timing, quiet hours, and device permission work together.",
+        "patient-book", "Patient app", "Book or cancel an appointment",
+        "Pick a free time from your clinic's calendar.",
         listOf(
-            "In Settings, open Clinic management → Reminders. Enable clinic reminders and review their lead time and quiet hours.",
-            "For an appointment, enable Schedule appointment reminder and record patient consent. Review the appointment's lead hours before saving.",
-            "Choose Allow appointment notifications in Settings and permit notifications when Android asks.",
-            "Reminders are scheduled on each phone; nothing is sent from a server. Patients who use the patient app get their own reminders on their phone (the day before and 2 hours before).",
-            "Your Schedule remains available to review appointments directly."
+            "Open ☰ › Book appointment. Days with free times have a green dot.",
+            "Pick a day, tap a free time, add a reason if you like and tap Book.",
+            "Your booking appears under Upcoming appointments straight away and is sent to the clinic.",
+            "To cancel, tap Cancel on the appointment (up to 2 hours before). Later than that, please call the clinic.",
+            "You can hold up to 3 upcoming bookings."
         ),
-        "Staff notifications contain a general clinic reminder. Patient reminders appear only on the patient's own phone. No SMS or email is sent."
+        "If online booking is off, call the clinic to book.", "patient"
     ),
     GuideArticle(
-        "account", "Settings", "Use an account or switch workspaces",
-        "The app opens directly while Google sign-in is disabled.",
+        "patient-reminders", "Patient app", "Appointment reminders on your phone",
+        "Your phone reminds you before each appointment.",
         listOf(
-            "Start with records on this device. Google sign-in is currently disabled for this release.",
-            "When the clinic's cloud workspace is configured, use Sync and Restore cloud records as directed by the clinic owner.",
-            "To change clinic workspace, preserve your exports, synchronize or resolve changes, and choose Close synchronized device workspace. This removes synchronized local records while keeping cloud records.",
-            "Use Choose cloud workspace to enter the workspace supplied by the clinic owner, then restore its records. Access also requires the appropriate membership.",
-            "When Google sign-in is enabled in a future release, Continue with Google will become available in Settings. Preserve your existing records before changing accounts."
+            "Allow notifications when the app asks (or in Android Settings › Apps › Dental Care › Notifications).",
+            "Reminders come the day before and 2 hours before each upcoming appointment.",
+            "Open the app now and then so the reminders follow any changes your clinic made."
         ),
-        "Closing a device workspace, signing out, archiving a patient, and deleting an exported file are different actions. Read the confirmation before proceeding."
-    )
+        null, "patient"
+    ),
 )
