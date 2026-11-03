@@ -160,7 +160,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     fun openPatient(id: String) { patientId = id; tab = "Overview" }
     if (showHowTo) {
         BackHandler { showHowTo = false }
-        HowToUseScreen(onBack = { showHowTo = false })
+        HowToUseScreen(onBack = { showHowTo = false }, audience = "staff")
         return
     }
     BackHandler(enabled = patient != null || doctor != null) { if (patient != null) patientId = null else doctorId = null }
@@ -311,11 +311,12 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                         SurfaceCard {
                             InfoRow(Glyph.Calendar, "Date of birth", p.optString("dob").ifBlank { "Not recorded" } + (ageText(p.optString("dob"))?.let { " · $it" } ?: ""))
                             InfoRow(Glyph.Phone, "Phone", p.optString("phone").ifBlank { "Not recorded" })
-                            InfoRow(Glyph.Person, "Patient ID", p.optString("id").take(8).uppercase())
+                            InfoRow(Glyph.Person, "Record number", p.optString("id").take(8).uppercase())
+                            p.optJSONObject("portal")?.optString("loginId")?.takeIf { it.isNotBlank() }?.let { InfoRow(Glyph.Lock, "Patient app ID", it) }
                         }
                         SectionHeader("Quick actions")
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ActionTile("Edit profile", Glyph.Edit, Modifier.weight(1f)) {
+                            ActionTile("Edit profile", Glyph.Edit, Modifier.weight(1f), enabled = store.can("managePatients")) {
                                 val fields = mutableListOf(Field("name", "Full name", p.optString("name"), true), Field("phone", "Phone", p.optString("phone")), Field("dob", "Date of birth", p.optString("dob")))
                                 if (p.has("allergies")) fields.add(Field("allergies", "Medical alerts", p.optString("allergies")))
                                 form = Form("Edit profile", fields) { values -> editRecord(p, "Profile amended") { changed -> values.forEach { (key, value) -> changed.put(key, value) } } }
@@ -324,9 +325,9 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                             ActionTile("Export JSON", Glyph.Clipboard, Modifier.weight(1f)) { store.stageExport(JSONObject().put("kind", "json").put("text", p.toString(2))) { exporter.launch("patient-${p.optString("id")}.json") } }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ActionTile("Attach image", Glyph.Image, Modifier.weight(1f), enabled = p.has("images") && !store.busy) { imagePatientId = p.optString("id"); imagePicker.launch("image/*") }
+                            ActionTile("Attach image", Glyph.Image, Modifier.weight(1f), enabled = p.has("images") && !store.busy && store.can("recordTreatment")) { imagePatientId = p.optString("id"); imagePicker.launch("image/*") }
                             ActionTile("Appointments", Glyph.Calendar, Modifier.weight(1f)) { patientId = null; doctorId = null; page = "Schedule" }
-                            ActionTile(if (p.optBoolean("archived")) "Restore patient" else "Archive patient", Glyph.Archive, Modifier.weight(1f), tint = if (p.optBoolean("archived")) Teal700 else Rose600) {
+                            ActionTile(if (p.optBoolean("archived")) "Restore patient" else "Archive patient", Glyph.Archive, Modifier.weight(1f), tint = if (p.optBoolean("archived")) Teal700 else Rose600, enabled = store.can("managePatients")) {
                                 form = Form(if (p.optBoolean("archived")) "Restore archived patient" else "Archive patient", listOf(Field("reason", "Reason", required = true))) { values -> editRecord(p, "Patient archive state amended: ${values["reason"]}") { it.put("archived", !p.optBoolean("archived")) } }
                             }
                         }
@@ -429,7 +430,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     val team = clinicianRecords(store.config).filter { it.optBoolean("active", true) }
                     SectionHeader("Care team")
                     if (team.isEmpty()) SurfaceCard(background = SurfaceTint) {
-                        Text("Add your dentists in Settings › Clinic › Staff to see their profiles here.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                        Text("Add your dentists in Team & roles to see their profiles here.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
                     } else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         team.forEach { member -> DoctorChip(member) { doctorId = member.optString("id") } }
                     }
@@ -476,6 +477,16 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                 "Team" -> TeamScreen(store.config, store.can("manageTeam"), store.busy, onBack = { page = "Settings" }) { updated, action -> store.saveConfig(updated, action) }
                 "Settings" -> {
                     Heading("Settings", "Storage and account preferences")
+                    SurfaceCard(onClick = { showHowTo = true }, background = Teal50) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            GlyphIcon(Glyph.Help, Teal700, 22.dp)
+                            Column(Modifier.weight(1f)) {
+                                Text("How to use Dental Care", style = MaterialTheme.typography.titleSmall, color = Ink)
+                                Text("Step-by-step guides for every feature: 3D teeth, treatment, appointments, team, billing, patient app", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                            }
+                            GlyphIcon(Glyph.Chevron, InkSubtle, 18.dp)
+                        }
+                    }
                     SubscriptionCard(store, billing)
                     SurfaceCard {
                         Text("Tooth numbering", style = MaterialTheme.typography.titleSmall, color = Ink)
@@ -491,13 +502,14 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                             Switch(TapSound.enabled, { TapSound.set(context, it); if (it) TapSound.play() })
                         }
                     }
-                    OutlinedButton(onClick = { showHowTo = true }, modifier = Modifier.fillMaxWidth()) { Text("How to use") }
                     if (store.cloudIdentity.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer { Text("Cloud UID: ${store.cloudIdentity}\nWorkspace: ${store.workspaceId.ifBlank { store.cloudIdentity }}") }
                     CardBlock("Device storage", "Patient records are encrypted on this device. Synchronize when you want to save changes to your cloud workspace.")
                     Button(onClick = { store.sync() }, enabled = !store.busy) { Text("Synchronize changes") }
                     OutlinedButton(onClick = { store.restore() }, enabled = !store.busy) { Text("Restore cloud records") }
                     OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "text/plain")) }) { Text("Import patient JSON as a new record") }
-                    OutlinedButton(onClick = { form = Form("Clinic workspace", listOf(Field("workspace", "Workspace ID (blank for personal)", store.workspaceId))) { v -> store.setWorkspace(v["workspace"].orEmpty()) } }) { Text("Choose cloud workspace") }
+                    // Staff join their clinic automatically through Team & roles; a manual workspace ID is only for
+                    // older device-only workspaces.
+                    if (runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.isAnonymous != false }.getOrDefault(true)) OutlinedButton(onClick = { form = Form("Clinic workspace", listOf(Field("workspace", "Workspace ID (blank for personal)", store.workspaceId))) { v -> store.setWorkspace(v["workspace"].orEmpty()) } }) { Text("Choose cloud workspace") }
                     OutlinedButton(onClick = { form = Form("Close device workspace", listOf(Field("confirm", "Type CLOSE to remove synchronized local records"))) { v -> require(v["confirm"] == "CLOSE") { "Enter CLOSE" }; store.closeWorkspace() } }) { Text("Close synchronized device workspace") }
                     if (android.os.Build.VERSION.SDK_INT >= 33) OutlinedButton(onClick = { notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS) }) { Text("Allow appointment notifications") }
                     SurfaceCard(onClick = { page = "Team" }) {

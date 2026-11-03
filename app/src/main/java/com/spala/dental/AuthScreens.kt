@@ -40,6 +40,8 @@ import org.json.JSONObject
 @Composable
 fun LoginScreen(store: ClinicStore) {
     val context = LocalContext.current
+    var showHelp by rememberSaveable { mutableStateOf(false) }
+    if (showHelp) { HowToUseScreen(onBack = { showHelp = false }, audience = "all"); return }
     var mode by rememberSaveable { mutableStateOf("Clinic team") }
     var loginId by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -86,6 +88,7 @@ fun LoginScreen(store: ClinicStore) {
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             if (store.message.isNotBlank() && error.isBlank()) Text(store.message, color = InkMuted, style = MaterialTheme.typography.bodySmall)
         }
+        TextButton(onClick = { showHelp = true }) { Text("How to use Dental Care") }
     }
 }
 
@@ -99,6 +102,8 @@ fun PatientPortalScreen(store: ClinicStore) {
     val record = store.portalRecord
     var focus by rememberSaveable { mutableStateOf<String?>(null) }
     var cancelling by remember { mutableStateOf<JSONObject?>(null) }
+    var showHelp by rememberSaveable { mutableStateOf(false) }
+    if (showHelp) { HowToUseScreen(onBack = { showHelp = false }, audience = "patient"); return }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
@@ -125,6 +130,7 @@ fun PatientPortalScreen(store: ClinicStore) {
                 scope.launch { drawerState.close() }
                 when (action) {
                     "refresh" -> store.refreshMyRecord()
+                    "howto" -> showHelp = true
                     "signout" -> store.patientSignOut()
                 }
             }

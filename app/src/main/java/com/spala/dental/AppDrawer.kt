@@ -125,7 +125,7 @@ fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (Str
     }
 }
 
-/** Patient drawer. [onSection] receives: teeth, treatments, appointments, book, billing. [onAction]: refresh, signout. */
+/** Patient drawer. [onSection] receives: teeth, treatments, appointments, book, billing. [onAction]: refresh, howto, signout. */
 @Composable
 fun PatientDrawerContent(store: ClinicStore, onSection: (String) -> Unit, onAction: (String) -> Unit) {
     val record = store.portalRecord
@@ -142,6 +142,7 @@ fun PatientDrawerContent(store: ClinicStore, onSection: (String) -> Unit, onActi
             if ((record?.optJSONArray("invoices")?.length() ?: 0) > 0) DrawerEntry("Billing", Glyph.Card) { onSection("billing") }
             DrawerSection("Account")
             DrawerEntry("Refresh my record", Glyph.Sync) { onAction("refresh") }
+            DrawerEntry("How to use", Glyph.Help) { onAction("howto") }
             HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 12.dp), color = Hairline)
             DrawerEntry("Sign out", Glyph.Logout, tint = Rose600) { onAction("signout") }
         }
