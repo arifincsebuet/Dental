@@ -70,7 +70,19 @@ class ClinicStore(private val context: Context) {
     }.getOrDefault(false)
     val subscriptionActive: Boolean get() = isSuperAdmin || complimentary ||
         (subscription.optBoolean("active") && subscription.optLong("expiresAt") > System.currentTimeMillis()) || (session == "local" && deviceEntitled)
-    /** The clinic a Play purchase is bound to. */
+    /** Active (not archived) patients: what the subscription tier is based on. */
+    val activePatientCount: Int get() = patients.count { !it.optBoolean("archived") }
+    /** Plan tier paid for (1 = up to 1,000 patients). */
+    val planTier: Int get() = subscription.optInt("tier", 1).coerceAtLeast(1)
+    /** Tier the clinic's current number of patients needs. */
+    val requiredTier: Int get() = PlanTiers.requiredTier(activePatientCount)
+    /** Free access: no plan limit. */
+    val freeAccess: Boolean get() = isSuperAdmin || complimentary || session == "local"
+    /** Patients the current plan covers, or null when there is no paid limit (free access or not subscribed). */
+    val patientLimit: Int? get() = if (freeAccess || !subscriptionActive) null else PlanTiers.limit(planTier)
+    /** The clinic has more patients than its plan covers. */
+    val needsUpgrade: Boolean get() = patientLimit?.let { activePatientCount > it } == true
+    /** The clinic subscription a Play purchase is bound to. */
     val subscriptionClinicId: String get() = workspaceId.ifBlank { cloudIdentity.ifBlank { "local-device" } }
     private var lastPullAt = 0L
     private var localMode = false
@@ -293,6 +305,9 @@ class ClinicStore(private val context: Context) {
         require(name.isNotBlank()) { "Patient name is required" }
         if (dob.isNotBlank()) java.time.LocalDate.parse(dob)
         require(patients.none { it.optString("name").equals(name.trim(), true) && it.optString("phone") == phone.trim() }) { "A patient with this name and phone already exists" }
+        patientLimit?.let { limit ->
+            require(activePatientCount < limit) { "Your plan covers up to %,d patients. Upgrade in Settings › Subscription to add more (or archive patients who no longer visit).".format(limit) }
+        }
         val record = JSONObject().put("id", uid()).put("schemaVersion", 3).put("name", name.trim()).put("phone", phone.trim())
             .put("dob", dob).put("remoteVersion", 0).put("appointments", JSONArray()).put("history", JSONArray())
         // Every new record starts with empty clinical and billing sections so later care can be added.
@@ -482,11 +497,15 @@ class ClinicStore(private val context: Context) {
         if (session == "local") { deviceEntitled = true; return }
         val boundTo = purchase.accountIdentifiers?.obfuscatedAccountId
         if (boundTo != null && boundTo != BillingManager.accountTag(subscriptionClinicId)) return // bought for another clinic
-        val renewed = JSONObject().put("active", true).put("productId", purchase.products.firstOrNull().orEmpty())
+        val tier = purchase.products.maxOfOrNull { PlanTiers.tierOf(it) } ?: 0
+        if (tier == 0) return
+        val renewed = JSONObject().put("active", true).put("productId", purchase.products.firstOrNull().orEmpty()).put("tier", tier)
             .put("orderId", purchase.orderId.orEmpty()).put("autoRenewing", purchase.isAutoRenewing).put("purchaseTime", purchase.purchaseTime)
             // Monthly plan: valid until a few days after the next renewal; the next refresh extends it.
             .put("expiresAt", System.currentTimeMillis() + 34L * 86_400_000L).put("verifiedAt", System.currentTimeMillis()).put("linkedBy", cloudIdentity)
-        if (subscription.optBoolean("active") && subscription.optLong("verifiedAt") > System.currentTimeMillis() - 86_400_000L) return // refreshed today
+        // Refreshed today with the same (or a higher) plan: nothing to write.
+        if (subscription.optBoolean("active") && subscription.optLong("verifiedAt") > System.currentTimeMillis() - 86_400_000L &&
+            subscription.optInt("tier", 1) >= tier) return
         if (currentRole !in listOf("owner", "admin", "administrator")) return
         operation {
             // Unlock this device at once; then share the entitlement with the clinic's other devices.

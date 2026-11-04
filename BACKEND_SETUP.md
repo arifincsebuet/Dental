@@ -141,20 +141,42 @@ Limits of a server-less design (accepted to save cost):
 
 ## Subscription (Google Play Billing)
 
-Prices live in Play Console (product `dental_care_pro`, base plan `monthly` USD 10, offer `launch`
-USD 5); see the paywall comments in `Subscription.kt`.
+The price depends on the clinic's number of active (not archived) patients:
 
-Without a server the purchase is handled on the device:
-1. The admin buys in the app. Checkout carries an obfuscated account ID derived from the clinic ID.
-2. The app **acknowledges** the purchase with the Play Billing library (required within 3 days).
-3. The admin's device writes `subscription {active, expiresAt ≈ 34 days, productId, orderId}` to the
-   clinic document, so every staff device of that clinic unlocks.
-4. Each app start on the purchasing device re-reads Play's purchase and extends `expiresAt` (at most
-   once a day). If the subscription is cancelled, it stops being extended and expires.
+| Patients | Product ID | Launch offer (`launch`) | Regular (`monthly`) |
+|---|---|---|---|
+| up to 1,000 | `dental_care_pro` | USD 5 / month | USD 10 / month |
+| 1,001 – 2,000 | `dental_care_pro_t2` | USD 10 / month | USD 20 / month |
+| 2,001 – 3,000 | `dental_care_pro_t3` | USD 15 / month | USD 30 / month |
+| … | `dental_care_pro_tN` | USD 5 × N | USD 10 × N |
+| 9,001 – 10,000 | `dental_care_pro_t10` | USD 50 / month | USD 100 / month |
 
-Super admins (`dev.spala@gmail.com`, `spalatechnologies@gmail.com`) never pay; clinics they own are
-marked `complimentary` for all their staff. The list is in `SUPER_ADMIN_EMAILS` (app/build.gradle.kts)
-and in `firebase/firestore.rules` (`superAdmin()`); change both together.
+Set up in Play Console › Monetize › Subscriptions, once per tier (N = 1…10; tier 1 keeps the existing
+`dental_care_pro`):
+1. Create the subscription product with the ID above.
+2. Add base plan **`monthly`**: auto-renewing, 1 month, regular price USD 10 × N.
+3. Add offer **`launch`** on it: new customers, discounted price USD 5 × N per month (for as many months
+   as you choose), tag `launch`. Deactivate the offers when the promotion ends; new subscribers then pay
+   the regular price, no app update needed.
+4. Optionally put all tiers in one **subscription group** in your store listing so Google Play treats them
+   as upgrades of each other.
+
+How it works without a server:
+1. The app offers the tier for the clinic's current patient count. Checkout carries an obfuscated
+   account ID derived from the clinic ID.
+2. The app **acknowledges** the purchase (required within 3 days) and the admin's device writes
+   `subscription {active, tier, productId, expiresAt ≈ 34 days}` to the clinic document; every staff
+   device unlocks. Each app start on the purchasing phone extends it while Play still reports it.
+3. When the clinic reaches its tier's limit, registering more patients asks for an upgrade (care for
+   existing patients never stops). **Upgrade** in Settings › Subscription switches the Play subscription
+   to the next product with `CHARGE_PRORATED_PRICE` (only the difference is charged); a downgrade uses
+   `DEFERRED` (takes effect at renewal). It must be done on the phone/Google account that bought it.
+4. Add more tiers by raising `PlanTiers.MAX_TIER` in `Subscription.kt` and creating the products.
+
+Super admins (`dev.spala@gmail.com`, `spalatechnologies@gmail.com`) never pay and have no patient
+limit; clinics they own are marked `complimentary` for all their staff. The list is in
+`SUPER_ADMIN_EMAILS` (app/build.gradle.kts) and in `firebase/firestore.rules` (`superAdmin()`); change
+both together.
 
 ## Appointment slots
 
