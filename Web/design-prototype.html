@@ -1,0 +1,1305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dental Care Web</title>
+<meta name="description" content="Dental Care clinic management, web edition design prototype.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'%3E%3Crect width='108' height='108' rx='26' fill='%230F766E'/%3E%3Cpath fill='%23fff' d='M38,30 C30,30 29,40 32,49 C35,57 35,76 41,79 C46,82 46,61 54,61 C62,61 62,82 67,79 C73,76 73,57 76,49 C79,40 78,30 70,30 C64,29 60,34 54,34 C48,34 44,29 38,30 Z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F3F7F7; --surface:#FFFFFF; --surface-2:#F0FDFA; --surface-3:#F8FAFC;
+  --ink:#0F1E2E; --ink-2:#334155; --muted:#64748B; --line:#E2E8F0; --line-2:#CBD5E1;
+  --brand:#0F766E; --brand-ink:#FFFFFF; --brand-2:#14B8A6; --brand-soft:#CCFBF1; --brand-softer:#E6FBF6;
+  --accent:#2563EB; --accent-soft:#DBEAFE;
+  --amber:#B45309; --amber-soft:#FEF3C7; --amber-fill:#F59E0B;
+  --red:#DC2626; --red-soft:#FEE2E2; --green:#15803D; --green-soft:#DCFCE7;
+  --violet:#7C3AED; --violet-soft:#EDE9FE;
+  --treated:#60A5FA; --assessed:#FFE9C2; --unassessed:#EEF2F6; --missing:#64748B;
+  --shadow:0 1px 2px rgba(15,30,46,.05),0 4px 16px rgba(15,30,46,.05);
+  --shadow-lg:0 20px 60px rgba(15,30,46,.18);
+  --radius:16px; --radius-sm:10px;
+  --nav-w:252px; --top-h:64px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#081214; --surface:#0F1B1E; --surface-2:#0E2624; --surface-3:#132226;
+  --ink:#E6EEF2; --ink-2:#C2CED6; --muted:#8FA1AE; --line:#1E3035; --line-2:#2A4248;
+  --brand:#2DD4BF; --brand-ink:#04211E; --brand-2:#5EEAD4; --brand-soft:#134E4A; --brand-softer:#0F302D;
+  --accent:#60A5FA; --accent-soft:#172B4D; --amber:#FBBF24; --amber-soft:#3A2A0A; --amber-fill:#F59E0B;
+  --red:#F87171; --red-soft:#3B1515; --green:#4ADE80; --green-soft:#0F2E1C; --violet:#A78BFA; --violet-soft:#241B3D;
+  --treated:#3B82F6; --assessed:#5B4A2A; --unassessed:#1A2A2F; --missing:#94A3B8;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#081214; --surface:#0F1B1E; --surface-2:#0E2624; --surface-3:#132226;
+  --ink:#E6EEF2; --ink-2:#C2CED6; --muted:#8FA1AE; --line:#1E3035; --line-2:#2A4248;
+  --brand:#2DD4BF; --brand-ink:#04211E; --brand-2:#5EEAD4; --brand-soft:#134E4A; --brand-softer:#0F302D;
+  --accent:#60A5FA; --accent-soft:#172B4D; --amber:#FBBF24; --amber-soft:#3A2A0A; --amber-fill:#F59E0B;
+  --red:#F87171; --red-soft:#3B1515; --green:#4ADE80; --green-soft:#0F2E1C; --violet:#A78BFA; --violet-soft:#241B3D;
+  --treated:#3B82F6; --assessed:#5B4A2A; --unassessed:#1A2A2F; --missing:#94A3B8;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); color-scheme:dark;}
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 "Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--brand)}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.92em}
+svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:var(--nav-w) minmax(0,1fr);grid-template-rows:var(--top-h) minmax(0,1fr);height:100vh;height:100dvh}
+.side{grid-row:1/3;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.brand{height:var(--top-h);display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--line);flex:none}
+.brand img,.brand svg.logo{width:36px;height:36px;border-radius:10px}
+.brand b{font-size:16px;letter-spacing:-.01em}
+.brand small{display:block;color:var(--muted);font-size:11.5px;font-weight:500;margin-top:-2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav{padding:12px 10px;overflow:auto;flex:1}
+.nav h6{margin:14px 10px 6px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.nav a{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:10px;color:var(--ink-2);text-decoration:none;font-weight:600;position:relative}
+.nav a:hover{background:var(--surface-3)}
+.nav a.on{background:var(--brand-softer);color:var(--brand)}
+.nav a.on::before{content:"";position:absolute;left:-10px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--brand)}
+.nav .badge{margin-left:auto}
+.side-foot{padding:12px;border-top:1px solid var(--line)}
+.plan{background:linear-gradient(135deg,var(--brand-softer),var(--surface-2));border:1px solid var(--line);border-radius:14px;padding:12px}
+.plan .bar{height:6px;border-radius:6px;background:var(--line);overflow:hidden;margin:8px 0 4px}
+.plan .bar i{display:block;height:100%;background:var(--brand);border-radius:6px}
+
+.top{display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--line);min-width:0}
+.top .crumb{font-weight:700;font-size:16px;white-space:nowrap}
+.top .crumb small{display:block;color:var(--muted);font-weight:500;font-size:12px;margin-top:-2px}
+.search{flex:1;max-width:560px;margin-left:auto;margin-right:auto;position:relative}
+.search button{width:100%;display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface-3);color:var(--muted);cursor:pointer;text-align:left}
+.search button:hover{border-color:var(--line-2)}
+kbd{font-family:"JetBrains Mono",monospace;font-size:11px;padding:2px 6px;border-radius:6px;border:1px solid var(--line-2);background:var(--surface);color:var(--muted)}
+.top-actions{display:flex;align-items:center;gap:8px}
+.icon-btn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;cursor:pointer;color:var(--ink-2);position:relative}
+.icon-btn:hover{background:var(--surface-3)}
+.icon-btn .dot{position:absolute;top:6px;right:6px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:10px;font-weight:700;display:grid;place-items:center}
+.me{display:flex;align-items:center;gap:10px;padding:4px 10px 4px 4px;border-radius:14px;border:1px solid var(--line);cursor:pointer;background:var(--surface)}
+.me b{font-size:13px;display:block;line-height:1.2}.me small{color:var(--muted);font-size:11.5px}
+.avatar{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff;background:linear-gradient(135deg,#3B82F6,#0F766E);flex:none}
+.avatar.lg{width:56px;height:56px;border-radius:16px;font-size:19px}
+.main{overflow:auto;min-width:0;min-height:0}
+.page{padding:24px clamp(16px,2vw,32px) 40px;min-height:100%}
+.menu-btn{display:none}
+
+/* ---------- primitives ---------- */
+.btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:11px;border:1px solid var(--line);background:var(--surface);font-weight:600;cursor:pointer;white-space:nowrap;color:var(--ink)}
+.btn:hover{background:var(--surface-3)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--brand)}
+.btn.ghost:hover{background:var(--brand-softer)}
+.btn.sm{height:30px;padding:0 10px;font-size:12.5px;border-radius:9px}
+.btn.danger{color:var(--red)}
+.btn svg.i{width:16px;height:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);min-width:0}
+.card-h{display:flex;align-items:center;gap:10px;padding:16px 18px 0}
+.card-h h3{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.card-h .sub{color:var(--muted);font-size:12.5px}
+.card-h .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.card-b{padding:14px 18px 18px}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--surface-3);color:var(--ink-2);white-space:nowrap}
+.badge.teal{background:var(--brand-softer);color:var(--brand)}
+.badge.blue{background:var(--accent-soft);color:var(--accent)}
+.badge.amber{background:var(--amber-soft);color:var(--amber)}
+.badge.red{background:var(--red-soft);color:var(--red)}
+.badge.green{background:var(--green-soft);color:var(--green)}
+.badge.violet{background:var(--violet-soft);color:var(--violet)}
+.badge.count{background:var(--red);color:#fff;height:19px;min-width:19px;justify-content:center;padding:0 6px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-weight:600;font-size:12.5px;cursor:pointer;color:var(--ink-2);display:inline-flex;align-items:center;gap:6px}
+.chip:hover{border-color:var(--line-2)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.seg{display:inline-flex;padding:3px;border-radius:12px;background:var(--surface-3);border:1px solid var(--line)}
+.seg button{height:30px;padding:0 12px;border:0;background:transparent;border-radius:9px;font-weight:600;font-size:12.5px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field label{font-size:12px;font-weight:700;color:var(--ink-2)}
+.input,select.input,textarea.input{height:40px;border-radius:11px;border:1px solid var(--line-2);background:var(--surface);padding:0 12px;outline:none;width:100%}
+textarea.input{height:auto;min-height:84px;padding:10px 12px;resize:vertical}
+.input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-softer)}
+.grid-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.switch{position:relative;width:40px;height:23px;flex:none;cursor:pointer}
+.switch input{opacity:0;width:0;height:0;position:absolute}
+.switch i{position:absolute;inset:0;border-radius:20px;background:var(--line-2);transition:.2s}
+.switch i::after{content:"";position:absolute;width:17px;height:17px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.switch input:checked+i{background:var(--brand)}
+.switch input:checked+i::after{transform:translateX(17px)}
+.row{display:flex;align-items:center;gap:10px}
+.between{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.muted{color:var(--muted)}
+.small{font-size:12.5px}
+.h1{font-size:clamp(20px,1.6vw,26px);font-weight:800;letter-spacing:-.02em;margin:0}
+.page-head{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.page-head .r{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
+table.t{width:100%;border-collapse:collapse}
+table.t th{text-align:left;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface)}
+table.t td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.t tr.click{cursor:pointer}
+table.t tr.click:hover td{background:var(--surface-3)}
+table.t tr.sel td{background:var(--brand-softer)}
+.table-wrap{overflow:auto}
+.notice{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;background:var(--amber-soft);color:var(--amber);font-weight:600;font-size:13px}
+.notice.teal{background:var(--brand-softer);color:var(--brand)}
+.notice.red{background:var(--red-soft);color:var(--red)}
+
+/* ---------- dashboard ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:16px}
+.kpi{padding:16px 18px;position:relative;overflow:hidden}
+.kpi .lbl{display:flex;align-items:center;gap:8px;color:var(--muted);font-weight:600;font-size:12.5px}
+.kpi .ico{width:30px;height:30px;border-radius:9px;display:grid;place-items:center}
+.kpi .val{font-size:26px;font-weight:800;letter-spacing:-.02em;margin-top:8px}
+.kpi .delta{font-size:12px;font-weight:700}
+.kpi svg.spark{position:absolute;right:12px;bottom:12px;width:90px;height:34px;opacity:.9}
+.dash{display:grid;gap:16px;grid-template-columns:minmax(0,2fr) minmax(320px,1fr)}
+.dash .span2{grid-column:1/-1}
+@media (min-width:1800px){.dash{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr)}.dash .wide{grid-column:span 2}}
+.lanes{position:relative;overflow-x:auto}
+.lanes-inner{min-width:1100px}
+.lane-head{display:grid;grid-template-columns:150px 1fr;font-size:11px;color:var(--muted);font-weight:700}
+.lane-head .hours{position:relative;height:20px}
+.lane-head .hours span{position:absolute;transform:translateX(-50%)}
+.lane{display:grid;grid-template-columns:150px 1fr;align-items:center;border-top:1px dashed var(--line);min-height:64px}
+.lane .who{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px}
+.lane .who small{display:block;color:var(--muted);font-weight:500;font-size:11.5px}
+.lane .track{position:relative;height:48px}
+.blk{position:absolute;top:4px;bottom:4px;border-radius:8px;padding:3px 8px;font-size:11.5px;font-weight:700;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;border:1px solid transparent}
+.blk small{display:block;font-weight:500;opacity:.8}
+.blk.open{border:1.5px dashed var(--line-2);background:transparent;color:var(--muted);font-weight:600}
+.now-line{position:absolute;top:0;bottom:0;width:2px;background:var(--red);z-index:2}
+.now-line::before{content:"Now";position:absolute;top:-2px;left:4px;font-size:10px;font-weight:800;color:var(--red)}
+.st-Scheduled{background:var(--surface-3);color:var(--ink-2);border-color:var(--line)}
+.st-Confirmed{background:var(--accent-soft);color:var(--accent)}
+.st-Checked-in{background:var(--violet-soft);color:var(--violet)}
+.st-In-progress{background:var(--amber-soft);color:var(--amber)}
+.st-Completed{background:var(--green-soft);color:var(--green)}
+.st-Cancelled{background:var(--surface-3);color:var(--muted);text-decoration:line-through;border-color:var(--line)}
+.st-No-show{background:var(--red-soft);color:var(--red)}
+.st-Requested{background:var(--amber-soft);color:var(--amber);border:1.5px dashed var(--amber-fill)}
+.list-item{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.list-item:last-child{border-bottom:0}
+.list-item .grow{flex:1;min-width:0}
+.list-item b{display:block;font-size:13.5px}
+.list-item small{color:var(--muted)}
+.qa{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.qa button{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--surface-3);cursor:pointer;font-weight:700;text-align:left}
+.qa button:hover{border-color:var(--brand);background:var(--brand-softer)}
+.qa .ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#fff}
+.bars{display:flex;align-items:flex-end;gap:6px;height:180px;padding-top:10px}
+.bars .b{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%;min-width:0}
+.bars .b i{display:block;width:100%;max-width:28px;border-radius:6px 6px 2px 2px;background:var(--brand);opacity:.85}
+.bars .b i.today{background:var(--accent);opacity:1}
+.bars .b span{font-size:10.5px;color:var(--muted);font-weight:600}
+
+/* ---------- patients workspace ---------- */
+.pw{display:grid;grid-template-columns:320px minmax(0,1fr) 380px;height:calc(100dvh - var(--top-h));}
+.pw>section{min-height:0;overflow:auto}
+.plist{border-right:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;overflow:hidden!important}
+.plist .head{padding:16px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.plist .items{overflow:auto;flex:1}
+.pitem{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.pitem:hover{background:var(--surface-3)}
+.pitem.on{background:var(--brand-softer);box-shadow:inset 3px 0 0 var(--brand)}
+.pitem .grow{flex:1;min-width:0}
+.pitem b{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pitem small{color:var(--muted);font-size:12px}
+.pcenter{padding:20px clamp(16px,1.6vw,28px) 40px}
+.prail{border-left:1px solid var(--line);background:var(--surface);padding:18px}
+.phead{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.phead .meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12.5px;margin-top:4px}
+.phead .meta span{display:inline-flex;gap:5px;align-items:center}
+.phead .meta svg.i{width:14px;height:14px}
+.alerts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:18px 0 16px;overflow-x:auto}
+.tabs button{border:0;background:none;padding:10px 14px;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button.on{color:var(--brand);border-bottom-color:var(--brand)}
+.tabs button .badge{margin-left:6px;height:18px}
+.counters{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.counter{padding:10px 12px;border-radius:12px;background:var(--surface-3);border:1px solid var(--line)}
+.counter b{font-size:20px;display:block;font-weight:800}
+.counter span{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);font-weight:600}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:6px;vertical-align:-1px;border:1px solid var(--line-2)}
+.odo-wrap{overflow-x:auto;padding:6px 0}
+svg.odo{width:100%;min-width:720px;height:auto;display:block;user-select:none}
+svg.odo .tooth{cursor:pointer}
+svg.odo .tooth .sf{stroke:var(--line-2);stroke-width:1;fill:var(--unassessed);transition:fill .15s}
+svg.odo .tooth.assessed .sf{fill:var(--assessed)}
+svg.odo .tooth .sf.treated{fill:var(--treated)}
+svg.odo .tooth .sf.finding{fill:var(--amber-fill)}
+svg.odo .tooth .sf.planned{fill:var(--brand-soft)}
+svg.odo .tooth.missing .sf{fill:var(--surface-3);stroke-dasharray:2 2}
+svg.odo .tooth .frame{fill:none;stroke:transparent;stroke-width:2.5;rx:9}
+svg.odo .tooth:hover .frame{stroke:var(--line-2)}
+svg.odo .tooth.sel .frame{stroke:var(--brand);stroke-width:3}
+svg.odo .tooth .sf:hover{filter:brightness(.95)}
+svg.odo .tooth .sf.selsf{stroke:var(--brand);stroke-width:2.5}
+svg.odo text.n{font-size:12px;font-weight:700;fill:var(--muted);text-anchor:middle;font-family:"Plus Jakarta Sans",sans-serif}
+svg.odo .tooth.sel text.n{fill:var(--brand)}
+svg.odo text.mk{font-size:22px;font-weight:800;text-anchor:middle;pointer-events:none}
+svg.odo .midline{stroke:var(--line-2);stroke-dasharray:4 4}
+svg.odo text.q{font-size:10px;font-weight:800;letter-spacing:.1em;fill:var(--muted);text-transform:uppercase}
+.ov-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:16px}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;font-size:13px}
+.kv dt{color:var(--muted);font-weight:600}.kv dd{margin:0;font-weight:600}
+.imgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.imgs div{aspect-ratio:1;border-radius:12px;background:linear-gradient(135deg,#1e293b,#334155);display:grid;place-items:center;color:#cbd5e1;font-size:11px;font-weight:700;cursor:pointer;border:1px solid var(--line)}
+.timeline{position:relative;padding-left:18px}
+.timeline::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.tl{position:relative;padding:0 0 16px}
+.tl::before{content:"";position:absolute;left:-17px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2.5px solid var(--brand)}
+.tl.planned::before{border-color:var(--brand-2);background:var(--brand-soft)}
+.tl.finding::before{border-color:var(--amber-fill)}
+.tl.cancel::before{border-color:var(--line-2)}
+.tl b{font-size:13.5px}
+.tl .m{font-size:12px;color:var(--muted)}
+.pay{margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--surface-3);border:1px solid var(--line)}
+.pay .track{height:6px;border-radius:6px;background:var(--line);overflow:hidden;margin:6px 0}
+.pay .track i{display:block;height:100%;background:var(--green)}
+.pay.due .track i{background:var(--amber-fill)}
+.pay .nums{display:flex;gap:12px;font-size:12px;font-weight:700}
+.tooth-card{padding:14px;border-radius:14px;background:linear-gradient(160deg,var(--brand-softer),var(--surface));border:1px solid var(--line);margin-bottom:16px}
+.tooth-card h4{margin:0;font-size:17px}
+.surfpad{display:grid;grid-template-columns:repeat(3,38px);grid-template-rows:repeat(3,38px);gap:4px}
+.surfpad button{border:1px solid var(--line-2);background:var(--surface);border-radius:8px;font-weight:800;cursor:pointer;font-size:12px}
+.surfpad button.on{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.rail-title{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:4px 0 12px}
+.plist-back{display:none}
+
+/* ---------- schedule ---------- */
+.sched{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:start}
+.mini-cal{padding:14px}
+.mini-cal .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;font-size:12px}
+.mini-cal .grid .dow{color:var(--muted);font-weight:700;font-size:10.5px;padding:4px 0}
+.mini-cal .grid button{aspect-ratio:1;border:0;background:none;border-radius:10px;cursor:pointer;font-weight:600;position:relative;color:var(--ink-2)}
+.mini-cal .grid button:hover{background:var(--surface-3)}
+.mini-cal .grid button.out{color:var(--line-2)}
+.mini-cal .grid button.today{color:var(--brand);font-weight:800}
+.mini-cal .grid button.on{background:var(--brand);color:var(--brand-ink)}
+.mini-cal .grid button i{position:absolute;bottom:4px;left:50%;width:4px;height:4px;border-radius:50%;transform:translateX(-50%);background:var(--green)}
+.mini-cal .grid button i.full{background:var(--line-2)}
+.dayview{overflow:auto;max-height:calc(100dvh - var(--top-h) - 150px)}
+.dv{display:grid;min-width:640px}
+.dv .colh{position:sticky;top:0;z-index:3;background:var(--surface);padding:12px;border-bottom:1px solid var(--line);border-left:1px solid var(--line);display:flex;gap:10px;align-items:center}
+.dv .colh small{display:block;color:var(--muted);font-size:11.5px}
+.dv .gutter{position:relative;border-right:0}
+.dv .gutter span{position:absolute;right:8px;font-size:11px;color:var(--muted);font-weight:700;transform:translateY(-50%)}
+.dv .col{position:relative;border-left:1px solid var(--line);background-image:repeating-linear-gradient(to bottom,var(--line) 0,var(--line) 1px,transparent 1px,transparent var(--hh));}
+.dv .col .off{position:absolute;left:0;right:0;background:repeating-linear-gradient(135deg,var(--surface-3),var(--surface-3) 6px,transparent 6px,transparent 12px)}
+.ev{position:absolute;left:6px;right:6px;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:700;overflow:hidden;cursor:pointer;border:1px solid transparent;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.ev small{display:block;font-weight:500;opacity:.85}
+.ev.slot{background:transparent;border:1.5px dashed var(--line-2);color:var(--muted);box-shadow:none;font-weight:600;display:flex;align-items:center;gap:6px}
+.ev.slot:hover{border-color:var(--brand);color:var(--brand);background:var(--brand-softer)}
+.ev.sel{outline:3px solid var(--brand);outline-offset:1px}
+
+/* ---------- billing / generic split ---------- */
+.split{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:16px;align-items:start}
+.inv-lines td{padding:8px 0;border-bottom:1px dashed var(--line);font-size:13px}
+.total-row{display:flex;justify-content:space-between;font-size:13px;padding:4px 0}
+.total-row.big{font-size:16px;font-weight:800;padding-top:8px}
+
+/* ---------- team ---------- */
+.matrix td.c,.matrix th.c{text-align:center}
+.tick{width:22px;height:22px;border-radius:7px;display:inline-grid;place-items:center;background:var(--brand-softer);color:var(--brand)}
+.tick.no{background:var(--surface-3);color:var(--line-2)}
+.tick svg.i{width:14px;height:14px;stroke-width:2.6}
+
+/* ---------- help ---------- */
+.help{display:grid;grid-template-columns:400px minmax(0,1fr);gap:16px;align-items:start}
+.help .list{max-height:calc(100dvh - var(--top-h) - 220px);overflow:auto}
+.gitem{padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.gitem:hover{background:var(--surface-3)}
+.gitem.on{background:var(--brand-softer);box-shadow:inset 3px 0 0 var(--brand)}
+.gitem .tp{font-size:10.5px;font-weight:800;letter-spacing:.08em;color:var(--brand);text-transform:uppercase}
+.gitem b{display:block;font-size:13.5px}
+.gitem small{color:var(--muted);font-size:12px}
+.steps{list-style:none;padding:0;margin:16px 0;counter-reset:s;display:flex;flex-direction:column;gap:12px}
+.steps li{display:flex;gap:14px;counter-increment:s;font-size:14px;line-height:1.6}
+.steps li::before{content:counter(s);flex:none;width:30px;height:30px;border-radius:9px;background:var(--brand-softer);color:var(--brand);font-weight:800;display:grid;place-items:center}
+
+/* ---------- settings ---------- */
+.set-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.set-row:last-child{border-bottom:0}
+.set-row b{display:block;font-size:13.5px}.set-row small{color:var(--muted)}
+
+/* ---------- overlays ---------- */
+.scrim{position:fixed;inset:0;background:rgba(8,18,20,.45);backdrop-filter:blur(3px);z-index:50;display:none;align-items:flex-start;justify-content:center;padding:8vh 16px 16px}
+.scrim.show{display:flex}
+.modal{width:min(640px,100%);max-height:84vh;overflow:auto;background:var(--surface);border-radius:20px;box-shadow:var(--shadow-lg);border:1px solid var(--line)}
+.modal.wide{width:min(860px,100%)}
+.modal-h{display:flex;align-items:center;gap:10px;padding:18px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:1}
+.modal-h h3{margin:0;font-size:17px}
+.modal-b{padding:20px}
+.modal-f{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--surface)}
+.cmdk{width:min(640px,100%);background:var(--surface);border-radius:18px;box-shadow:var(--shadow-lg);border:1px solid var(--line);overflow:hidden}
+.cmdk input{width:100%;height:56px;border:0;border-bottom:1px solid var(--line);padding:0 18px;font-size:16px;outline:none;background:var(--surface)}
+.cmdk .res{max-height:50vh;overflow:auto;padding:6px}
+.cmdk .res div{display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:10px;cursor:pointer}
+.cmdk .res div.on,.cmdk .res div:hover{background:var(--brand-softer)}
+.cmdk .res h6{margin:8px 12px 4px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(30px);opacity:0;background:var(--ink);color:var(--surface);padding:12px 16px;border-radius:12px;font-weight:600;display:flex;gap:10px;align-items:center;z-index:60;transition:.25s;box-shadow:var(--shadow-lg);max-width:calc(100% - 32px)}
+.toast.show{opacity:1;transform:translateX(-50%)}
+.toast svg.i{color:var(--brand-2)}
+.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- sign-in ---------- */
+.signin{min-height:100dvh;display:grid;grid-template-columns:1.1fr 1fr;background:var(--surface)}
+.signin .hero{background:radial-gradient(1200px 600px at 10% 10%,#14B8A6 0,transparent 55%),radial-gradient(900px 600px at 90% 90%,#2563EB 0,transparent 55%),#0F766E;color:#fff;padding:56px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.signin .hero h1{font-size:clamp(30px,3.2vw,52px);line-height:1.08;letter-spacing:-.03em;margin:0 0 16px;max-width:14ch}
+.signin .hero p{opacity:.88;max-width:46ch;font-size:16px}
+.signin .feat{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-width:560px}
+.signin .feat div{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:14px;font-weight:600;font-size:13px}
+.signin .feat b{display:block;font-size:14px;margin-bottom:2px}
+.signin .form{display:flex;align-items:center;justify-content:center;padding:40px 24px}
+.signin .box{width:min(420px,100%)}
+.gbtn{width:100%;height:48px;border-radius:12px;border:1px solid var(--line-2);background:var(--surface);display:flex;align-items:center;justify-content:center;gap:12px;font-weight:700;cursor:pointer;font-size:15px}
+.gbtn:hover{background:var(--surface-3)}
+
+/* ---------- patient portal ---------- */
+.portal{max-width:1400px;margin:0 auto;padding:24px clamp(16px,2vw,32px)}
+.portal-top{display:flex;align-items:center;gap:12px;padding:12px clamp(16px,2vw,32px);background:var(--surface);border-bottom:1px solid var(--line)}
+.portal-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr);gap:16px}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:8px}
+.slots button{height:38px;border-radius:10px;border:1.5px dashed var(--line-2);background:var(--surface);font-weight:700;cursor:pointer}
+.slots button:hover,.slots button.on{border-style:solid;border-color:var(--brand);background:var(--brand-softer);color:var(--brand)}
+.slots button:disabled{opacity:.4;cursor:not-allowed;text-decoration:line-through}
+
+/* ---------- bottom nav (phones) ---------- */
+.bnav{display:none}
+
+/* ---------- responsive ---------- */
+@media (max-width:1599px){
+  .pw{grid-template-columns:300px minmax(0,1fr)}
+  .prail{grid-column:2;border-left:0;border-top:1px solid var(--line);overflow:visible!important;display:none}
+  .pw.rail-below .prail{display:block}
+  .pcenter .rail-inline{display:block}
+}
+@media (min-width:1600px){.pcenter .rail-inline{display:none}}
+@media (max-width:1279px){
+  :root{--nav-w:76px}
+  .brand b,.brand small,.nav h6,.nav a span.lbl,.side-foot .plan{display:none}
+  .brand{justify-content:center;padding:0}
+  .nav a{justify-content:center;padding:11px}
+  .nav a .badge{position:absolute;top:3px;right:6px;margin:0}
+  .dash{grid-template-columns:1fr}
+  .split{grid-template-columns:1fr}
+  .help{grid-template-columns:320px minmax(0,1fr)}
+  .me b,.me small{display:none}.me{padding:4px}
+}
+@media (max-width:1023px){
+  .pw{grid-template-columns:1fr;height:auto}
+  .pw .plist{display:none}
+  .pw.listmode .plist{display:flex;height:calc(100dvh - var(--top-h) - 64px)}
+  .pw.listmode .pcenter{display:none}
+  .prail{grid-column:1}
+  .plist-back{display:inline-flex}
+  .sched{grid-template-columns:1fr}
+  .sched .side-col{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .help{grid-template-columns:1fr}.help .list{max-height:340px}
+  .signin{grid-template-columns:1fr}.signin .hero{padding:32px 24px}.signin .feat{display:none}
+  .portal-grid{grid-template-columns:1fr}
+}
+@media (max-width:767px){
+  .app{grid-template-columns:1fr;grid-template-rows:56px minmax(0,1fr) 64px}
+  :root{--top-h:56px}
+  .side{display:none}
+  .app.drawer .side{display:flex;position:fixed;inset:0 auto 0 0;width:280px;z-index:40;box-shadow:var(--shadow-lg)}
+  .app.drawer .brand b,.app.drawer .brand small,.app.drawer .nav h6,.app.drawer .nav a span.lbl{display:block}
+  .app.drawer .nav a{justify-content:flex-start;padding:9px 12px}
+  .app.drawer .brand{justify-content:flex-start;padding:0 18px}
+  .menu-btn{display:grid}
+  .top{padding:0 12px;gap:8px}
+  .top .crumb small{display:none}
+  .search{max-width:none}.search button span.t,.search kbd{display:none}.search button{width:40px;padding:0;justify-content:center}
+  .search{flex:0 0 auto;margin-left:auto;margin-right:0}
+  .me{display:none}
+  .bnav{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface);border-top:1px solid var(--line);grid-column:1}
+  .bnav a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;font-weight:700;color:var(--muted);text-decoration:none}
+  .bnav a.on{color:var(--brand)}
+  .page{padding:16px}
+  .counters{grid-template-columns:repeat(2,1fr)}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .kpi .val{font-size:22px}.kpi svg.spark{display:none}
+  .kv{grid-template-columns:110px 1fr}
+  .pw.listmode .plist{height:calc(100dvh - 56px - 64px)}
+  .set-grid{grid-template-columns:1fr}
+  .hide-sm{display:none!important}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="scrim" id="scrim"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   Dental Care Web · design prototype (mock data, no backend)
+   Routes: #/signin #/home #/patients/<id> #/schedule #/billing
+           #/reports #/team #/settings #/help #/portal
+   ========================================================= */
+const TODAY = new Date(2026,10,4); // Wed 4 Nov 2026 (demo)
+const CUR = "৳";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const money = n => CUR + " " + Math.round(n).toLocaleString("en-IN");
+const pad = n => String(n).padStart(2,"0");
+const iso = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const addDays = (d,n) => { const x=new Date(d); x.setDate(x.getDate()+n); return x; };
+const fmtDate = s => { const d = typeof s==="string"? new Date(s+"T00:00") : s; return d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}); };
+const fmtDay = d => d.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+const hm = m => pad(Math.floor(m/60))+":"+pad(m%60);
+const initials = n => n.replace(/^Dr\.\s*/,"").split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+let seed = 7; const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
+const pick = a => a[Math.floor(rnd()*a.length)];
+
+/* ---------- icons ---------- */
+const P = {
+ home:'<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+ users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/>',
+ cal:'<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
+ receipt:'<path d="M5 3h14v18l-2.5-1.6L14 21l-2-1.6L10 21l-2.5-1.6L5 21z"/><path d="M9 8h6M9 12h6"/>',
+ chart:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+ team:'<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
+ cog:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+ help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.3-2.5 4"/><path d="M12 17.5h.01"/>',
+ sync:'<path d="M20 12a8 8 0 0 1-14.3 4.9M4 12A8 8 0 0 1 18.3 7.1"/><path d="M18.5 3v4.2h-4.2M5.5 21v-4.2h4.2"/>',
+ bell:'<path d="M6 9a6 6 0 1 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9"/><path d="M10 19a2 2 0 0 0 4 0"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ out:'<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3"/>',
+ tooth:'<path d="M7.5 3C4.6 3 4 6.6 5 10c.9 3 1 9 3 10s1.7-6 4-6 2 7 4 6 2.1-7 3-10c1-3.4.4-7-2.5-7-2 0-3 1.3-4.5 1.3S9.5 3 7.5 3z"/>',
+ chev:'<path d="m9 6 6 6-6 6"/>', chevl:'<path d="m15 6-6 6 6 6"/>',
+ x:'<path d="M18 6 6 18M6 6l12 12"/>', check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+ clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ phone:'<path d="M5 4h3.5l1.8 4.4-2.2 1.4a11 11 0 0 0 6.1 6.1l1.4-2.2L20 15.5V19a1.5 1.5 0 0 1-1.6 1.5A16.5 16.5 0 0 1 3.5 5.6 1.5 1.5 0 0 1 5 4z"/>',
+ alert:'<path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.5h.01"/>',
+ file:'<path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5M8.5 13h7M8.5 17h5"/>',
+ img:'<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
+ moon:'<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+ sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+ menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+ wallet:'<rect x="3" y="6" width="18" height="14" rx="2.5"/><path d="M3 10h18M16 15h2M7 6V4.5A1.5 1.5 0 0 1 8.5 3h9"/>',
+ spark:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+ download:'<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+ edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+ archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
+ clip:'<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>',
+ user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.4 4.2-6.5 8-6.5s7 2.1 8 6.5"/>',
+ lock:'<rect x="4.5" y="10" width="15" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+ share:'<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.4M8.2 13.2l7.6 4.4"/>',
+ cube:'<path d="M12 2.5 3.5 7v10l8.5 4.5 8.5-4.5V7z"/><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"/>',
+ filter:'<path d="M3 5h18l-7 8.5V20l-4-2v-4.5z"/>',
+ google:'',
+};
+const I = (n,cls="") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n]||""}</svg>`;
+const LOGO = `<svg class="logo" viewBox="0 0 108 108" aria-hidden="true"><rect width="108" height="108" rx="26" fill="#0F766E"/><path fill="#fff" d="M38,30 C30,30 29,40 32,49 C35,57 35,76 41,79 C46,82 46,61 54,61 C62,61 62,82 67,79 C73,76 73,57 76,49 C79,40 78,30 70,30 C64,29 60,34 54,34 C48,34 44,29 38,30 Z"/><path d="M39,38 C42,36 46,39 49,40" fill="none" stroke="#99F6E4" stroke-width="2.5" stroke-linecap="round"/><path d="M77,23 L79.2,29.8 L86,32 L79.2,34.2 L77,41 L74.8,34.2 L68,32 L74.8,29.8 Z" fill="#2563EB" stroke="#CCFBF1" stroke-width="0.7"/></svg>`;
+
+/* ---------- mock data ---------- */
+const CLINIC = {name:"Smile Point Dental", tz:"Asia/Dhaka", currency:"BDT", tax:0, buffer:5, reminderHours:24, booking:true, planLimit:1000};
+const STAFF = [
+ {id:"s1",name:"Dr. Arif Rahman",role:"Admin",email:"arif.rahman@gmail.com",phone:"01711-204455",active:true,owner:true,reg:"BMDC 4471"},
+ {id:"s2",name:"Dr. Nusrat Jahan",role:"Dentist",email:"nusrat.dds@gmail.com",phone:"01819-332211",active:true,reg:"BMDC 6120",spec:"General dentistry",color:"#0F766E"},
+ {id:"s3",name:"Dr. Tanvir Ahmed",role:"Dentist",email:"tanvir.endo@gmail.com",phone:"01712-998877",active:true,reg:"BMDC 5893",spec:"Endodontics",color:"#2563EB"},
+ {id:"s4",name:"Dr. Farzana Akter",role:"Dentist",email:"farzana.ortho@gmail.com",phone:"01911-441100",active:true,reg:"BMDC 7004",spec:"Orthodontics",color:"#7C3AED"},
+ {id:"s5",name:"Sumaiya Khatun",role:"Assistant",email:"sumaiya.k@gmail.com",phone:"01552-110022",active:true},
+ {id:"s6",name:"Rafiqul Islam",role:"Receptionist",email:"rafiq.front@gmail.com",phone:"01673-552200",active:true},
+ {id:"s7",name:"Kamal Hossain",role:"Cashier",email:"kamal.cash@gmail.com",phone:"01844-776655",active:true},
+ {id:"s8",name:"Mahmuda Parvin",role:"Auditor",email:"mahmuda.audit@gmail.com",phone:"01715-009988",active:false},
+];
+const DOCTORS = STAFF.filter(s=>s.role==="Dentist");
+const ACCESS = [
+ ["view","View charts & records"],["treat","Record & edit treatment"],["register","Register & edit patients"],
+ ["book","Book & change appointments"],["slots","Open & close appointment slots"],["billing","Invoices & payments"],
+ ["portal","Patient app logins"],["reports","Reports"],["settings","Clinic settings, team & roles"]];
+const ROLE_ACCESS = {
+ Admin:["view","treat","register","book","slots","billing","portal","reports","settings"],
+ Dentist:["view","treat","register","book","slots"],
+ Assistant:["view","register","book"],
+ Receptionist:["register","book","slots","portal"],
+ Cashier:["billing","reports"],
+ Auditor:["view","reports"]};
+STAFF.forEach(s=>s.access=[...ROLE_ACCESS[s.role]]);
+const SERVICES = [
+ ["Consultation",500],["Scaling & polishing",2500],["Composite filling",2000],["Root canal",5000],["Extraction",1500],
+ ["Surgical extraction",4000],["Crown (PFM)",8000],["Zirconia crown",15000],["Teeth whitening",12000],["Orthodontic braces",80000],["Dental X-ray (IOPA)",300],["Implant",60000]];
+const PROCS = SERVICES.map(s=>s[0]).filter(s=>!/Consult|X-ray/.test(s));
+const METHODS = ["Cash","bKash","Nagad","Card","Bank"];
+const ALERTS = ["Penicillin allergy","Diabetic","On blood thinners","Hypertension","Pregnant","Asthma","Latex allergy"];
+
+const NAMES = ["Rahim Uddin","Fatema Begum","Sajid Hossain","Nadia Islam","Karim Chowdhury","Ayesha Siddiqua","Mehedi Hasan","Tahmina Akter","Imran Kabir","Shirin Sultana","Arman Hossain","Lubna Rahman","Jahid Hasan","Ruma Akhter","Tariq Aziz","Sabina Yasmin","Faisal Mahmud","Rokeya Khanam"];
+const FDI_PERM = {UR:[18,17,16,15,14,13,12,11],UL:[21,22,23,24,25,26,27,28],LL:[31,32,33,34,35,36,37,38],LR:[48,47,46,45,44,43,42,41]};
+const ALL_PERM = [...FDI_PERM.UR,...FDI_PERM.UL,...FDI_PERM.LL,...FDI_PERM.LR];
+const isPosterior = n => (n%10)>=4;
+
+function makePatient(i,name){
+  const id = "P-"+(1001+i);
+  const sex = /a$|Begum|Akter|Islam$|Siddiqua|Sultana|Rahman$|Akhter|Yasmin|Khanam|Nadia|Fatema|Tahmina|Lubna|Ruma|Sabina|Rokeya|Shirin|Ayesha/.test(name) && !/Rahim|Karim|Imran|Arman|Mehedi|Sajid|Jahid|Tariq|Faisal/.test(name) ? "F":"M";
+  const age = name==="Arman Hossain"? 9 : 18+Math.floor(rnd()*52);
+  const dob = iso(new Date(2026-age, Math.floor(rnd()*12), 1+Math.floor(rnd()*27)));
+  const alerts = rnd()<.45? [pick(ALERTS)] : [];
+  if(i===0) alerts.splice(0,alerts.length,"Penicillin allergy","Diabetic");
+  const chart = {}; ALL_PERM.forEach(n=>{ if(rnd()<.8) chart[n]={a:1}; });
+  const treatments=[]; let tid=1;
+  const nT = i===0? 0 : 1+Math.floor(rnd()*4);
+  for(let k=0;k<nT;k++){
+    const tooth = pick(ALL_PERM); const proc = pick(PROCS.slice(0,7));
+    const st = pick(["Completed","Completed","Planned","In progress"]);
+    const fee = (SERVICES.find(s=>s[0]===proc)||[0,2000])[1];
+    const paid = st==="Planned"?0: Math.min(fee, Math.round(fee*pick([1,1,.4,.6])/100)*100);
+    const date = iso(addDays(TODAY,-Math.floor(rnd()*160)));
+    treatments.push({id:id+"-T"+(tid++),tooth,proc,status:st,doctor:pick(DOCTORS).name,date,surfaces:isPosterior(tooth)?["O"]:["F"],fee,payments:paid?[{amt:paid,method:pick(METHODS),date,note:"visit 1"}]:[],notes:""});
+  }
+  return {id,name,sex,age,dob,phone:"01"+(7+Math.floor(rnd()*3))+Math.floor(10+rnd()*89)+"-"+Math.floor(100000+rnd()*899999),
+    address:pick(["Mirpur 10, Dhaka","Kazipara, Mirpur","Dhanmondi 27, Dhaka","Uttara Sector 7","Mohammadpur, Dhaka","Banani, Dhaka","Shewrapara, Mirpur"]),
+    alerts,chart,treatments,lastVisit:iso(addDays(TODAY,-Math.floor(rnd()*90))),consent:rnd()<.7,
+    portal: rnd()<.5? name.split(" ")[0].toUpperCase().slice(0,6)+pad(i+1):null,
+    story:"",encounters:[],invoices:[],history:[],images:Math.floor(rnd()*4),archived:false};
+}
+const PATIENTS = NAMES.map((n,i)=>makePatient(i,n));
+// Rahim: rich demo record
+(function(){
+  const r = PATIENTS[0]; r.age=42; r.dob="1984-03-12"; r.phone="01711-482916"; r.address="Kazipara, Mirpur, Dhaka"; r.portal="RAHIM01"; r.consent=true; r.images=4;
+  r.story="Presented in Sept with intermittent pain lower left. Irreversible pulpitis 36, RCT in progress. Generalised mild gingivitis, scaling done. Plan: crown 36 after RCT, filling 25, review 17 caries.";
+  ALL_PERM.forEach(n=>r.chart[n]={a:1});
+  Object.assign(r.chart,{18:{missing:1},28:{missing:1},38:{a:1,finding:["O"]},48:{missing:1},
+    36:{a:1,treated:["O","M"],planned:["W"]},46:{a:1,treated:["O"]},26:{a:1,treated:["O","D"]},25:{a:1,planned:["D"]},
+    17:{a:1,finding:["O"]},11:{a:1,treated:["M"]},21:{a:1,treated:["M"]},45:{a:1,finding:["D"]},14:{a:1,treated:["W"]}});
+  const D=DOCTORS;
+  r.treatments=[
+   {id:"T1",tooth:36,proc:"Root canal",status:"In progress",doctor:D[1].name,date:"2026-10-20",surfaces:["W"],fee:5000,notes:"Visit 2 of 4. Working length 21mm MB, ML, D.",payments:[{amt:1000,method:"bKash",date:"2026-10-06",note:"visit 1 of 5"},{amt:1000,method:"Cash",date:"2026-10-20",note:"visit 2 of 5"}]},
+   {id:"T2",tooth:36,proc:"Zirconia crown",status:"Planned",doctor:D[1].name,date:"2026-11-24",surfaces:["W"],fee:15000,notes:"After RCT completion.",payments:[]},
+   {id:"T3",tooth:46,proc:"Composite filling",status:"Completed",doctor:D[0].name,date:"2026-09-14",surfaces:["O"],fee:2000,notes:"",payments:[{amt:2000,method:"Cash",date:"2026-09-14",note:""}]},
+   {id:"T4",tooth:26,proc:"Composite filling",status:"Completed",doctor:D[0].name,date:"2026-09-14",surfaces:["O","D"],fee:2500,notes:"",payments:[{amt:2500,method:"Card",date:"2026-09-14",note:""}]},
+   {id:"T5",tooth:25,proc:"Composite filling",status:"Planned",doctor:D[0].name,date:"2026-11-10",surfaces:["D"],fee:2000,notes:"",payments:[]},
+   {id:"T6",tooth:14,proc:"Crown (PFM)",status:"Completed",doctor:D[1].name,date:"2025-06-02",surfaces:["W"],fee:8000,notes:"",payments:[{amt:8000,method:"Bank",date:"2025-06-02",note:""}]},
+   {id:"T7",tooth:11,proc:"Composite filling",status:"Completed",doctor:D[0].name,date:"2026-02-11",surfaces:["M"],fee:2000,notes:"",payments:[{amt:2000,method:"Nagad",date:"2026-02-11",note:""}]},
+   {id:"T8",tooth:21,proc:"Composite filling",status:"Completed",doctor:D[0].name,date:"2026-02-11",surfaces:["M"],fee:2000,notes:"",payments:[{amt:1500,method:"Nagad",date:"2026-02-11",note:""}]},
+   {id:"T9",tooth:48,proc:"Surgical extraction",status:"Completed",doctor:D[1].name,date:"2024-12-01",surfaces:["W"],fee:4000,notes:"Impacted, uneventful healing.",payments:[{amt:4000,method:"Cash",date:"2024-12-01",note:""}]},
+  ];
+  r.encounters=[
+   {date:"2026-10-20",doctor:D[1].name,complaint:"Follow-up RCT 36",dx:"Irreversible pulpitis 36",plan:"Continue RCT, obturation next visit",status:"Finalized",amend:0},
+   {date:"2026-10-06",doctor:D[1].name,complaint:"Throbbing pain lower left, 4 days",dx:"Irreversible pulpitis 36; caries 17, 38",plan:"RCT 36 then crown; restore 25",status:"Finalized",amend:1},
+   {date:"2026-09-14",doctor:D[0].name,complaint:"Routine check-up",dx:"Caries 46 O, 26 OD; gingivitis",plan:"Restorations, scaling",status:"Finalized",amend:0},
+   {date:"2026-11-04",doctor:D[1].name,complaint:"RCT visit 3",dx:"",plan:"",status:"Draft",amend:0}];
+  r.history=[
+   ["2026-10-20 18:42",D[1].name,"Recorded payment ৳ 1,000 (Cash) for Root canal 36"],
+   ["2026-10-20 18:30",D[1].name,"Updated Root canal 36: status Planned → In progress"],
+   ["2026-10-07 10:12",D[1].name,"Amended encounter 6 Oct: diagnosis added caries 38"],
+   ["2026-10-06 19:05","Rafiqul Islam","Booked appointment 20 Oct 18:00 with Dr. Tanvir Ahmed"],
+   ["2026-10-06 18:50",D[1].name,"Chart: finding Caries on 17 O, 38 O"],
+   ["2026-09-14 12:20","Kamal Hossain","Issued invoice #INV-0412 ৳ 4,500"],
+   ["2026-09-14 11:55",D[0].name,"Completed Composite filling 46 O, 26 OD"],
+   ["2026-02-11 10:00","Rafiqul Islam","Created patient app login RAHIM01"]];
+})();
+// invoices from treatment fees + some service invoices
+let invNo=400;
+PATIENTS.forEach(p=>{
+  p.treatments.forEach(t=>{ if(t.status!=="Planned"&&t.fee){ p.invoices.push({no:"INV-0"+(invNo++),date:t.date,lines:[[t.proc+" · "+t.tooth,t.fee,1]],discount:0,tax:0,payments:t.payments.map(x=>({...x})),status:"Issued",tid:t.id}); }});
+  if(rnd()<.5) p.invoices.push({no:"INV-0"+(invNo++),date:iso(addDays(TODAY,-Math.floor(rnd()*30))),lines:[["Consultation",500,1],["Dental X-ray (IOPA)",300,2]],discount:0,tax:0,payments:[{amt:1100,method:pick(METHODS),date:iso(TODAY),note:""}],status:"Issued"});
+});
+const invTotal = v => v.lines.reduce((a,l)=>a+l[1]*l[2],0)-v.discount;
+const invPaid = v => v.payments.reduce((a,x)=>a+x.amt,0);
+const tPaid = t => t.payments.reduce((a,x)=>a+x.amt,0);
+const patientDue = p => p.invoices.filter(v=>v.status!=="Void").reduce((a,v)=>a+Math.max(0,invTotal(v)-invPaid(v)),0) + p.treatments.filter(t=>t.status!=="Planned"&&!p.invoices.some(v=>v.tid===t.id)).reduce((a,t)=>a+Math.max(0,t.fee-tPaid(t)),0);
+
+/* availability + appointments */
+const HOURS = {s2:[[540,780],[960,1200]], s3:[[600,840],[1020,1260]], s4:[[900,1200]]};
+const REASONS = ["Check-up","Scaling","Filling","RCT visit","Extraction","Braces adjustment","Crown fitting","Pain, lower left","Whitening","Follow-up","Consultation"];
+const APPTS = {};
+function apptsFor(date){
+  const k = iso(date); if(APPTS[k]) return APPTS[k];
+  const dow = date.getDay(); seed = 1000 + date.getDate()*31 + date.getMonth()*7;
+  const list=[];
+  if(dow===5){ APPTS[k]=list; return list; } // Friday closed
+  DOCTORS.forEach(d=>{
+    (HOURS[d.id]||[]).forEach(([s,e])=>{
+      for(let m=s;m<e;m+=30){
+        if(rnd()<.55){
+          const dur = rnd()<.25?60:30; if(m+dur>e) continue;
+          const p = PATIENTS[Math.floor(rnd()*PATIENTS.length)];
+          const past = date<TODAY || (iso(date)===iso(TODAY) && m+dur<=17*60+30);
+          let st = past? pick(["Completed","Completed","Completed","No show","Cancelled"]) : pick(["Scheduled","Confirmed","Confirmed","Scheduled"]);
+          if(iso(date)===iso(TODAY) && m<=17*60+30 && m+dur>17*60+30) st="In progress";
+          if(iso(date)===iso(TODAY) && m>17*60+30 && m<=18*60) st="Checked-in";
+          list.push({id:k+d.id+m,doc:d.id,start:m,dur,pid:p.id,reason:pick(REASONS),status:st,src:rnd()<.2?"Patient app":"Clinic"});
+          m += dur-30;
+        }
+      }
+    });
+  });
+  if(iso(date)===iso(TODAY)){ list.push({id:"req1",doc:"s3",start:20*60+30,dur:30,pid:PATIENTS[0].id,reason:"RCT visit 3",status:"Requested",src:"Patient app"}); const r=list.find(a=>a.pid===PATIENTS[0].id&&a.id!=="req1"); if(r) r.pid=PATIENTS[5].id; list.push({id:"rahim",doc:"s3",start:19*60,dur:60,pid:PATIENTS[0].id,reason:"RCT visit 3, tooth 36",status:"Confirmed",src:"Clinic"}); }
+  APPTS[k]=list; return list;
+}
+const NOW_MIN = 17*60+42; // demo "now": 17:42
+
+/* ---------- state ---------- */
+const S = { route:"home", pid:PATIENTS[0].id, tab:"overview", tooth:null, multi:[], surf:"W", numbering:"FDI", dentition:"Permanent",
+  pq:"", pfilter:"All", day:new Date(TODAY), calMonth:new Date(TODAY.getFullYear(),TODAY.getMonth(),1), schedView:"Day", selAppt:null,
+  invFilter:"All", selInv:null, period:"Month", selStaff:"s2", helpQ:"", helpTopic:"All topics", helpId:"start", pending:3, theme:null, listmode:false, railBelow:true };
+try{ const t=localStorage.getItem("dc-theme"); if(t){S.theme=t; document.documentElement.dataset.theme=t;} const n=localStorage.getItem("dc-num"); if(n) S.numbering=n; }catch(e){}
+const pat = id => PATIENTS.find(p=>p.id===id);
+const doc = id => STAFF.find(s=>s.id===id);
+
+/* ---------- tooth notation ---------- */
+function toothLabel(n){
+  const q=Math.floor(n/10), u=n%10;
+  if(S.numbering==="FDI") return String(n);
+  if(S.numbering==="Universal"){
+    if(q===1) return String(9-u); if(q===2) return String(8+u); if(q===3) return String(25-u); if(q===4) return String(24+u);
+    const L="ABCDEFGHIJKLMNOPQRST"; if(q===5) return L[5-u]; if(q===6) return L[4+u]; if(q===7) return L[10+(5-u)]; if(q===8) return L[14+u];
+  }
+  const qn={1:"UR",2:"UL",3:"LL",4:"LR",5:"UR",6:"UL",7:"LL",8:"LR"}[q]; return qn+(q>4?"ABCDE"[u-1]:u);
+}
+function toothName(n){
+  const q=Math.floor(n/10), u=n%10, prim=q>4;
+  const side={1:"Upper right",2:"Upper left",3:"Lower left",4:"Lower right",5:"Upper right",6:"Upper left",7:"Lower left",8:"Lower right"}[q];
+  const t = prim? ["","central incisor","lateral incisor","canine","first molar","second molar"][u] : ["","central incisor","lateral incisor","canine","first premolar","second premolar","first molar","second molar","third molar"][u];
+  return side+" "+(prim?"primary ":"")+t;
+}
+
+/* ---------- shell ---------- */
+const NAV = [
+ ["Clinic",[["home","Home","home"],["patients","Patients","users"],["schedule","Appointments","cal"],["billing","Billing","receipt"],["reports","Reports","chart"]]],
+ ["Administration",[["team","Team & roles","team"],["settings","Clinic settings","cog"]]],
+ ["Help",[["help","How to use","help"],["portal","Patient app preview","user"]]]];
+const TITLES = {home:["Home","Wednesday, 4 November 2026"],patients:["Patients","18 active records"],schedule:["Appointments","Calendar, slots and bookings"],billing:["Billing","Invoices, payments and receipts"],reports:["Reports","Practice performance"],team:["Team & roles","Staff, roles and access"],settings:["Clinic settings","Clinic, reminders, numbering, subscription"],help:["How to use","Step-by-step guides"]};
+
+function upcoming7(){ let n=0; for(let i=0;i<7;i++) n+=apptsFor(addDays(TODAY,i)).filter(a=>!["Cancelled","Completed","No show"].includes(a.status)).length; return n; }
+const UP7 = upcoming7();
+
+function shell(content){
+  const [t,sub] = TITLES[S.route]||["",""];
+  return `<div class="app" id="app">
+  <aside class="side">
+    <div class="brand">${LOGO}<div><b>Dental Care</b><small>${esc(CLINIC.name)}</small></div></div>
+    <nav class="nav" aria-label="Main">
+      ${NAV.map(([h,items])=>`<h6>${h}</h6>`+items.map(([r,l,ic])=>`<a href="#/${r==="patients"?"patients/"+S.pid:r}" class="${S.route===r?"on":""}" title="${l}">${I(ic)}<span class="lbl">${l}</span>${r==="schedule"?`<span class="badge count">${UP7}</span>`:""}</a>`).join("")).join("")}
+      <a href="#/signin" title="Sign out">${I("out")}<span class="lbl">Sign out</span></a>
+    </nav>
+    <div class="side-foot"><div class="plan">
+      <div class="between"><b class="small">Dental Care Pro</b><span class="badge teal">Active</span></div>
+      <div class="bar"><i style="width:74.2%"></i></div>
+      <div class="small muted num">742 of 1,000 patients · US$5/mo</div>
+    </div></div>
+  </aside>
+  <header class="top">
+    <button class="icon-btn menu-btn" onclick="document.getElementById('app').classList.toggle('drawer')" aria-label="Menu">${I("menu")}</button>
+    <div class="crumb">${t}<small>${sub}</small></div>
+    <div class="search"><button onclick="openCmd()" aria-label="Search">${I("search")}<span class="t">Search patients, phone, ID or jump to a page</span><kbd style="margin-left:auto">Ctrl K</kbd></button></div>
+    <div class="top-actions">
+      <button class="btn primary hide-sm" onclick="registerPatient()">${I("plus")}<span>Register patient</span></button>
+      <button class="icon-btn" id="syncBtn" onclick="doSync()" title="Sync now · ${S.pending} changes waiting" aria-label="Sync">${I("sync")}${S.pending?`<span class="dot">${S.pending}</span>`:""}</button>
+      <button class="icon-btn hide-sm" onclick="toggleTheme()" title="Theme" aria-label="Toggle theme">${I(isDark()?"sun":"moon")}</button>
+      <div class="me" title="Dr. Arif Rahman · Owner"><div class="avatar">AR</div><div><b>Dr. Arif Rahman</b><small>Owner · Admin</small></div></div>
+    </div>
+  </header>
+  <main class="main" id="main">${content}</main>
+  <nav class="bnav" aria-label="Bottom">
+    ${[["home","Home","home"],["patients","Patients","users"],["schedule","Schedule","cal"],["reports","Reports","chart"],["settings","Settings","cog"]].map(([r,l,ic])=>`<a href="#/${r==="patients"?"patients/"+S.pid:r}" class="${S.route===r?"on":""}">${I(ic)}${l}</a>`).join("")}
+  </nav></div>`;
+}
+const isDark = () => S.theme? S.theme==="dark" : matchMedia("(prefers-color-scheme:dark)").matches;
+function toggleTheme(){ S.theme = isDark()?"light":"dark"; document.documentElement.dataset.theme=S.theme; try{localStorage.setItem("dc-theme",S.theme)}catch(e){} render(); }
+
+/* ---------- HOME ---------- */
+function spark(vals,color){ const mx=Math.max(...vals),mn=Math.min(...vals); const pts=vals.map((v,i)=>`${(i/(vals.length-1)*88+1).toFixed(1)},${(32-(v-mn)/((mx-mn)||1)*28).toFixed(1)}`).join(" "); return `<svg class="spark" viewBox="0 0 90 34"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`; }
+function pageHome(){
+  const today = apptsFor(TODAY);
+  const active = today.filter(a=>a.status!=="Cancelled");
+  const received = PATIENTS.flatMap(p=>[...p.invoices.flatMap(v=>v.payments)]).filter(x=>x.date===iso(TODAY)).reduce((a,x)=>a+x.amt,0)+18500;
+  const due = PATIENTS.reduce((a,p)=>a+patientDue(p),0);
+  const openPlans = PATIENTS.reduce((a,p)=>a+p.treatments.filter(t=>!["Completed","Declined","Cancelled"].includes(t.status)).length,0);
+  const requested = today.filter(a=>a.status==="Requested");
+  const k = (lbl,val,ic,col,soft,delta,sv)=>`<div class="card kpi"><div class="lbl"><span class="ico" style="background:${soft};color:${col}">${I(ic)}</span>${lbl}</div><div class="val num">${val}</div><div class="delta" style="color:${col}">${delta}</div>${spark(sv,col)}</div>`;
+  const S0 = 9*60, S1 = 21*60+30, W = S1-S0;
+  const pct = m => ((m-S0)/W*100).toFixed(2)+"%";
+  const lanes = DOCTORS.map(d=>{
+    const ap = today.filter(a=>a.doc===d.id);
+    const open = []; (HOURS[d.id]||[]).forEach(([s,e])=>{ for(let m=s;m<e;m+=30){ if(!ap.some(a=>m>=a.start&&m<a.start+a.dur)) open.push(m);} });
+    return `<div class="lane"><div class="who"><div class="avatar" style="background:${d.color}">${initials(d.name)}</div><div>${esc(d.name.replace("Dr. ",""))}<small>${ap.filter(a=>a.status!=="Cancelled").length} visits · ${open.length} open</small></div></div>
+      <div class="track">${open.map(m=>`<div class="blk open" style="left:${pct(m)};width:calc(${(30/W*100).toFixed(2)}% - 3px)" onclick="bookAppt('${d.id}',${m})" title="Open slot ${hm(m)}">+</div>`).join("")}
+      ${ap.map(a=>`<div class="blk st-${a.status.replace(" ","-")}" style="left:${pct(a.start)};width:calc(${(a.dur/W*100).toFixed(2)}% - 3px)" title="${hm(a.start)} ${esc(pat(a.pid).name)} · ${a.reason} · ${a.status}" onclick="go('patients/${a.pid}')">${esc(pat(a.pid).name.split(" ")[0])}<small>${hm(a.start)}</small></div>`).join("")}
+      </div></div>`;}).join("");
+  const hours=[]; for(let h=9;h<=21;h++) hours.push(`<span style="left:${pct(h*60)}">${pad(h)}:00</span>`);
+  const days=[...Array(14)].map((_,i)=>{const d=addDays(TODAY,i-13); seed=d.getDate()*13; return {d,v:d.getDay()===5?0:18000+Math.round(rnd()*42000)};});
+  const mx=Math.max(...days.map(x=>x.v));
+  const nextUp = today.filter(a=>a.start>=NOW_MIN-30 && !["Cancelled","Completed","No show"].includes(a.status)).sort((a,b)=>a.start-b.start).filter((a,i,arr)=>arr.findIndex(b=>b.pid===a.pid)===i).slice(0,6);
+  return `<div class="page">
+  <div class="page-head"><div><p class="muted small" style="margin:0 0 2px;font-weight:600">Good evening, Dr. Arif</p><h1 class="h1">Here is ${esc(CLINIC.name)} today</h1></div>
+    <div class="r"><button class="btn" onclick="go('schedule')">${I("cal")}Open schedule</button><button class="btn primary" onclick="bookAppt()">${I("plus")}Book appointment</button></div></div>
+  <div class="kpis">
+    ${k("Today's appointments",active.length,"cal","var(--brand)","var(--brand-softer)",`${active.filter(a=>a.status==="Completed").length} completed · ${requested.length} requested`,[8,11,9,12,10,13,active.length])}
+    ${k("Received today",money(received),"wallet","var(--green)","var(--green-soft)","+12% vs last Wed",[20,26,18,31,24,29,33])}
+    ${k("Outstanding balance",money(due),"receipt","var(--amber)","var(--amber-soft)",`${PATIENTS.filter(p=>patientDue(p)>0).length} patients with dues`,[30,28,33,29,31,27,26])}
+    ${k("Open treatment plans",openPlans,"clip","var(--violet)","var(--violet-soft)","Planned + in progress",[14,15,13,16,17,15,openPlans])}
+    ${k("Active patients","742","users","var(--accent)","var(--accent-soft)","+23 this month",[690,700,708,715,724,733,742])}
+  </div>
+  <div class="dash">
+    <div class="card wide span2-sm">
+      <div class="card-h"><h3>Today at a glance</h3><span class="sub">Doctors' day, open slots are dashed (click to book)</span><div class="r"><span class="legend hide-sm"><span><i style="background:var(--accent-soft)"></i>Confirmed</span><span><i style="background:var(--violet-soft)"></i>Checked in</span><span><i style="background:var(--amber-soft)"></i>In progress</span><span><i style="background:var(--green-soft)"></i>Completed</span></span></div></div>
+      <div class="card-b lanes"><div class="lanes-inner">
+        <div class="lane-head"><div></div><div class="hours">${hours.join("")}</div></div>
+        <div style="position:relative">${lanes}<div style="position:absolute;left:150px;right:0;top:0;bottom:0;pointer-events:none"><div class="now-line" style="left:${pct(NOW_MIN)}"></div></div></div>
+      </div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Needs attention</h3><span class="badge red">${requested.length+3}</span></div>
+      <div class="card-b">
+        ${requested.map(a=>`<div class="list-item"><span class="kpi ico" style="padding:0;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--amber-soft);color:var(--amber)">${I("phone")}</span><div class="grow"><b>Patient app booking needs a decision</b><small>${esc(pat(a.pid).name)} asked for ${hm(a.start)} with ${esc(doc(a.doc).name)}; that slot was taken</small></div><button class="btn sm" onclick="go('schedule')">Review</button></div>`).join("")}
+        <div class="list-item"><span style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--red-soft);color:var(--red)">${I("alert")}</span><div class="grow"><b>Sync conflict on Nadia Islam</b><small>Edited on another device. Your draft is retained.</small></div><button class="btn sm" onclick="go('patients/P-1004')">Resolve</button></div>
+        <div class="list-item"><span style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--violet-soft);color:var(--violet)">${I("file")}</span><div class="grow"><b>1 encounter draft not finalized</b><small>Rahim Uddin · RCT visit 3 · Dr. Tanvir Ahmed</small></div><button class="btn sm" onclick="S.tab='encounters';go('patients/P-1001')">Open</button></div>
+        <div class="list-item"><span style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--brand-softer);color:var(--brand)">${I("users")}</span><div class="grow"><b>Plan is 74% full</b><small>742 of 1,000 patients. Upgrade or archive inactive patients.</small></div><button class="btn sm" onclick="go('settings')">View</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Up next</h3><span class="sub">from ${hm(NOW_MIN)}</span><div class="r"><button class="btn ghost sm" onclick="go('schedule')">All ${I("chev")}</button></div></div>
+      <div class="card-b">${nextUp.map(a=>{const p=pat(a.pid);return `<div class="list-item" style="cursor:pointer" onclick="go('patients/${p.id}')"><div class="mono" style="width:48px;font-weight:600">${hm(a.start)}</div><div class="avatar" style="background:${doc(a.doc).color}">${initials(p.name)}</div><div class="grow"><b>${esc(p.name)}</b><small>${esc(a.reason)} · ${esc(doc(a.doc).name)}</small></div><span class="badge st-${a.status.replace(" ","-")}">${a.status}</span></div>`;}).join("")||`<div class="empty">No more visits today</div>`}</div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Payments received</h3><span class="sub">last 14 days</span><div class="r"><span class="badge green">${money(days.reduce((a,x)=>a+x.v,0))}</span></div></div>
+      <div class="card-b"><div class="bars">${days.map((x,i)=>`<div class="b" title="${fmtDate(x.d)}: ${money(x.v)}"><i class="${i===13?"today":""}" style="height:${(x.v/mx*100).toFixed(1)}%"></i><span>${x.d.getDate()}</span></div>`).join("")}</div><p class="small muted" style="margin:8px 0 0">Fridays closed. Based on payments received, not invoices issued.</p></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Quick actions</h3></div>
+      <div class="card-b"><div class="qa">
+        <button onclick="registerPatient()"><span class="ico" style="background:#0F766E">${I("plus")}</span>Register patient</button>
+        <button onclick="bookAppt()"><span class="ico" style="background:#2563EB">${I("cal")}</span>Book appointment</button>
+        <button onclick="openSlots()"><span class="ico" style="background:#0891B2">${I("clock")}</span>Open slots</button>
+        <button onclick="openCmd()"><span class="ico" style="background:#7C3AED">${I("search")}</span>Find patient</button>
+        <button onclick="go('billing')"><span class="ico" style="background:#B45309">${I("receipt")}</span>Receive payment</button>
+        <button onclick="doSync()"><span class="ico" style="background:#334155">${I("sync")}</span>Sync now</button>
+      </div></div>
+    </div>
+  </div></div>`;
+}
+
+/* ---------- ODONTOGRAM ---------- */
+function toothCounts(p){ let t=0,pl=0,f=0,m=0; Object.values(p.chart).forEach(c=>{ if(c.missing) m++; if(c.treated) t++; if(c.planned) pl++; if(c.finding) f++; }); return {t,pl,f,m}; }
+function surfClass(c,s){ if(!c) return ""; const has = a => a && (a.includes(s)||a.includes("W")); if(has(c.finding)) return "finding"; if(has(c.treated)) return "treated"; if(has(c.planned)) return "planned"; return ""; }
+function toothG(n,x,y,c,ro){
+  const q = Math.floor(n/10)%4||4, upper = [1,2,5,6].includes(Math.floor(n/10)), rightSide=[1,4,5,8].includes(Math.floor(n/10));
+  const sz=44, i=13; // outer/inner offsets
+  const L=x, T=y, R=x+sz, B=y+sz, il=x+i, it=y+i, ir=x+sz-i, ib=y+sz-i;
+  const top = upper?"F":"L", bot = upper?"L":"F", left = rightSide?"D":"M", right = rightSide?"M":"D";
+  const center = isPosterior(n)&&n%10<6||n%10>=4 ? "O":"I";
+  const polys = [[top,`${L},${T} ${R},${T} ${ir},${it} ${il},${it}`],[right,`${R},${T} ${R},${B} ${ir},${ib} ${ir},${it}`],[bot,`${L},${B} ${R},${B} ${ir},${ib} ${il},${ib}`],[left,`${L},${T} ${il},${it} ${il},${ib} ${L},${B}`]];
+  const sel = S.tooth===n || S.multi.includes(n);
+  const cls = ["tooth",c&&c.a?"assessed":"",c&&c.missing?"missing":"",sel?"sel":""].join(" ");
+  const onc = ro?`onclick="selTooth(${n},event)"`:`onclick="selTooth(${n},event)"`;
+  let mk=""; if(c&&c.missing) mk=`<text class="mk" x="${x+sz/2}" y="${y+sz/2+8}" fill="var(--missing)">×</text>`; else if(c&&c.planned) mk=`<text class="mk" x="${x+sz/2}" y="${y+sz/2+8}" fill="var(--brand)" style="font-size:18px">+</text>`;
+  const sfSel = s => sel && S.tooth===n && S.surf===s ? " selsf":"";
+  return `<g class="${cls}" ${onc} data-n="${n}"><title>${toothLabel(n)} · ${toothName(n)}</title>
+    <rect class="frame" x="${L-4}" y="${T-4}" width="${sz+8}" height="${sz+8}" rx="9"/>
+    ${polys.map(([s,pts])=>`<polygon class="sf ${c&&!c.missing?surfClass(c,s):""}${sfSel(s)}" points="${pts}"/>`).join("")}
+    <rect class="sf ${c&&!c.missing?surfClass(c,center==="I"?"I":"O")||surfClass(c,"O"):""}${sfSel(center)}" x="${il}" y="${it}" width="${ir-il}" height="${ib-it}" rx="2"/>
+    ${mk}
+    <text class="n" x="${x+sz/2}" y="${upper? T-10 : B+20}">${toothLabel(n)}</text></g>`;
+}
+function odontogram(p,ro=false){
+  const prim = S.dentition==="Primary", mixed = S.dentition==="Mixed";
+  const rowsP = [[FDI_PERM.UR,FDI_PERM.UL],[FDI_PERM.LR,[...FDI_PERM.LL]]];
+  const rowsD = [[[55,54,53,52,51],[61,62,63,64,65]],[[85,84,83,82,81],[71,72,73,74,75]]];
+  const step=54, gap=26, w=16*step+gap+20;
+  let out="", y=46, h=0;
+  const drawRow=(pair,yy,offset)=>{ let x=10+offset; pair[0].forEach(n=>{ out+=toothG(n,x,yy,p.chart[n],ro); x+=step;}); x+=gap; pair[1].forEach(n=>{ out+=toothG(n,x,yy,p.chart[n],ro); x+=step;}); };
+  const sets = prim? [[rowsD,3*step]] : mixed? [[rowsP,0],[rowsD,3*step]] : [[rowsP,0]];
+  const blocks=[];
+  sets.forEach(([rows,off],si)=>{ blocks.push([rows[0],off,true]); });
+  sets.slice().reverse().forEach(([rows,off])=>{ blocks.push([rows[1],off,false]); });
+  blocks.forEach(([pair,off,up],bi)=>{ if(!up && bi===Math.ceil(blocks.length/2)) y+=22; drawRow(pair,y,off); y+= 44+ (up?34:34); });
+  h=y+6;
+  const mid = 10+8*step+gap/2-5;
+  out = `<line class="midline" x1="${mid}" y1="6" x2="${mid}" y2="${h-6}"/>
+         <line class="midline" x1="6" y1="${h/2+2}" x2="${w-6}" y2="${h/2+2}"/>
+         <text class="q" x="10" y="11">Patient right</text><text class="q" x="${w-10}" y="11" text-anchor="end">Patient left</text>` + out;
+  return `<div class="odo-wrap"><svg class="odo" viewBox="0 0 ${w} ${h}" role="img" aria-label="Dental chart">${out}</svg></div>`;
+}
+const LEGEND = `<div class="legend"><span><i style="background:var(--unassessed)"></i>Not assessed</span><span><i style="background:var(--assessed)"></i>Assessed</span><span><i style="background:var(--treated)"></i>Treated</span><span><i style="background:var(--brand-soft)"></i>Planned +</span><span><i style="background:var(--amber-fill)"></i>Finding</span><span><i style="background:var(--surface-3);border-style:dashed"></i>Missing ×</span></div>`;
+
+function selTooth(n,e){
+  if(e && (e.ctrlKey||e.metaKey||e.shiftKey)){ const set=new Set(S.multi.length?S.multi:(S.tooth?[S.tooth]:[])); set.has(n)?set.delete(n):set.add(n); S.multi=[...set]; S.tooth=null; }
+  else { S.multi=[]; S.tooth = S.tooth===n? null : n; S.surf="W"; }
+  // capture surface click
+  if(e && e.target && e.target.classList.contains("sf") && S.tooth===n){ const pts=[...e.target.parentNode.querySelectorAll(".sf")]; const idx=pts.indexOf(e.target); const n10=Math.floor(n/10); const upper=[1,2,5,6].includes(n10), rs=[1,4,5,8].includes(n10); const map=[upper?"F":"L",rs?"M":"D",upper?"L":"F",rs?"D":"M",isPosterior(n)?"O":"I"]; S.surf=map[idx]||"W"; }
+  renderMain();
+}
+
+/* ---------- PATIENTS ---------- */
+function statusBadge(s){ return {Completed:"green","In progress":"amber",Planned:"teal",Accepted:"blue",Cancelled:"red",Deferred:"",Declined:"red",Referred:"violet"}[s]??""; }
+function payBlock(p,t){
+  if(!t.fee) return `<button class="btn sm" style="margin-top:8px" onclick="payDialog('${p.id}','${t.id}')">${I("wallet")}Set fee / add payment</button>`;
+  const paid=tPaid(t), due=Math.max(0,t.fee-paid), pc=Math.min(100,paid/t.fee*100);
+  return `<div class="pay ${due?"due":""}"><div class="nums num"><span>Fee ${money(t.fee)}</span><span style="color:var(--green)">Paid ${money(paid)}</span><span style="color:${due?"var(--amber)":"var(--green)"}">${due?"Due "+money(due):"Fully paid"}</span></div>
+   <div class="track"><i style="width:${pc}%"></i></div>
+   ${t.payments.length?`<div class="small muted">${t.payments.map(x=>`${fmtDate(x.date)} · ${money(x.amt)} · ${x.method}${x.note?" · "+esc(x.note):""}`).join("<br>")}</div>`:""}
+   ${t.status!=="Planned"?`<div class="row" style="margin-top:8px"><button class="btn sm" onclick="payDialog('${p.id}','${t.id}')">${I("plus")}Add payment</button><button class="btn sm ghost" onclick="toast('Receipt ready to share')">${I("share")}Receipt</button></div>`:""}</div>`;
+}
+function treatmentTimeline(p,tooth){
+  const list = p.treatments.filter(t=>tooth? t.tooth===tooth : true).sort((a,b)=>b.date.localeCompare(a.date));
+  if(!list.length) return `<div class="empty small">No treatment recorded${tooth?" for this tooth":""} yet.</div>`;
+  return `<div class="timeline">${list.map(t=>`<div class="tl ${t.status==="Planned"?"planned":t.status==="Cancelled"?"cancel":""}">
+    <div class="between"><b>${esc(t.proc)} <span class="muted" style="font-weight:600">· ${toothLabel(t.tooth)}${t.surfaces&&t.surfaces[0]!=="W"?" "+t.surfaces.join(""):""}</span></b><span class="badge ${statusBadge(t.status)}">${t.status}</span></div>
+    <div class="m">${fmtDate(t.date)} · ${esc(t.doctor)}</div>
+    ${t.notes?`<div class="small" style="margin-top:4px">${esc(t.notes)}</div>`:""}
+    ${payBlock(p,t)}
+    <div class="row" style="margin-top:6px"><button class="btn ghost sm" onclick="recordTreatment([${t.tooth}],'${t.id}')">${I("edit")}Edit</button></div>
+  </div>`).join("")}</div>`;
+}
+function railContent(p){
+  const n=S.tooth, multi=S.multi;
+  let top="";
+  if(multi.length){
+    top=`<div class="tooth-card"><div class="rail-title" style="margin:0 0 4px">Multiple teeth</div><h4>${multi.map(toothLabel).join(", ")}</h4><p class="small muted" style="margin:6px 0 10px">Ctrl+click teeth to add or remove.</p><div class="row"><button class="btn primary sm" onclick="recordTreatment(S.multi)">${I("plus")}Record treatment (${multi.length})</button><button class="btn sm" onclick="S.multi=[];renderMain()">Clear</button></div></div>`;
+  } else if(n){
+    const c=p.chart[n]||{};
+    const st=[c.missing?"<span class='badge'>Missing</span>":"",c.treated?"<span class='badge blue'>Treated "+c.treated.join("")+"</span>":"",c.planned?"<span class='badge teal'>Planned</span>":"",c.finding?"<span class='badge amber'>Finding "+c.finding.join("")+"</span>":"",!c.a&&!c.missing?"<span class='badge'>Not assessed</span>":""].join("");
+    top=`<div class="tooth-card"><div class="between"><div><div class="rail-title" style="margin:0 0 2px">Selected tooth</div><h4>${toothLabel(n)} <span class="muted" style="font-weight:600;font-size:13px">${S.numbering!=="FDI"?"(FDI "+n+")":""}</span></h4><div class="small muted">${toothName(n)}</div></div>
+      <div class="surfpad" aria-label="Surface">${["","F","","M","O","D","","L",""].map((s,i)=>{ const lab=s==="O"&&!isPosterior(n)?"I":s; return s?`<button class="${S.surf===lab?"on":""}" onclick="S.surf='${lab}';renderMain()">${lab}</button>`:(i===0?`<button class="${S.surf==="W"?"on":""}" title="Whole tooth" onclick="S.surf='W';renderMain()">W</button>`:"<span></span>");}).join("")}</div></div>
+      <div class="alerts" style="margin:10px 0">${st}</div>
+      <div class="row" style="flex-wrap:wrap"><button class="btn primary sm" onclick="recordTreatment([${n}])">${I("plus")}Record treatment</button><button class="btn sm" onclick="chartStatus(${n})">${I("clip")}Chart status</button></div></div>`;
+  }
+  return `${top}<div class="between"><div class="rail-title">Treatment history ${n?"· "+toothLabel(n):""}</div>${n?`<button class="btn ghost sm" onclick="S.tooth=null;renderMain()">All teeth</button>`:""}</div>${treatmentTimeline(p,n)}`;
+}
+function pageOverview(p){
+  const c=toothCounts(p);
+  const ap=[...apptsFor(TODAY),...apptsFor(addDays(TODAY,1)),...apptsFor(addDays(TODAY,6))].filter(a=>a.pid===p.id);
+  return `<div class="card"><div class="card-h"><h3>Dental chart</h3><span class="sub hide-sm">Click a tooth; Ctrl+click to select several. 3D model opens in the Android app.</span>
+    <div class="r"><div class="seg">${["Permanent","Primary","Mixed"].map(d=>`<button class="${S.dentition===d?"on":""}" onclick="S.dentition='${d}';renderMain()">${d}</button>`).join("")}</div></div></div>
+    <div class="card-b">${odontogram(p)}
+    <div class="between" style="flex-wrap:wrap;margin-top:6px">${LEGEND}<span class="small muted">Numbering: <b>${S.numbering}</b> · stored as FDI</span></div>
+    <div class="counters" style="margin-top:14px">
+      <div class="counter"><b class="num" style="color:var(--accent)">${c.t}</b><span>Treated</span></div>
+      <div class="counter"><b class="num" style="color:var(--brand)">${c.pl}</b><span>Planned</span></div>
+      <div class="counter"><b class="num" style="color:var(--amber)">${c.f}</b><span>Findings</span></div>
+      <div class="counter"><b class="num" style="color:var(--missing)">${c.m}</b><span>Missing</span></div></div></div></div>
+  <div class="card rail-inline" style="margin-top:16px"><div class="card-b">${railContent(p)}</div></div>
+  <div class="ov-grid">
+    <div class="card"><div class="card-h"><h3>Profile</h3><div class="r"><button class="btn sm" onclick="registerPatient('${p.id}')">${I("edit")}Edit profile</button></div></div><div class="card-b"><dl class="kv">
+      <dt>Patient ID</dt><dd class="mono">${p.id}</dd><dt>Date of birth</dt><dd>${fmtDate(p.dob)} (${p.age} y)</dd><dt>Sex</dt><dd>${p.sex==="F"?"Female":"Male"}</dd><dt>Phone</dt><dd class="num">${p.phone}</dd><dt>Address</dt><dd>${esc(p.address)}</dd><dt>Last visit</dt><dd>${fmtDate(p.lastVisit)}</dd></dl></div></div>
+    <div class="card"><div class="card-h"><h3>Clinical story</h3><div class="r"><button class="btn sm" onclick="toast('Clinical story editor opened')">Update</button></div></div><div class="card-b"><p style="margin:0;color:var(--ink-2)">${esc(p.story||"No clinical narrative yet. Use Update to write the patient's story in plain words.")}</p></div></div>
+    <div class="card"><div class="card-h"><h3>Appointments</h3><div class="r"><button class="btn sm" onclick="bookAppt(null,null,'${p.id}')">${I("plus")}Book</button></div></div><div class="card-b">
+      ${ap.length?ap.map(a=>`<div class="list-item"><div class="mono" style="width:48px">${hm(a.start)}</div><div class="grow"><b>${esc(a.reason)}</b><small>${esc(doc(a.doc).name)}</small></div><span class="badge st-${a.status.replace(" ","-")}">${a.status}</span></div>`).join(""):`<p class="muted small" style="margin:0">No upcoming appointments.</p>`}
+      <hr class="sep"><div class="set-row" style="padding:0"><div><b>Appointment reminders</b><small>Patient consents to reminders</small></div><label class="switch"><input type="checkbox" ${p.consent?"checked":""}><i></i></label></div></div></div>
+    <div class="card"><div class="card-h"><h3>Patient app access</h3></div><div class="card-b">${p.portal?`<div class="between"><div><div class="small muted">Patient app ID</div><div class="mono" style="font-size:18px;font-weight:600">${p.portal}</div></div><span class="badge green">Active</span></div><div class="row" style="margin-top:12px"><button class="btn sm" onclick="toast('New password generated, shown once')">Change ID / password</button><button class="btn sm danger">Turn off</button></div>`:`<p class="muted small" style="margin:0 0 10px">This patient has no app login yet.</p><button class="btn sm primary" onclick="toast('Login created: '+'${p.name.split(" ")[0].toUpperCase()}01')">Create patient login</button>`}</div></div>
+    <div class="card"><div class="card-h"><h3>Clinical images</h3><div class="r"><button class="btn sm" onclick="toast('Compressed losslessly to 186 KB (WebP)')">${I("img")}Attach image</button></div></div><div class="card-b"><div class="imgs">${[...Array(p.images)].map((_,i)=>`<div>${["IOPA 36","OPG","Intraoral L","IOPA 25"][i]}</div>`).join("")||`<p class="muted small" style="margin:0">No images attached.</p>`}</div></div></div>
+    <div class="card"><div class="card-h"><h3>Records</h3></div><div class="card-b"><div class="row" style="flex-wrap:wrap"><button class="btn sm">${I("download")}Care summary PDF</button><button class="btn sm">${I("download")}Export JSON</button><button class="btn sm danger" onclick="toast('Archive needs a reason; record is kept')">${I("archive")}Archive patient</button></div></div></div>
+  </div>`;
+}
+function pageChartTab(p){
+  const n=S.tooth||36, c=p.chart[n]||{};
+  return `<div class="card"><div class="card-h"><h3>Assess teeth</h3><span class="sub">Assessment, presence, findings and restorations are recorded separately</span><div class="r"><div class="seg">${["Permanent","Primary","Mixed"].map(d=>`<button class="${S.dentition===d?"on":""}" onclick="S.dentition='${d}';renderMain()">${d}</button>`).join("")}</div></div></div>
+  <div class="card-b">${odontogram(p)}${LEGEND}</div></div>
+  <div class="ov-grid">
+   <div class="card"><div class="card-h"><h3>Chart status · ${toothLabel(n)}</h3><span class="sub">${toothName(n)}</span></div><div class="card-b"><div class="grid-form">
+    <div class="field"><label>Assessment</label><select class="input"><option ${c.a?"selected":""}>Assessed</option><option ${!c.a?"selected":""}>Not assessed</option></select></div>
+    <div class="field"><label>Presence</label><select class="input"><option>Present</option><option ${c.missing?"selected":""}>Missing</option><option>Extracted</option><option>Unerupted</option><option>Impacted</option></select></div>
+    <div class="field"><label>Replacement</label><select class="input"><option>None</option><option>Implant</option><option>Bridge pontic</option><option>Denture</option></select></div>
+    <div class="field"><label>Surface</label><div class="seg">${["W","M","D","F","L",isPosterior(n)?"O":"I"].map(s=>`<button class="${S.surf===s?"on":""}" onclick="S.surf='${s}';renderMain()">${s}</button>`).join("")}</div></div>
+   </div><div class="row" style="margin-top:14px;flex-wrap:wrap"><button class="btn">Add finding</button><button class="btn">Add restoration</button><button class="btn ghost">Resolve findings at selected scope</button></div>
+   <div class="grid-form" style="margin-top:14px"><div class="field"><label>Planned procedure (optional)</label><input class="input" placeholder="e.g. Composite filling"></div><div class="field" style="grid-column:1/-1"><label>Clinical note</label><textarea class="input" placeholder="Observations"></textarea></div></div>
+   <div class="row" style="margin-top:14px"><button class="btn primary" onclick="toast('Assessment saved · will sync')">${I("check")}Save assessment</button><button class="btn" onclick="toast('Patient explanation view')">Patient explanation view</button></div></div></div>
+   <div class="card"><div class="card-b"><div class="notice teal">${I("alert")}<span>An unrecorded tooth is unassessed, never automatically healthy. Record missing or extracted teeth explicitly.</span></div>
+   <p class="small muted">The interactive 3D chart (rotate, roots, surfaces) runs in the Android app. The web uses this 2D odontogram, which shares the same FDI chart contract (schema v2).</p></div></div>
+  </div>`;
+}
+function pageEncounters(p){
+  const e=p.encounters.length?p.encounters:[{date:p.lastVisit,doctor:DOCTORS[0].name,complaint:"Routine check-up",dx:"No acute findings",plan:"Recall 6 months",status:"Finalized",amend:0}];
+  return `<div class="between" style="margin-bottom:12px"><span class="muted small">${e.length} encounters</span><button class="btn primary" onclick="toast('New encounter draft created')">${I("plus")}New encounter</button></div>
+  <div style="display:grid;gap:12px">${e.map(x=>`<div class="card"><div class="card-h"><h3>${fmtDate(x.date)} · ${esc(x.complaint)}</h3><div class="r">${x.amend?`<span class="badge violet">${x.amend} amendment</span>`:""}<span class="badge ${x.status==="Draft"?"amber":"green"}">${x.status}</span></div></div>
+   <div class="card-b"><dl class="kv"><dt>Clinician</dt><dd>${esc(x.doctor)}</dd><dt>Diagnosis</dt><dd>${esc(x.dx||"Not entered")}</dd><dt>Plan</dt><dd>${esc(x.plan||"Not entered")}</dd></dl>
+   <div class="row" style="margin-top:12px">${x.status==="Draft"?`<button class="btn sm">Edit draft</button><button class="btn sm primary" onclick="toast('Encounter finalized')">Finalize</button>`:`<button class="btn sm">Amend with reason</button>`}</div></div></div>`).join("")}</div>`;
+}
+function pageTreatments(p){
+  return `<div class="card"><div class="card-h"><h3>Treatment plan</h3><div class="r"><button class="btn primary sm" onclick="recordTreatment([S.tooth||36])">${I("plus")}Record treatment</button></div></div>
+  <div class="table-wrap"><table class="t"><thead><tr><th>Tooth</th><th>Procedure</th><th>Status</th><th class="hide-sm">Clinician</th><th>Date</th><th style="text-align:right">Fee</th><th style="text-align:right">Due</th><th></th></tr></thead><tbody>
+  ${p.treatments.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<tr class="click" onclick="S.tooth=${t.tooth};S.tab='overview';renderMain()"><td class="mono">${toothLabel(t.tooth)}</td><td><b>${esc(t.proc)}</b></td><td><span class="badge ${statusBadge(t.status)}">${t.status}</span></td><td class="hide-sm">${esc(t.doctor)}</td><td>${fmtDate(t.date)}</td><td class="num" style="text-align:right">${money(t.fee)}</td><td class="num" style="text-align:right;color:${t.fee-tPaid(t)>0&&t.status!=="Planned"?"var(--amber)":"var(--muted)"}">${t.status==="Planned"?"Not started":money(Math.max(0,t.fee-tPaid(t)))}</td><td><select class="input" style="height:30px;width:auto;font-size:12px" onclick="event.stopPropagation()"><option>Next state…</option>${["Accepted","In progress","Completed","Deferred","Declined","Referred","Cancelled"].map(s=>`<option>${s}</option>`).join("")}</select></td></tr>`).join("")}
+  </tbody></table></div></div>
+  <div class="notice" style="margin-top:12px">${I("alert")}<span>Completing care doesn't resolve findings automatically; reassess the tooth in Chart status.</span></div>`;
+}
+function invoiceCard(p,v){
+  const tot=invTotal(v), paid=invPaid(v), due=Math.max(0,tot-paid);
+  return `<div class="card"><div class="card-h"><h3 class="mono">#${v.no}</h3><span class="sub">${fmtDate(v.date)}</span><div class="r"><span class="badge ${v.status==="Void"?"red":due?"amber":"green"}">${v.status==="Void"?"Void":due?(paid?"Partially paid":"Unpaid"):"Paid"}</span></div></div>
+  <div class="card-b"><table style="width:100%" class="inv-lines">${v.lines.map(l=>`<tr><td>${esc(l[0])}${l[2]>1?" × "+l[2]:""}</td><td class="num" style="text-align:right">${money(l[1]*l[2])}</td></tr>`).join("")}</table>
+  <div class="total-row big"><span>Total</span><span class="num">${money(tot)}</span></div><div class="total-row"><span class="muted">Received</span><span class="num" style="color:var(--green)">${money(paid)}</span></div><div class="total-row"><span class="muted">Balance</span><span class="num" style="color:${due?"var(--amber)":"var(--muted)"}">${money(due)}</span></div>
+  <div class="row" style="margin-top:10px;flex-wrap:wrap">${due?`<button class="btn sm primary" onclick="toast('Payment recorded')">${I("wallet")}Receive payment</button>`:""}<button class="btn sm">${I("share")}Share invoice</button><button class="btn sm ghost">Refund</button><button class="btn sm ghost danger">Void</button></div></div></div>`;
+}
+function pageBillingTab(p){
+  return `<div class="between" style="margin-bottom:12px"><span class="muted small">Balance due <b style="color:var(--amber)">${money(patientDue(p))}</b></span><button class="btn primary" onclick="newInvoice('${p.id}')">${I("plus")}Create invoice</button></div>
+  <div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">${p.invoices.map(v=>invoiceCard(p,v)).join("")||`<div class="empty">Issued invoices and received payments will appear here.</div>`}</div>`;
+}
+function pageHistoryTab(p){
+  const h=p.history.length?p.history:[[p.lastVisit+" 10:00","Rafiqul Islam","Registered patient"]];
+  return `<div class="card"><div class="card-b"><div class="timeline">${h.map(x=>`<div class="tl"><b>${esc(x[2])}</b><div class="m">${x[0]} · ${esc(x[1])}</div><div class="row" style="margin-top:4px"><button class="btn ghost sm">Compare chart</button><button class="btn ghost sm">${I("cube")}View earlier chart</button></div></div>`).join("")}</div></div></div>`;
+}
+function pagePatients(){
+  const q=S.pq.trim().toLowerCase();
+  const list=PATIENTS.filter(p=>(!q||[p.name,p.phone,p.id,p.portal||""].join(" ").toLowerCase().includes(q)) && (S.pfilter==="All"||(S.pfilter==="Dues"&&patientDue(p)>0)||(S.pfilter==="Alerts"&&p.alerts.length)||(S.pfilter==="Today"&&apptsFor(TODAY).some(a=>a.pid===p.id))));
+  const p=pat(S.pid)||PATIENTS[0];
+  const due=patientDue(p);
+  const tabs=[["overview","Overview"],["chart","Chart"],["encounters","Encounters",p.encounters.filter(e=>e.status==="Draft").length],["treatments","Treatments",p.treatments.length],["billing","Billing"],["history","History"]];
+  const body={overview:pageOverview,chart:pageChartTab,encounters:pageEncounters,treatments:pageTreatments,billing:pageBillingTab,history:pageHistoryTab}[S.tab](p);
+  return `<div class="pw ${S.listmode?"listmode":""}">
+  <section class="plist"><div class="head">
+    <div class="between"><b>Patients <span class="muted" style="font-weight:600">${list.length}</span></b><button class="btn primary sm" onclick="registerPatient()">${I("plus")}Register</button></div>
+    <input class="input" placeholder="Search name, phone, or patient ID" value="${esc(S.pq)}" oninput="S.pq=this.value;renderMainKeep(this)" id="pq">
+    <div class="chips">${["All","Today","Dues","Alerts"].map(f=>`<button class="chip ${S.pfilter===f?"on":""}" onclick="S.pfilter='${f}';renderMain()">${f}</button>`).join("")}</div></div>
+    <div class="items">${list.map(x=>{const d=patientDue(x);return `<div class="pitem ${x.id===p.id?"on":""}" onclick="S.listmode=false;S.tooth=null;S.multi=[];go('patients/${x.id}')"><div class="avatar" style="background:${x.sex==="F"?"linear-gradient(135deg,#EC4899,#7C3AED)":"linear-gradient(135deg,#3B82F6,#0F766E)"}">${initials(x.name)}</div><div class="grow"><b>${esc(x.name)}</b><small class="num">${x.id} · ${x.phone}</small></div><div style="text-align:right">${x.alerts.length?`<span class="badge red" title="${esc(x.alerts.join(", "))}">${I("alert")}</span>`:""}${d?`<div class="small num" style="color:var(--amber);font-weight:700">${money(d)}</div>`:""}</div></div>`;}).join("")||`<div class="empty">No matching patient. <br><button class="btn sm" style="margin-top:8px" onclick="registerPatient()">Register patient</button></div>`}</div>
+  </section>
+  <section class="pcenter">
+    <button class="btn ghost sm plist-back" style="margin-bottom:10px" onclick="S.listmode=true;renderMain()">${I("chevl")}All patients</button>
+    <div class="phead"><div class="avatar lg" style="background:${p.sex==="F"?"linear-gradient(135deg,#EC4899,#7C3AED)":"linear-gradient(135deg,#3B82F6,#0F766E)"}">${initials(p.name)}</div>
+      <div style="flex:1;min-width:220px"><h1 class="h1">${esc(p.name)}</h1>
+        <div class="meta"><span class="mono">${p.id}</span><span>${I("user")}${p.sex==="F"?"Female":"Male"}, ${p.age} y</span><span>${I("phone")}${p.phone}</span>${p.portal?`<span>${I("lock")}App ID ${p.portal}</span>`:""}</div>
+        <div class="alerts">${p.alerts.map(a=>`<span class="badge red">${I("alert")}${esc(a)}</span>`).join("")||`<span class="badge">No medical alerts</span>`}${due?`<span class="badge amber">Due ${money(due)}</span>`:""}</div></div>
+      <div class="row" style="flex-wrap:wrap"><button class="btn" onclick="bookAppt(null,null,'${p.id}')">${I("cal")}Book</button><button class="btn" onclick="S.tab='billing';renderMain()">${I("wallet")}Billing</button><button class="btn primary" onclick="recordTreatment(S.multi.length?S.multi:[S.tooth||36])">${I("plus")}Record treatment</button></div></div>
+    ${p.id==="P-1004"?`<div class="notice red" style="margin-top:14px">${I("alert")}<span>Another device changed this patient. <a href="#" onclick="toast('Draft retained, server version loaded');return false">Review conflict · retain draft and load server version</a></span></div>`:""}
+    <div class="tabs" role="tablist">${tabs.map(([k,l,b])=>`<button class="${S.tab===k?"on":""}" onclick="S.tab='${k}';renderMain()">${l}${b?`<span class="badge">${b}</span>`:""}</button>`).join("")}</div>
+    ${body}
+  </section>
+  <section class="prail">${railContent(p)}</section></div>`;
+}
+
+/* ---------- SCHEDULE ---------- */
+function miniCal(){
+  const m=S.calMonth, first=new Date(m.getFullYear(),m.getMonth(),1), start=addDays(first,-((first.getDay()+6)%7));
+  const cells=[...Array(42)].map((_,i)=>{const d=addDays(start,i); const ap=apptsFor(d); const total=d.getDay()===5?0:DOCTORS.reduce((a,doc)=>a+(HOURS[doc.id]||[]).reduce((b,[s,e])=>b+(e-s)/30,0),0); const used=ap.filter(a=>a.status!=="Cancelled").reduce((a,x)=>a+x.dur/30,0); const dot=d.getDay()===5?"":(used>=total?'<i class="full"></i>':'<i></i>');
+    return `<button class="${d.getMonth()!==m.getMonth()?"out":""} ${iso(d)===iso(TODAY)?"today":""} ${iso(d)===iso(S.day)?"on":""}" onclick="S.day=new Date(${d.getFullYear()},${d.getMonth()},${d.getDate()});S.selAppt=null;renderMain()">${d.getDate()}${dot}</button>`;}).join("");
+  return `<div class="card mini-cal"><div class="between" style="margin-bottom:8px"><b>${m.toLocaleDateString("en-GB",{month:"long",year:"numeric"})}</b><div class="row" style="gap:4px"><button class="icon-btn" style="width:30px;height:30px" onclick="S.calMonth=new Date(S.calMonth.getFullYear(),S.calMonth.getMonth()-1,1);renderMain()">${I("chevl")}</button><button class="icon-btn" style="width:30px;height:30px" onclick="S.calMonth=new Date(S.calMonth.getFullYear(),S.calMonth.getMonth()+1,1);renderMain()">${I("chev")}</button></div></div>
+  <div class="grid">${["Mo","Tu","We","Th","Fr","Sa","Su"].map(d=>`<span class="dow">${d}</span>`).join("")}${cells}</div>
+  <div class="legend" style="margin-top:8px"><span><i style="background:var(--green);border-radius:50%;width:8px;height:8px"></i>Free slots</span><span><i style="background:var(--line-2);border-radius:50%;width:8px;height:8px"></i>Fully booked</span></div></div>`;
+}
+function pageSchedule(){
+  const ap=apptsFor(S.day); const sel=ap.find(a=>a.id===S.selAppt);
+  const H0=9*60,H1=22*60, hh=56, px=m=>(m-H0)/30*hh;
+  const cols=DOCTORS.map(d=>{
+    const mine=ap.filter(a=>a.doc===d.id); const hrs=HOURS[d.id]||[]; const closed=S.day.getDay()===5;
+    let offs=""; let cur=H0; (closed?[]:hrs).forEach(([s,e])=>{ if(s>cur) offs+=`<div class="off" style="top:${px(cur)}px;height:${px(s)-px(cur)}px"></div>`; cur=e;}); offs+=`<div class="off" style="top:${px(closed?H0:cur)}px;height:${px(H1)-px(closed?H0:cur)}px"></div>`;
+    const open=[]; if(!closed) hrs.forEach(([s,e])=>{for(let m=s;m<e;m+=30) if(!mine.some(a=>a.status!=="Requested"&&m>=a.start&&m<a.start+a.dur)) open.push(m);});
+    return `<div class="col" style="height:${px(H1)}px">${offs}
+      ${open.map(m=>`<div class="ev slot" style="top:${px(m)+3}px;height:${hh-6}px" onclick="bookAppt('${d.id}',${m})">${I("plus")}${hm(m)} free</div>`).join("")}
+      ${mine.map(a=>{const p=pat(a.pid);return `<div class="ev st-${a.status.replace(" ","-")} ${S.selAppt===a.id?"sel":""}" style="top:${px(a.start)+3}px;height:${a.dur/30*hh-6}px;${a.status==="Requested"?"left:50%;":""}" onclick="S.selAppt='${a.id}';renderMain()">${hm(a.start)} ${esc(p.name)}<small>${esc(a.reason)}${a.src==="Patient app"?" · app":""}</small></div>`;}).join("")}
+      ${iso(S.day)===iso(TODAY)?`<div class="now-line" style="left:0;right:0;width:auto;height:2px;top:${px(NOW_MIN)}px;bottom:auto"></div>`:""}</div>`;}).join("");
+  const gutter=[...Array(13)].map((_,i)=>`<span style="top:${px(H0+i*60)}px;${i===0?"transform:none;top:4px":""}">${pad(9+i)}:00</span>`).join("");
+  const counts=st=>ap.filter(a=>a.status===st).length;
+  const detail = sel? (()=>{const p=pat(sel.pid);return `<div class="card"><div class="card-h"><h3>Appointment</h3><div class="r"><button class="icon-btn" style="width:30px;height:30px" onclick="S.selAppt=null;renderMain()">${I("x")}</button></div></div><div class="card-b">
+    <div class="row"><div class="avatar lg">${initials(p.name)}</div><div><b style="font-size:16px">${esc(p.name)}</b><div class="small muted num">${p.id} · ${p.phone}</div></div></div>
+    <dl class="kv" style="margin-top:14px"><dt>When</dt><dd>${fmtDate(S.day)} · ${hm(sel.start)}–${hm(sel.start+sel.dur)}</dd><dt>Doctor</dt><dd>${esc(doc(sel.doc).name)}</dd><dt>Reason</dt><dd>${esc(sel.reason)}</dd><dt>Booked via</dt><dd>${sel.src}</dd><dt>Status</dt><dd><span class="badge st-${sel.status.replace(" ","-")}">${sel.status}</span></dd></dl>
+    ${sel.status==="Requested"?`<div class="notice" style="margin-top:12px">${I("alert")}<span>Booked in the patient app, but the time was taken meanwhile. Reschedule then confirm, or cancel and call the patient.</span></div>`:""}
+    <div class="chips" style="margin-top:14px">${["Confirmed","Checked-in","In progress","Completed","Cancelled","No show"].map(s=>`<button class="chip ${sel.status===s?"on":""}" onclick="setStatus('${sel.id}','${s}')">${s}</button>`).join("")}</div>
+    <div class="row" style="margin-top:14px;flex-wrap:wrap"><button class="btn primary sm" onclick="go('patients/${p.id}')">Open patient</button><button class="btn sm" onclick="bookAppt('${sel.doc}',${sel.start},'${p.id}')">Reschedule / edit</button></div></div></div>`;})()
+    : `<div class="card"><div class="card-h"><h3>${fmtDay(S.day)}</h3></div><div class="card-b">
+      <div class="counters" style="grid-template-columns:repeat(2,1fr)"><div class="counter"><b class="num">${ap.filter(a=>a.status!=="Cancelled").length}</b><span>Booked</span></div><div class="counter"><b class="num" style="color:var(--green)">${counts("Completed")}</b><span>Completed</span></div><div class="counter"><b class="num" style="color:var(--amber)">${counts("Requested")}</b><span>Requested</span></div><div class="counter"><b class="num" style="color:var(--red)">${counts("No show")}</b><span>No show</span></div></div>
+      <hr class="sep"><div class="rail-title">Doctor hours</div>${DOCTORS.map(d=>`<div class="list-item"><div class="avatar" style="background:${d.color}">${initials(d.name)}</div><div class="grow"><b>${esc(d.name)}</b><small>${S.day.getDay()===5?"Closed (Friday)":(HOURS[d.id]||[]).map(([s,e])=>hm(s)+"–"+hm(e)).join(", ")} · weekly</small></div><button class="btn ghost sm" onclick="toast('This day closed for ${esc(d.name)}')">Close day</button></div>`).join("")}
+      <button class="btn" style="width:100%;margin-top:10px;justify-content:center" onclick="openSlots()">${I("clock")}Open slots on ${S.day.toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</button></div></div>`;
+  const listView = `<div class="card"><div class="table-wrap"><table class="t"><thead><tr><th>Time</th><th>Patient</th><th>Doctor</th><th>Reason</th><th>Source</th><th>Status</th></tr></thead><tbody>${ap.slice().sort((a,b)=>a.start-b.start).map(a=>`<tr class="click ${S.selAppt===a.id?"sel":""}" onclick="S.selAppt='${a.id}';renderMain()"><td class="mono">${hm(a.start)}</td><td><b>${esc(pat(a.pid).name)}</b></td><td>${esc(doc(a.doc).name)}</td><td>${esc(a.reason)}</td><td>${a.src}</td><td><span class="badge st-${a.status.replace(" ","-")}">${a.status}</span></td></tr>`).join("")||`<tr><td colspan="6" class="empty">No appointments match this calendar period.</td></tr>`}</tbody></table></div></div>`;
+  return `<div class="page"><div class="page-head"><div><h1 class="h1">${fmtDay(S.day)}</h1><p class="muted small" style="margin:2px 0 0">${CLINIC.tz} · ${CLINIC.buffer} min buffer · Friday closed</p></div>
+   <div class="r"><div class="row" style="gap:4px"><button class="btn" onclick="S.day=addDays(S.day,-1);S.selAppt=null;renderMain()">${I("chevl")}</button><button class="btn" onclick="S.day=new Date(TODAY);S.calMonth=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);renderMain()">Today</button><button class="btn" onclick="S.day=addDays(S.day,1);S.selAppt=null;renderMain()">${I("chev")}</button></div>
+   <div class="seg">${["Day","List"].map(v=>`<button class="${S.schedView===v?"on":""}" onclick="S.schedView='${v}';renderMain()">${v==="Day"?"Calendar":"List"}</button>`).join("")}</div>
+   <label class="row small" style="font-weight:700;padding:0 6px">Online booking by patients <label class="switch"><input type="checkbox" ${CLINIC.booking?"checked":""} onchange="CLINIC.booking=this.checked;toast(this.checked?'Patient self-booking on':'Patient self-booking off')"><i></i></label></label>
+   <button class="btn" onclick="openSlots()">${I("clock")}Open slots</button><button class="btn primary" onclick="bookAppt()">${I("plus")}Book appointment</button></div></div>
+  <div class="sched"><div class="side-col" style="display:grid;gap:16px">${miniCal()}${detail}</div>
+   ${S.schedView==="List"?listView:`<div class="card dayview"><div class="dv" style="grid-template-columns:64px repeat(${DOCTORS.length},minmax(200px,1fr));--hh:${hh}px">
+     <div class="colh" style="border-left:0"></div>${DOCTORS.map(d=>`<div class="colh"><div class="avatar" style="background:${d.color}">${initials(d.name)}</div><div><b>${esc(d.name)}</b><small>${d.spec}</small></div></div>`).join("")}
+     <div class="gutter" style="height:${px(H1)}px">${gutter}</div>${cols}</div></div>`}
+  </div></div>`;
+}
+function setStatus(id,s){ const a=apptsFor(S.day).find(x=>x.id===id); if(a){a.status=s; S.pending++; toast("Status set to "+s); render();} }
+
+/* ---------- BILLING ---------- */
+function pageBilling(){
+  const all=PATIENTS.flatMap(p=>p.invoices.map(v=>({p,v}))).sort((a,b)=>b.v.date.localeCompare(a.v.date));
+  const st=v=>v.status==="Void"?"Void":invPaid(v)>=invTotal(v)?"Paid":invPaid(v)?"Partially paid":"Unpaid";
+  const list=all.filter(x=>S.invFilter==="All"||st(x.v)===S.invFilter);
+  const sel=all.find(x=>x.v.no===S.selInv)||list[0];
+  const billed=all.reduce((a,x)=>a+invTotal(x.v),0), rec=all.reduce((a,x)=>a+invPaid(x.v),0);
+  return `<div class="page"><div class="page-head"><div><h1 class="h1">Billing</h1><p class="muted small" style="margin:2px 0 0">Billed amounts and money received are shown separately</p></div><div class="r"><button class="btn">${I("download")}Export CSV</button><button class="btn primary" onclick="newInvoice()">${I("plus")}Create invoice</button></div></div>
+  <div class="kpis"><div class="card kpi"><div class="lbl">Billed (all)</div><div class="val num">${money(billed)}</div></div><div class="card kpi"><div class="lbl">Received</div><div class="val num" style="color:var(--green)">${money(rec)}</div></div><div class="card kpi"><div class="lbl">Outstanding</div><div class="val num" style="color:var(--amber)">${money(billed-rec)}</div></div><div class="card kpi"><div class="lbl">Invoices</div><div class="val num">${all.length}</div></div></div>
+  <div class="split"><div class="card"><div class="card-h"><div class="chips">${["All","Unpaid","Partially paid","Paid","Void"].map(f=>`<button class="chip ${S.invFilter===f?"on":""}" onclick="S.invFilter='${f}';renderMain()">${f}</button>`).join("")}</div></div>
+   <div class="table-wrap" style="margin-top:10px"><table class="t"><thead><tr><th>Invoice</th><th>Date</th><th>Patient</th><th class="hide-sm">Items</th><th style="text-align:right">Total</th><th style="text-align:right">Received</th><th>Status</th></tr></thead><tbody>
+   ${list.map(({p,v})=>`<tr class="click ${sel&&sel.v===v?"sel":""}" onclick="S.selInv='${v.no}';renderMain()"><td class="mono">#${v.no}</td><td>${fmtDate(v.date)}</td><td><b>${esc(p.name)}</b></td><td class="hide-sm muted">${esc(v.lines.map(l=>l[0]).join(", "))}</td><td class="num" style="text-align:right">${money(invTotal(v))}</td><td class="num" style="text-align:right">${money(invPaid(v))}</td><td><span class="badge ${({Paid:"green","Partially paid":"amber",Unpaid:"red",Void:""})[st(v)]}">${st(v)}</span></td></tr>`).join("")}
+   </tbody></table></div></div>
+   <div style="position:sticky;top:0">${sel?`<div class="small muted" style="margin:0 0 8px;font-weight:700">${esc(sel.p.name)} · <a href="#/patients/${sel.p.id}">open patient</a></div>`+invoiceCard(sel.p,sel.v):""}</div></div></div>`;
+}
+
+/* ---------- REPORTS ---------- */
+function pageReports(){
+  seed=99; const days=S.period==="Day"?1:S.period==="Week"?7:S.period==="Month"?30:90;
+  const series=[...Array(Math.min(days,30))].map((_,i)=>18000+Math.round(rnd()*40000));
+  const rec=series.reduce((a,b)=>a+b,0)*(days>30?3:1), billed=Math.round(rec*1.18), ref=Math.round(rec*.012);
+  const mx=Math.max(...series);
+  const byMethod=[["Cash",.41],["bKash",.27],["Nagad",.12],["Card",.14],["Bank",.06]];
+  const proc=[["Root canal",42,210000],["Composite filling",118,236000],["Scaling & polishing",96,240000],["Extraction",37,55500],["Crown (PFM)",14,112000],["Orthodontic braces",6,480000]];
+  const pm=Math.max(...proc.map(x=>x[2]));
+  const balances=PATIENTS.map(p=>[p,patientDue(p)]).filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  return `<div class="page"><div class="page-head"><div><h1 class="h1">Reports</h1><p class="muted small" style="margin:2px 0 0">Asia/Dhaka · figures reconcile to source payments</p></div><div class="r"><div class="seg">${["Day","Week","Month","Custom","All"].map(x=>`<button class="${S.period===x?"on":""}" onclick="S.period='${x}';renderMain()">${x}</button>`).join("")}</div><button class="btn">${I("share")}Share financial report CSV</button></div></div>
+  <div class="kpis">${[["Billed in period",billed,""],["Payments received",rec,"var(--green)"],["Refunds paid out",ref,"var(--red)"],["Net cash",rec-ref,"var(--brand)"],["Outstanding",PATIENTS.reduce((a,p)=>a+patientDue(p),0),"var(--amber)"]].map(([l,v,c])=>`<div class="card kpi"><div class="lbl">${l}</div><div class="val num" style="color:${c||"var(--ink)"}">${money(v)}</div></div>`).join("")}</div>
+  <div class="dash">
+   <div class="card wide"><div class="card-h"><h3>Payments received per day</h3><span class="sub">cash basis</span></div><div class="card-b"><div class="bars" style="height:220px">${series.map((v,i)=>`<div class="b" title="${money(v)}"><i style="height:${v/mx*100}%"></i><span class="hide-sm">${i%3===0?i+1:""}</span></div>`).join("")}</div></div></div>
+   <div class="card"><div class="card-h"><h3>By payment method</h3></div><div class="card-b">${byMethod.map(([m,f],i)=>`<div style="margin-bottom:12px"><div class="between small"><b>${m}</b><span class="num">${money(rec*f)} · ${Math.round(f*100)}%</span></div><div class="pay" style="padding:0;border:0;background:none"><div class="track"><i style="width:${f*100/0.41}%;background:${["#0F766E","#E2136E","#F7941D","#2563EB","#64748B"][i]}"></i></div></div></div>`).join("")}</div></div>
+   <div class="card wide"><div class="card-h"><h3>Totals by procedure</h3></div><div class="table-wrap"><table class="t"><thead><tr><th>Procedure</th><th>Count</th><th>Revenue</th><th style="width:40%"></th></tr></thead><tbody>${proc.map(([n,c,r])=>`<tr><td><b>${n}</b></td><td class="num">${c}</td><td class="num">${money(r)}</td><td><div class="pay" style="padding:0;border:0;background:none;margin:0"><div class="track"><i style="width:${r/pm*100}%;background:var(--brand)"></i></div></div></td></tr>`).join("")}</tbody></table></div></div>
+   <div class="card"><div class="card-h"><h3>Largest balances due</h3></div><div class="card-b">${balances.map(([p,d])=>`<div class="list-item" style="cursor:pointer" onclick="go('patients/${p.id}')"><div class="avatar">${initials(p.name)}</div><div class="grow"><b>${esc(p.name)}</b><small>${p.phone}</small></div><b class="num" style="color:var(--amber)">${money(d)}</b></div>`).join("")}</div></div>
+   <div class="card"><div class="card-h"><h3>Clinician workload</h3></div><div class="card-b">${DOCTORS.map((d,i)=>`<div class="list-item"><div class="avatar" style="background:${d.color}">${initials(d.name)}</div><div class="grow"><b>${esc(d.name)}</b><small>${[86,74,41][i]} visits · ${[91,84,77][i]}% utilization</small></div><span class="badge teal">${[112,96,38][i]} procedures</span></div>`).join("")}</div></div>
+   <div class="card"><div class="card-h"><h3>Appointment states</h3></div><div class="card-b"><div class="counters" style="grid-template-columns:repeat(2,1fr)">${[["Completed",201,"var(--green)"],["Cancelled",18,"var(--red)"],["No show",9,"var(--red)"],["Upcoming",64,"var(--accent)"]].map(([l,v,c])=>`<div class="counter"><b class="num" style="color:${c}">${v}</b><span>${l}</span></div>`).join("")}</div></div></div>
+  </div></div>`;
+}
+
+/* ---------- TEAM ---------- */
+function pageTeam(){
+  const s=STAFF.find(x=>x.id===S.selStaff)||STAFF[0];
+  return `<div class="page"><div class="page-head"><div><h1 class="h1">Team & roles</h1><p class="muted small" style="margin:2px 0 0">Staff join your clinic when they sign in with the Google email you add here</p></div><div class="r"><button class="btn primary" onclick="addStaff()">${I("plus")}Add staff member</button></div></div>
+  <div class="split"><div class="card"><div class="table-wrap"><table class="t matrix"><thead><tr><th>Member</th><th>Role</th>${ACCESS.map(a=>`<th class="c hide-sm" title="${a[1]}" style="writing-mode:vertical-rl;transform:rotate(180deg);height:150px;font-size:10.5px;letter-spacing:.03em;text-transform:none;padding:8px 6px">${a[1]}</th>`).join("")}<th>Active</th></tr></thead><tbody>
+   ${STAFF.map(m=>`<tr class="click ${m.id===s.id?"sel":""}" onclick="S.selStaff='${m.id}';renderMain()"><td><div class="row"><div class="avatar" style="background:${m.color||"linear-gradient(135deg,#64748B,#334155)"}">${initials(m.name)}</div><div><b>${esc(m.name)}</b>${m.owner?' <span class="badge teal">Owner</span>':""}<div class="small muted">${m.email}</div></div></div></td><td><span class="badge">${m.role}</span></td>${ACCESS.map(a=>`<td class="c hide-sm"><span class="tick ${m.access.includes(a[0])?"":"no"}">${I(m.access.includes(a[0])?"check":"x")}</span></td>`).join("")}<td>${m.active?'<span class="badge green">Active</span>':'<span class="badge">Inactive</span>'}</td></tr>`).join("")}
+   </tbody></table></div></div>
+   <div class="card" style="position:sticky;top:0"><div class="card-h"><h3>${esc(s.name)}</h3><div class="r">${s.active?'<span class="badge green">Active</span>':'<span class="badge">Inactive</span>'}</div></div><div class="card-b">
+    <div class="grid-form"><div class="field"><label>Name</label><input class="input" value="${esc(s.name)}"></div><div class="field"><label>Google email</label><input class="input" value="${s.email}"></div><div class="field"><label>Phone</label><input class="input" value="${s.phone}"></div><div class="field"><label>Registration</label><input class="input" value="${s.reg||""}"></div></div>
+    <div class="field" style="margin-top:14px"><label>Role (fills in access)</label><div class="chips">${Object.keys(ROLE_ACCESS).map(r=>`<button class="chip ${s.role===r?"on":""}" onclick="setRole('${s.id}','${r}')">${r}</button>`).join("")}</div></div>
+    <hr class="sep"><div class="rail-title">Access</div>
+    ${ACCESS.map(a=>`<div class="set-row" style="padding:8px 0"><span class="small" style="font-weight:600">${a[1]}</span><label class="switch"><input type="checkbox" ${s.access.includes(a[0])?"checked":""} onchange="toggleAccess('${s.id}','${a[0]}')"><i></i></label></div>`).join("")}
+    <div class="set-row"><div><b>Active</b><small>Turn off to remove access; earlier work stays</small></div><label class="switch"><input type="checkbox" ${s.active?"checked":""}><i></i></label></div>
+    <div class="row" style="margin-top:12px"><button class="btn primary" onclick="toast('Saved and shared with the clinic')">Save changes</button>${s.owner?"":`<button class="btn danger">Remove from team</button>`}</div></div></div></div></div>`;
+}
+function setRole(id,r){ const s=STAFF.find(x=>x.id===id); s.role=r; s.access=[...ROLE_ACCESS[r]]; renderMain(); }
+function toggleAccess(id,a){ const s=STAFF.find(x=>x.id===id); s.access=s.access.includes(a)?s.access.filter(x=>x!==a):[...s.access,a]; renderMain(); }
+
+/* ---------- SETTINGS ---------- */
+function pageSettings(){
+  return `<div class="page"><div class="page-head"><div><h1 class="h1">Clinic settings</h1></div></div>
+  <div class="set-grid">
+   <div class="card"><div class="card-h"><h3>Clinic management</h3></div><div class="card-b"><div class="grid-form">
+     <div class="field"><label>Clinic name</label><input class="input" value="${esc(CLINIC.name)}"></div><div class="field"><label>Time zone</label><select class="input"><option>Asia/Dhaka</option><option>Asia/Kolkata</option><option>UTC</option></select></div>
+     <div class="field"><label>Currency</label><select class="input"><option>BDT (৳)</option><option>USD ($)</option><option>INR (₹)</option></select></div><div class="field"><label>Tax percent</label><input class="input" value="0"></div>
+     <div class="field"><label>Appointment buffer (min)</label><input class="input" value="5"></div><div class="field"><label>Default slot length</label><select class="input"><option>30 min</option><option>15 min</option><option>45 min</option><option>60 min</option></select></div></div>
+     <button class="btn primary" style="margin-top:14px">Save clinic settings</button></div></div>
+   <div class="card"><div class="card-h"><h3>Chart & display</h3></div><div class="card-b">
+     <div class="set-row"><div><b>Tooth numbering</b><small>Records are always stored in FDI</small></div><div class="seg">${["Palmer","FDI","Universal"].map(n=>`<button class="${S.numbering===n?"on":""}" onclick="S.numbering='${n}';try{localStorage.setItem('dc-num','${n}')}catch(e){};renderMain()">${n}</button>`).join("")}</div></div>
+     <div class="set-row"><div><b>Tooth tap sound</b><small>Soft click when selecting a tooth</small></div><label class="switch"><input type="checkbox" checked><i></i></label></div>
+     <div class="set-row"><div><b>Theme</b><small>Follows your system unless chosen</small></div><div class="seg"><button class="${!isDark()?"on":""}" onclick="S.theme='dark';toggleTheme()">Light</button><button class="${isDark()?"on":""}" onclick="S.theme='light';toggleTheme()">Dark</button></div></div>
+     <div class="set-row"><div><b>Keyboard shortcuts</b><small><kbd>Ctrl K</kbd> search · <kbd>Ctrl</kbd>+click multi-select teeth · <kbd>Esc</kbd> close</small></div></div></div></div>
+   <div class="card"><div class="card-h"><h3>Reminders</h3></div><div class="card-b">
+     <div class="set-row"><div><b>Enable clinic reminders</b><small>Scheduled on each device; no SMS or email is sent</small></div><label class="switch"><input type="checkbox" checked><i></i></label></div>
+     <div class="grid-form" style="margin-top:8px"><div class="field"><label>Hours before appointment</label><input class="input" value="24"></div><div class="field"><label>Quiet hours</label><input class="input" value="22:00 – 08:00"></div></div>
+     <div class="set-row"><div><b>Browser notifications</b><small>Allow appointment notifications on this PC</small></div><button class="btn sm" onclick="toast('Browser permission requested')">Allow</button></div></div></div>
+   <div class="card"><div class="card-h"><h3>Subscription</h3><div class="r"><span class="badge teal">Dental Care Pro</span></div></div><div class="card-b">
+     <div class="between"><div><div style="font-size:28px;font-weight:800" class="num">US$5<span class="muted" style="font-size:14px;font-weight:600">/month</span></div><div class="small muted">Launch offer · normally US$10 · up to 1,000 patients</div></div><span class="badge green">Renews 1 Dec</span></div>
+     <div class="plan" style="margin-top:14px;background:var(--surface-3)"><div class="between small"><b>742 of 1,000 active patients</b><span class="num">74%</span></div><div class="bar"><i style="width:74.2%"></i></div><div class="small muted">Each further 1,000 patients adds US$5. Archived patients don't count.</div></div>
+     <div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="btn primary">Upgrade</button><button class="btn">Restore purchase</button><button class="btn ghost">Manage billing</button></div></div></div>
+   <div class="card"><div class="card-h"><h3>Data & sync</h3></div><div class="card-b">
+     <div class="set-row"><div><b>Sync now</b><small>${S.pending} changes waiting</small></div><button class="btn sm" onclick="doSync()">${I("sync")}Sync</button></div>
+     <div class="set-row"><div><b>Restore cloud records</b><small>Reload all clinic records into this browser</small></div><button class="btn sm">Restore</button></div>
+     <div class="set-row"><div><b>Conflict drafts</b><small>1 retained draft (Nadia Islam)</small></div><button class="btn sm">Export draft</button></div>
+     <div class="set-row"><div><b>Import patient JSON as a new record</b><small>Exported files contain sensitive data</small></div><button class="btn sm">Import</button></div></div></div>
+   <div class="card"><div class="card-h"><h3>Services & pricing</h3><div class="r"><button class="btn sm">${I("plus")}Add service</button></div></div><div class="table-wrap"><table class="t"><tbody>${SERVICES.map(s=>`<tr><td><b>${s[0]}</b></td><td class="num" style="text-align:right">${money(s[1])}</td><td style="width:60px"><button class="btn ghost sm">Edit</button></td></tr>`).join("")}</tbody></table></div></div>
+  </div></div>`;
+}
+
+/* ---------- HELP ---------- */
+const GUIDES = [
+ ["start","Getting started","Sign in and set up your clinic","The first Google account to sign in creates the clinic and becomes its owner.",["On the sign-in page choose Clinic team, then Continue with Google.","The first account to sign in creates a new clinic and becomes its owner (all access). Staff you add later join this clinic automatically.","Open Clinic settings › Clinic management to set the clinic name, time zone, currency, tax and appointment buffer.","Open Team & roles and add your dentists and staff with their Google email.","Choose a subscription in Clinic settings › Subscription, or continue if your clinic is complimentary.","Use the left sidebar to move around. The red badge on Appointments counts appointments in the next 7 days. Press Ctrl K anywhere to search."],"The web version uses the same Firebase clinic as the Android app. Your team can use both at the same time."],
+ ["menu","Getting started","Find your way: sidebar, Sync and messages","The sidebar holds everything important; Sync shares your work with the clinic.",["The sidebar is grouped into Clinic (Home, Patients, Appointments, Billing, Reports), Administration (Team & roles, Clinic settings) and Help.","The Sync button at the top right sends your saved changes and fetches others' changes and patient app bookings. The red number shows how many changes are waiting.","Team, slot and settings changes, and appointments you book, are shared right away.","Messages at the bottom confirm what happened. Red or amber notices explain a problem and what to do."],"If something is missing from the sidebar, your role may not include it. Ask your admin to check Team & roles."],
+ ["patients","Patients","Register, find, edit or archive a patient","Keep one record per person with correct identity and medical alerts.",["Open Patients. Search by name, phone or ID first so you don't create a duplicate.","Choose Register patient. Enter the full name, phone, date of birth and medical alerts, then Save.","Click the patient in the list. On a wide screen the list, the patient and the treatment history are shown side by side.","On Overview use Edit profile to correct details, Update next to Clinical story for the narrative, and the Appointment reminders switch for consent.","Archive patient needs a reason and keeps the record."],"Registering and editing patients needs the \"Register & edit patients\" access item."],
+ ["record","Dental chart","Record treatment for one tooth or several","Dentists record care straight from the chart.",["Click a tooth on the chart. The Selected tooth card shows Record treatment and Chart status.","For several teeth hold Ctrl and click each tooth (Ctrl+click again to remove it), then Record treatment (n).","Pick the procedure, the status (Completed, In progress or Planned), surfaces if needed, the doctor and the date, and add notes.","Save. The teeth turn blue (completed) or show + (planned), and the entry appears in Treatment history.","Chart status records presence (missing, extracted…), findings and restorations for that tooth."],"The 3D model is available in the Android app. The web shows the same records on a 2D chart."],
+ ["edit-treatment","Dental chart","Edit or correct a recorded treatment","Any recorded treatment can be changed later; the old values are kept.",["Open the patient and click the tooth to filter Treatment history.","Click Edit on the entry you want to change.","Change the procedure, status (including Cancelled), surfaces, doctor, date or notes, then Save.","The change log keeps the previous values, and the patient History shows what changed."],"A treatment can't be moved to another tooth; record a new one for the right tooth and cancel the wrong one."],
+ ["treatment-payments","Dental chart","Take payments for a treatment over several visits","Set the total fee once, then add each visit's payment (e.g. root canal 5,000 tk, 1,000 tk per visit).",["Open the patient and click the tooth in the chart.","Click Set fee / add payment on the treatment (for example Root canal).","Enter the total fee. If the procedure matches one of your Services, its default fee is filled in.","Enter the amount paid at this visit, choose Cash, bKash, Nagad, Card or Bank, check the date and add a note such as \"visit 1 of 5\". Save.","At every later visit click Add payment; the last amount and method are filled in for you.","The treatment shows Fee · Paid · Due (amber while money is due, green when fully paid)."],"The fee and payments are an invoice in the patient's Billing tab too, so receipts, refunds and Reports include them."],
+ ["chart","Clinical care","Assess teeth in the Chart tab","Record assessment, presence, findings and restorations as separate facts.",["Open a patient › Chart. Choose Permanent, Primary or Mixed dentition.","Click a tooth. Choose its assessment and presence, and a replacement if applicable.","Choose Whole tooth or a surface (M, D, F, L, O/I), then Add finding or Add restoration.","Optionally enter a Planned procedure and a clinical note, then Save assessment."],"An unrecorded tooth is unassessed, never automatically healthy."],
+ ["encounters","Clinical care","Write and finalize an encounter","Keep an examination note and preserve later corrections.",["Open Encounters and choose New encounter. Record the clinician, complaint, examination, diagnosis and plan.","Use Edit draft while it is a draft. Review it, then Finalize.","To correct a finalized note choose Amend with reason.","Amendments stay attached to the original note; History records the change."],null],
+ ["treatments","Clinical care","Move treatment through its steps","The Treatments tab shows every planned and performed item with its status.",["Open Treatments to see the plan for this patient.","Choose the next state: Accepted, In progress, Completed, Deferred, Declined, Referred or Cancelled.","For Completed care record the outcome; the tooth turns blue on the chart."],"Completing care doesn't resolve findings automatically; reassess the tooth in Chart status."],
+ ["history","Clinical care","Review history and earlier charts","Compare previous states.",["Open the History tab to see every change with date and author.","Use Compare chart on a change to see the earlier and current chart side by side."],null],
+ ["slots","Appointments","Open appointment slots for a day","Make a doctor's times bookable in a few clicks.",["Open Appointments. Pick a day on the month calendar (green dot = free slots, grey dot = fully booked).","Click Open slots. Choose the doctor, the hours, the appointment length, and This day only or every week.","Check the preview and click Open n slots. They are shared with staff and the patient app at once.","Under Doctor hours, Close day removes one day of a weekly series.","The Online booking by patients switch turns patient self-booking on or off."],"Opening slots needs the \"Open & close appointment slots\" access item."],
+ ["booking","Appointments","Book, reschedule or cancel an appointment","Book from a free slot, or add any appointment.",["In the calendar, each doctor has a column. Click a dashed free time.","Find the patient by name, phone or patient app ID, enter the reason and click Book slot.","Click a booked time to see its details on the left; use the status chips (Confirmed, Checked in, In progress, Completed, Cancelled, No show) as the visit goes on.","Bookings made in the patient app arrive with the next Sync. If the time was taken it shows as Requested: confirm after rescheduling, or cancel and call the patient."],"Booking needs the \"Book & change appointments\" access item."],
+ ["reminders","Appointments","Appointment reminders","Reminders are scheduled on each device; nothing is sent from a server.",["In Clinic settings › Reminders, turn on clinic reminders and set the hours before and quiet hours.","On a patient's Overview turn on Appointment reminders (patient consent).","Allow browser notifications on this PC if you want reminders here too."],"No SMS or email is sent."],
+ ["team","Team & roles","Add staff and set their roles and access","Each person gets a role and simple on/off access switches.",["Open Team & roles. The table shows everyone's access at a glance.","Click Add staff member. Enter the name and the Google email they will sign in with.","Choose a role: Admin, Dentist, Assistant, Receptionist, Cashier or Auditor. This fills in their access.","Switch any access item on or off on the right, then Save changes.","Turn off Active to remove someone's access. Their earlier work stays in the records."],"Only the owner and people with \"Clinic settings, team & roles\" can change the team."],
+ ["patient-logins","Team & roles","Give a patient access to the patient app","You choose a simple Patient ID and password for the patient.",["Open the patient › Overview › Patient app access › Create patient login.","Type a Patient ID (4–12 letters or numbers, e.g. RAHIM01) and a password (6+ characters).","Share the ID and password with the patient. The password is shown only once.","Use Change ID / password to reset; the old password stops working at once."],null],
+ ["billing","Billing","Create an invoice and receive payment","Record line items and distinguish billed amounts from money received.",["Open Billing (or the patient's Billing tab) and choose Create invoice.","Pick a service or type a line, unit price and quantity. Set discount and tax, then Issue invoice.","Choose Receive payment on an unpaid invoice. Partial payments leave a balance.","Use Share receipt or Share invoice to send a copy.","To correct: Refund a payment with a reason, or Void an invoice after refunding its payments."],"Recording a payment doesn't charge a card."],
+ ["reports","Reports","Review and share practice reports","Compare activity and finances for a period.",["Open Reports and choose Day, Week, Month, Custom or All.","Read billed, received, refunded, net and outstanding amounts, appointment states and clinician workload.","Treatment payments show money received by method, totals by procedure and the largest balances due.","Choose Share financial report CSV to share it."],"Sync first for the latest figures."],
+ ["sync","Records and sync","Sync, conflicts and restore","Know what is in this browser and what the clinic has.",["Click Sync at the top. It sends your saved changes, applies patient app bookings and fetches others' changes.","If another device changed the same patient, use Review conflict · retain draft and load server version.","Restore cloud records reloads all clinic records into this browser."],"Exported files contain sensitive patient information; choose the destination carefully."],
+ ["subscription","Settings","Subscription price and account","One subscription covers the whole clinic and is priced by the number of patients; patients never pay.",["Up to 1,000 patients US$5 a month during the launch offer (normally US$10). Each further 1,000 patients adds US$5.","The owner or an admin subscribes from Clinic settings › Subscription. Every staff device of the clinic then unlocks.","When the plan is almost full, Home shows a reminder. Archiving patients who no longer visit frees places."],null],
+];
+function pageHelp(){
+  const q=S.helpQ.trim().toLowerCase();
+  const list=GUIDES.filter(g=>(S.helpTopic==="All topics"||g[1]===S.helpTopic)&&(!q||[g[1],g[2],g[3],...g[4],g[5]||""].join(" ").toLowerCase().includes(q)));
+  const g=GUIDES.find(x=>x[0]===S.helpId)||list[0]||GUIDES[0];
+  const idx=GUIDES.indexOf(g);
+  return `<div class="page"><div class="page-head"><div><h1 class="h1">Make each visit easier</h1><p class="muted small" style="margin:2px 0 0">Step-by-step guides for every part of Dental Care web</p></div></div>
+  <div class="help"><div class="card"><div class="card-b" style="padding-bottom:10px"><input class="input" id="hq" placeholder="Try chart, slots, roles, refund, or sync" value="${esc(S.helpQ)}" oninput="S.helpQ=this.value;renderMainKeep(this)">
+   <div class="chips" style="margin-top:10px">${["All topics",...new Set(GUIDES.map(x=>x[1]))].map(t=>`<button class="chip ${S.helpTopic===t?"on":""}" onclick="S.helpTopic='${t}';renderMain()">${t}</button>`).join("")}</div>
+   <div class="small muted" style="margin-top:10px">${list.length} ${list.length===1?"guide":"guides"}</div></div>
+   <div class="list">${list.map(x=>`<div class="gitem ${x===g?"on":""}" onclick="S.helpId='${x[0]}';renderMain()"><div class="tp">${x[1]}</div><b>${x[2]}</b><small>${x[3]}</small></div>`).join("")||`<div class="empty">No matching guide. Try a shorter search.</div>`}</div></div>
+   <div class="card"><div class="card-b" style="padding:28px clamp(18px,3vw,44px)"><div class="gitem" style="padding:0;border:0;background:none;box-shadow:none;cursor:default"><div class="tp">${g[1]}</div></div><h2 style="margin:6px 0 6px;font-size:clamp(20px,1.8vw,28px);letter-spacing:-.02em">${g[2]}</h2><p class="muted" style="margin:0;font-size:15px">${g[3]}</p>
+    <ol class="steps">${g[4].map(s=>`<li>${esc(s)}</li>`).join("")}</ol>${g[5]?`<div class="notice teal">${I("help")}<span>${esc(g[5])}</span></div>`:""}
+    <div class="between" style="margin-top:24px"><button class="btn" ${idx<=0?"disabled":""} onclick="S.helpId='${(GUIDES[idx-1]||g)[0]}';renderMain()">${I("chevl")}Previous</button><button class="btn" ${idx>=GUIDES.length-1?"disabled":""} onclick="S.helpId='${(GUIDES[idx+1]||g)[0]}';renderMain()">Next ${I("chev")}</button></div></div></div></div></div>`;
+}
+
+/* ---------- SIGN IN ---------- */
+let signTab="team";
+function pageSignin(){
+  return `<div class="signin"><div class="hero"><div class="row" style="gap:12px">${LOGO.replace('class="logo"','class="logo" style="width:44px;height:44px"')}<b style="font-size:18px">Dental Care</b></div>
+   <div><h1>Your whole clinic, on the big screen.</h1><p>Patients, charts, appointments, treatment payments and reports in one place. The same records as the Android app, synced through your clinic's Firebase.</p></div>
+   <div class="feat"><div><b>Side-by-side workspace</b>Patient list, chart and history together</div><div><b>Doctor columns</b>Every doctor's day in one calendar</div><div><b>Payments by visit</b>Fee, paid and due for each treatment</div><div><b>Roles and access</b>Simple switches per staff member</div></div></div>
+  <div class="form"><div class="box"><h2 style="margin:0 0 6px;font-size:26px;letter-spacing:-.02em">Sign in</h2><p class="muted" style="margin:0 0 20px">Choose who you are.</p>
+   <div class="seg" style="width:100%;margin-bottom:20px"><button style="flex:1" class="${signTab==="team"?"on":""}" onclick="signTab='team';render()">Clinic team</button><button style="flex:1" class="${signTab==="patient"?"on":""}" onclick="signTab='patient';render()">Patient</button></div>
+   ${signTab==="team"?`<button class="gbtn" onclick="go('home')"><svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>Continue with Google</button>
+   <p class="small muted" style="margin-top:16px">The first account to sign in creates the clinic and becomes its owner. Staff join automatically with the access set in Team & roles.</p>`
+   :`<div style="display:grid;gap:14px"><div class="field"><label>Patient ID</label><input class="input" placeholder="e.g. RAHIM01" value="RAHIM01"></div><div class="field"><label>Password</label><input class="input" type="password" value="secret12"></div><button class="btn primary" style="height:46px;justify-content:center" onclick="go('portal')">Sign in</button><p class="small muted" style="margin:0">Forgot your password? Ask your clinic; they can set a new one.</p></div>`}
+   <hr class="sep" style="margin:28px 0 14px"><a href="#/help" class="small" style="font-weight:700">How to use Dental Care</a></div></div></div>`;
+}
+
+/* ---------- PATIENT PORTAL ---------- */
+let portalSlot=null;
+function pagePortal(){
+  const p=PATIENTS[0]; const c=toothCounts(p);
+  const d=addDays(TODAY,1); const ap=apptsFor(d).filter(a=>a.doc==="s3");
+  const slots=[]; (HOURS.s3).forEach(([s,e])=>{for(let m=s;m<e;m+=30) slots.push([m,ap.some(a=>m>=a.start&&m<a.start+a.dur)]);});
+  return `<div style="min-height:100dvh;background:var(--bg)"><div class="portal-top">${LOGO.replace('class="logo"','class="logo" style="width:34px;height:34px"')}<div><b>${esc(CLINIC.name)}</b><div class="small muted">Patient app</div></div><div style="margin-left:auto" class="row"><span class="small hide-sm" style="font-weight:700">${esc(p.name)} · ${p.portal}</span><button class="btn sm" onclick="toast('Record refreshed from clinic')">${I("sync")}Refresh my record</button><button class="btn sm" onclick="go('signin')">Sign out</button><button class="btn sm ghost" onclick="go('home')">Staff view</button></div></div>
+  <div class="portal"><h1 class="h1" style="margin-bottom:4px">Hello, ${esc(p.name.split(" ")[0])}</h1><p class="muted" style="margin:0 0 18px">Your clinic's records, read only. Next visit: <b>today 19:00</b> with Dr. Tanvir Ahmed.</p>
+  <div class="portal-grid"><div style="display:grid;gap:16px;align-content:start">
+   <div class="card"><div class="card-h"><h3>My teeth</h3><span class="sub">Click a tooth to see its history</span></div><div class="card-b">${odontogram(p,true)}${LEGEND}
+    <div class="counters" style="margin-top:12px"><div class="counter"><b style="color:var(--accent)">${c.t}</b><span>Treated</span></div><div class="counter"><b style="color:var(--brand)">${c.pl}</b><span>Planned</span></div><div class="counter"><b style="color:var(--amber)">${c.f}</b><span>Findings</span></div><div class="counter"><b style="color:var(--missing)">${c.m}</b><span>Missing</span></div></div></div></div>
+   <div class="card"><div class="card-h"><h3>Treatment history ${S.tooth?"· "+toothLabel(S.tooth):""}</h3></div><div class="card-b">${treatmentTimeline(p,S.tooth).replace(/<div class="row" style="margin-top:(6|8)px">[\s\S]*?<\/div>/g,"")}</div></div></div>
+   <div style="display:grid;gap:16px;align-content:start">
+   <div class="card"><div class="card-h"><h3>Upcoming appointments</h3></div><div class="card-b"><div class="list-item"><div class="mono" style="width:56px">Today<br>19:00</div><div class="grow"><b>RCT visit 3, tooth 36</b><small>Dr. Tanvir Ahmed</small></div><span class="badge st-Confirmed">Confirmed</span></div><p class="small muted" style="margin:8px 0 0">Cancel up to 2 hours before. Later than that, please call the clinic.</p></div></div>
+   <div class="card"><div class="card-h"><h3>Book appointment</h3><span class="sub">${fmtDay(d)}</span></div><div class="card-b"><div class="field" style="margin-bottom:12px"><label>Doctor</label><select class="input"><option>Dr. Tanvir Ahmed</option><option>Dr. Nusrat Jahan</option></select></div>
+     <div class="slots">${slots.map(([m,b])=>`<button ${b?"disabled":""} class="${portalSlot===m?"on":""}" onclick="portalSlot=${m};render()">${hm(m)}</button>`).join("")}</div>
+     <div class="field" style="margin-top:12px"><label>Reason (optional)</label><input class="input" placeholder="e.g. tooth pain"></div><button class="btn primary" style="margin-top:12px;width:100%;justify-content:center" ${portalSlot===null?"disabled":""} onclick="toast('Booked ${portalSlot!==null?hm(portalSlot):""}. Sent to the clinic.')">Book</button><p class="small muted" style="margin:8px 0 0">You can hold up to 3 upcoming bookings.</p></div></div>
+   <div class="card"><div class="card-h"><h3>Billing</h3></div><div class="card-b"><div class="total-row"><span class="muted">Total fees</span><b class="num">${money(p.treatments.filter(t=>t.status!=="Planned").reduce((a,t)=>a+t.fee,0))}</b></div><div class="total-row"><span class="muted">Paid</span><b class="num" style="color:var(--green)">${money(p.treatments.reduce((a,t)=>a+tPaid(t),0))}</b></div><div class="total-row big"><span>Due</span><span class="num" style="color:var(--amber)">${money(patientDue(p))}</span></div></div></div>
+  </div></div></div></div>`;
+}
+
+/* ---------- dialogs ---------- */
+function modal(title,body,saveLabel,onSave,wide){
+  const sc=$("#scrim"); sc.innerHTML=`<div class="modal ${wide?"wide":""}" role="dialog" aria-modal="true"><div class="modal-h"><h3>${title}</h3><button class="icon-btn" style="margin-left:auto;width:34px;height:34px" onclick="closeModal()" aria-label="Close">${I("x")}</button></div><div class="modal-b">${body}</div><div class="modal-f"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="msave">${saveLabel}</button></div></div>`;
+  sc.classList.add("show"); $("#msave").onclick=()=>{ if(onSave()!==false) closeModal(); };
+  sc.onclick=e=>{ if(e.target===sc) closeModal(); };
+  setTimeout(()=>{const f=sc.querySelector("input,select");f&&f.focus();},30);
+}
+function closeModal(){ $("#scrim").classList.remove("show"); $("#scrim").innerHTML=""; }
+const opts=(arr,sel)=>arr.map(x=>`<option ${x===sel?"selected":""}>${esc(x)}</option>`).join("");
+function registerPatient(id){
+  const p=id?pat(id):null;
+  modal(p?"Edit profile":"Register patient",`<div class="notice teal" style="margin-bottom:14px">${I("search")}<span>Search first to avoid duplicates. Similar records are listed here as you type.</span></div><div class="grid-form">
+   <div class="field"><label>Full name</label><input class="input" id="rn" value="${p?esc(p.name):""}"></div><div class="field"><label>Phone</label><input class="input" id="rp" value="${p?p.phone:""}" placeholder="01XXX-XXXXXX"></div>
+   <div class="field"><label>Date of birth</label><input class="input" type="date" value="${p?p.dob:""}"></div><div class="field"><label>Sex</label><select class="input">${opts(["Female","Male","Other"],p?(p.sex==="F"?"Female":"Male"):"")}</select></div>
+   <div class="field" style="grid-column:1/-1"><label>Address</label><input class="input" value="${p?esc(p.address):""}"></div>
+   <div class="field" style="grid-column:1/-1"><label>Medical alerts</label><div class="chips">${ALERTS.map(a=>`<button type="button" class="chip ${p&&p.alerts.includes(a)?"on":""}" onclick="this.classList.toggle('on')">${a}</button>`).join("")}</div></div>
+   <div class="field" style="grid-column:1/-1"><label class="row" style="font-weight:600"><input type="checkbox" checked> Patient consents to appointment notifications</label></div></div>`,
+   p?"Save":"Register patient",()=>{ if(p){toast("Profile updated");return;} const n=$("#rn").value.trim(); if(!n){$("#rn").focus();return false;} const np=makePatient(PATIENTS.length,n); np.name=n; np.phone=$("#rp").value||np.phone; np.treatments=[];np.invoices=[]; ALL_PERM.forEach(k=>delete np.chart[k]); PATIENTS.unshift(np); S.pending++; toast("Patient registered · "+np.id); go("patients/"+np.id); },true);
+}
+function recordTreatment(teeth,tid){
+  const p=pat(S.pid); const t=tid?p.treatments.find(x=>x.id===tid):null;
+  modal(t?"Edit treatment":"Record treatment · "+teeth.map(toothLabel).join(", "),`<div class="grid-form">
+   <div class="field"><label>Procedure</label><input class="input" id="tp" list="procs" value="${t?esc(t.proc):""}" placeholder="Pick or type your own"><datalist id="procs">${PROCS.map(x=>`<option>${x}</option>`).join("")}</datalist></div>
+   <div class="field"><label>Status</label><select class="input" id="ts">${opts(t?["Completed","In progress","Planned","Cancelled"]:["Completed","In progress","Planned"],t?t.status:"Completed")}</select></div>
+   <div class="field"><label>Surfaces</label><div class="chips" id="tsf">${["W","M","D","F","L","O"].map(s=>`<button type="button" class="chip ${(t?t.surfaces:[S.surf]).includes(s)?"on":""}" onclick="this.classList.toggle('on')">${s}</button>`).join("")}</div></div>
+   <div class="field"><label>Doctor</label><select class="input" id="td">${opts(DOCTORS.map(d=>d.name),t?t.doctor:DOCTORS[1].name)}</select></div>
+   <div class="field"><label>Date</label><input class="input" type="date" id="tdt" value="${t?t.date:iso(TODAY)}"></div>
+   <div class="field"><label>Total fee (${CUR})</label><input class="input" id="tf" type="number" value="${t?t.fee:""}" placeholder="Filled from Services"></div>
+   <div class="field" style="grid-column:1/-1"><label>Notes</label><textarea class="input" id="tn">${t?esc(t.notes):""}</textarea></div></div>
+   ${t?`<p class="small muted">The change log keeps the previous values.</p>`:""}`, "Save",()=>{
+     const proc=$("#tp").value.trim()||"Composite filling", st=$("#ts").value, sf=[...document.querySelectorAll("#tsf .chip.on")].map(b=>b.textContent); const fee=+$("#tf").value||(SERVICES.find(s=>s[0]===proc)||[0,0])[1];
+     if(t){ Object.assign(t,{proc,status:st,surfaces:sf.length?sf:["W"],doctor:$("#td").value,date:$("#tdt").value,fee,notes:$("#tn").value}); }
+     else teeth.forEach(n=>{ p.treatments.push({id:"T"+Date.now()+n,tooth:n,proc,status:st,doctor:$("#td").value,date:$("#tdt").value,surfaces:sf.length?sf:["W"],fee,payments:[],notes:$("#tn").value}); const c=p.chart[n]=p.chart[n]||{}; c.a=1; const key=st==="Planned"?"planned":"treated"; c[key]=[...new Set([...(c[key]||[]),...(sf.length?sf:["W"])])]; });
+     p.history.unshift([iso(TODAY)+" "+hm(NOW_MIN),"Dr. Arif Rahman",(t?"Edited ":"Recorded ")+proc+" "+teeth.map(toothLabel).join(", ")]);
+     S.pending++; S.multi=[]; if(teeth.length===1) S.tooth=teeth[0]; toast(t?"Treatment updated":"Treatment recorded · "+teeth.length+" tooth"+(teeth.length>1?"s":"")); render(); },true);
+  const tp=$("#tp"); tp && tp.addEventListener("change",()=>{ const s=SERVICES.find(x=>x[0]===tp.value); if(s&&!$("#tf").value) $("#tf").value=s[1]; });
+}
+function payDialog(pid,tid){
+  const p=pat(pid), t=p.treatments.find(x=>x.id===tid); const last=t.payments[t.payments.length-1];
+  modal(`${t.fee?"Add payment":"Set fee / add payment"} · ${esc(t.proc)} ${toothLabel(t.tooth)}`,`<div class="grid-form">
+    <div class="field"><label>Total fee (${CUR})</label><input class="input" id="pf" type="number" value="${t.fee||(SERVICES.find(s=>s[0]===t.proc)||[0,""])[1]}"></div>
+    <div class="field"><label>Paid at this visit (${CUR})</label><input class="input" id="pa" type="number" value="${last?last.amt:""}"></div>
+    <div class="field"><label>Method</label><div class="seg" id="pm">${METHODS.map(m=>`<button type="button" class="${(last?last.method:"Cash")===m?"on":""}" onclick="[...this.parentNode.children].forEach(b=>b.classList.remove('on'));this.classList.add('on')">${m}</button>`).join("")}</div></div>
+    <div class="field"><label>Date</label><input class="input" type="date" id="pd" value="${iso(TODAY)}"></div>
+    <div class="field" style="grid-column:1/-1"><label>Note</label><input class="input" id="pn" placeholder="e.g. visit ${t.payments.length+1} of 5"></div></div>
+    <p class="small muted">Paid so far ${money(tPaid(t))}. The fee can't go below what was already paid. Also appears as an invoice in Billing.</p>`,"Save",()=>{
+      const fee=+$("#pf").value, amt=+$("#pa").value; if(fee<tPaid(t)){toast("Fee can't be below what was paid");return false;}
+      t.fee=fee; if(amt>0) t.payments.push({amt,method:document.querySelector("#pm .on").textContent,date:$("#pd").value,note:$("#pn").value});
+      S.pending++; toast("Payment saved · "+money(amt)); render(); });
+}
+function chartStatus(n){ S.tab="chart"; S.tooth=n; renderMain(); }
+function bookAppt(docId,start,pid){
+  modal("Book appointment",`<div class="grid-form">
+   <div class="field" style="grid-column:1/-1"><label>Patient</label><input class="input" list="plist2" value="${pid?esc(pat(pid).name):""}" placeholder="Name, phone or patient app ID"><datalist id="plist2">${PATIENTS.map(p=>`<option>${esc(p.name)}</option>`).join("")}</datalist></div>
+   <div class="field"><label>Doctor</label><select class="input">${opts(DOCTORS.map(d=>d.name),docId?doc(docId).name:DOCTORS[0].name)}</select></div>
+   <div class="field"><label>Date</label><input class="input" type="date" value="${iso(S.day)}"></div>
+   <div class="field"><label>Time</label><input class="input" type="time" value="${start!=null?hm(start):"18:30"}"></div>
+   <div class="field"><label>Duration</label><select class="input">${opts(["30 min","45 min","60 min","90 min"],"30 min")}</select></div>
+   <div class="field"><label>Reason / service</label><input class="input" list="svc" placeholder="e.g. Check-up"><datalist id="svc">${SERVICES.map(s=>`<option>${s[0]}</option>`).join("")}</datalist></div>
+   <div class="field"><label>Room / chair (optional)</label><input class="input" placeholder="Chair 2"></div>
+   <div class="field" style="grid-column:1/-1"><label class="row" style="font-weight:600"><input type="checkbox" checked> Schedule appointment reminder</label></div></div>`,"Book slot",()=>{S.pending++;toast("Appointment booked and shared with the clinic");},true);
+}
+function openSlots(){
+  modal("Open slots on "+S.day.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}),`<div class="grid-form">
+   <div class="field"><label>Doctor</label><select class="input">${opts(DOCTORS.map(d=>d.name))}</select></div>
+   <div class="field"><label>Appointment length</label><select class="input">${opts(["15 min","20 min","30 min","45 min","60 min"],"30 min")}</select></div>
+   <div class="field" style="grid-column:1/-1"><label>Hours</label><div class="chips">${["Morning 09–13","Afternoon 14–17","Evening 17–21","Full day","Exact times"].map((h,i)=>`<button type="button" class="chip ${i===2?"on":""}" onclick="this.classList.toggle('on')">${h}</button>`).join("")}</div></div>
+   <div class="field" style="grid-column:1/-1"><label>Repeat</label><div class="seg"><button class="on" type="button">This day only</button><button type="button">Every week · 4 weeks</button><button type="button">Every week · 1 year</button></div></div></div>
+   <div class="notice teal" style="margin-top:14px">${I("check")}<span>8 slots: 17:00, 17:30, 18:00, 18:30, 19:00, 19:30, 20:00, 20:30</span></div>`,"Open 8 slots",()=>toast("8 slots opened · visible in the patient app"));
+}
+function newInvoice(pid){
+  modal("New invoice · BDT",`<div class="grid-form"><div class="field" style="grid-column:1/-1"><label>Patient</label><input class="input" list="plist3" value="${pid?esc(pat(pid).name):""}"><datalist id="plist3">${PATIENTS.map(p=>`<option>${esc(p.name)}</option>`).join("")}</datalist></div>
+   <div class="field"><label>Line description</label><input class="input" list="svc2" placeholder="Pick a service"><datalist id="svc2">${SERVICES.map(s=>`<option>${s[0]}</option>`).join("")}</datalist></div><div class="field"><label>Unit price (${CUR})</label><input class="input" type="number" value="500"></div><div class="field"><label>Quantity</label><input class="input" type="number" value="1"></div>
+   <div class="field"><label>&nbsp;</label><button class="btn" type="button">${I("plus")}Add line</button></div>
+   <div class="field"><label>Discount amount (${CUR})</label><input class="input" type="number" value="0"></div><div class="field"><label>Tax percent</label><input class="input" type="number" value="0"></div></div>`,"Issue invoice",()=>toast("Invoice issued"),true);
+}
+function addStaff(){
+  modal("Add staff member",`<div class="grid-form"><div class="field"><label>Name</label><input class="input"></div><div class="field"><label>Google email</label><input class="input" placeholder="name@gmail.com"></div><div class="field"><label>Phone</label><input class="input"></div><div class="field"><label>Registration (optional)</label><input class="input"></div>
+   <div class="field" style="grid-column:1/-1"><label>Role</label><div class="chips">${Object.keys(ROLE_ACCESS).map((r,i)=>`<button type="button" class="chip ${i===1?"on":""}" onclick="[...this.parentNode.children].forEach(b=>b.classList.remove('on'));this.classList.add('on')">${r}</button>`).join("")}</div></div></div>
+   <p class="small muted">When they sign in with this Google email they join your clinic with exactly this access.</p>`,"Add to team",()=>toast("Added to team · shared at once"));
+}
+
+/* ---------- command palette ---------- */
+let cmdIdx=0;
+function openCmd(){
+  const sc=$("#scrim"); sc.innerHTML=`<div class="cmdk"><input id="cq" placeholder="Search patients, phone, ID, or type a page name…" autocomplete="off"><div class="res" id="cres"></div></div>`; sc.classList.add("show");
+  sc.onclick=e=>{ if(e.target===sc) closeModal(); };
+  const q=$("#cq"); q.oninput=()=>{cmdIdx=0;cmdRender();}; q.onkeydown=e=>{ const items=[...document.querySelectorAll("#cres [data-go]")]; if(e.key==="ArrowDown"){cmdIdx=Math.min(items.length-1,cmdIdx+1);cmdRender();e.preventDefault();} if(e.key==="ArrowUp"){cmdIdx=Math.max(0,cmdIdx-1);cmdRender();e.preventDefault();} if(e.key==="Enter"&&items[cmdIdx]){closeModal();go(items[cmdIdx].dataset.go);} };
+  cmdRender(); setTimeout(()=>q.focus(),20);
+}
+function cmdRender(){
+  const v=($("#cq")||{value:""}).value.trim().toLowerCase();
+  const ps=PATIENTS.filter(p=>!v||[p.name,p.phone,p.id,p.portal||""].join(" ").toLowerCase().includes(v)).slice(0,7);
+  const pages=[["home","Home"],["schedule","Appointments"],["billing","Billing"],["reports","Reports"],["team","Team & roles"],["settings","Clinic settings"],["help","How to use"]].filter(x=>!v||x[1].toLowerCase().includes(v));
+  let i=0; const row=(go,html)=>`<div data-go="${go}" class="${i++===cmdIdx?"on":""}" onclick="closeModal();go('${go}')">${html}</div>`;
+  $("#cres").innerHTML = (ps.length?`<h6>Patients</h6>`+ps.map(p=>row("patients/"+p.id,`<div class="avatar">${initials(p.name)}</div><div style="flex:1"><b>${esc(p.name)}</b><div class="small muted num">${p.id} · ${p.phone}${p.portal?" · "+p.portal:""}</div></div>${p.alerts.length?`<span class="badge red">${esc(p.alerts[0])}</span>`:""}`)).join(""):"")
+    + (pages.length?`<h6>Go to</h6>`+pages.map(x=>row(x[0],`${I("chev")}<b>${x[1]}</b>`)).join(""):"") || `<div class="empty">Nothing found</div>`;
+}
+
+/* ---------- misc ---------- */
+let toastT; function toast(msg){ const t=$("#toast"); t.innerHTML=I("check")+esc(msg); t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2600); }
+function doSync(){ const b=$("#syncBtn"); if(b) b.innerHTML=I("sync","spin"); setTimeout(()=>{ const n=S.pending; S.pending=0; render(); toast(n?`Synced ${n} changes · 1 patient app booking received`:"Everything is up to date"); },900); }
+function go(r){ location.hash="#/"+r; }
+function parse(){
+  const h=location.hash.replace(/^#\//,"")||"home"; const [r,id]=h.split("/");
+  S.route = ["home","patients","schedule","billing","reports","team","settings","help","signin","portal"].includes(r)?r:"home";
+  if(r==="patients"&&id&&pat(id)){ if(S.pid!==id){S.pid=id;S.tooth=null;S.multi=[];} }
+}
+function renderMain(){ const m=$("#main"); if(!m){render();return;} const st=m.scrollTop; const rail=document.querySelector(".prail"), rs=rail?rail.scrollTop:0, pl=document.querySelector(".plist .items"), ps=pl?pl.scrollTop:0; m.innerHTML=pageFor(); m.scrollTop=st; const r2=document.querySelector(".prail"); if(r2) r2.scrollTop=rs; const p2=document.querySelector(".plist .items"); if(p2) p2.scrollTop=ps; }
+function renderMainKeep(el){ const id=el.id, pos=el.selectionStart; renderMain(); const n=document.getElementById(id); if(n){n.focus(); n.setSelectionRange(pos,pos);} }
+function pageFor(){ return ({home:pageHome,patients:pagePatients,schedule:pageSchedule,billing:pageBilling,reports:pageReports,team:pageTeam,settings:pageSettings,help:pageHelp})[S.route](); }
+function render(){
+  parse();
+  if(S.route==="signin"){ $("#root").innerHTML=pageSignin(); return; }
+  if(S.route==="portal"){ $("#root").innerHTML=pagePortal(); return; }
+  $("#root").innerHTML=shell(pageFor());
+}
+addEventListener("hashchange",()=>{ render(); const m=$("#main"); if(m) m.scrollTop=0; });
+addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){ e.preventDefault(); openCmd(); }
+  if(e.key==="Escape"){ closeModal(); const a=$("#app"); a&&a.classList.remove("drawer"); }
+});
+render();
+</script>
+</body>
+</html>

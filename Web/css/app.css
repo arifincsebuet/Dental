@@ -1,0 +1,133 @@
+/* Dental Care Web: additions on top of base.css (the approved design). */
+.boot{min-height:100dvh;display:grid;place-items:center;color:var(--muted);font-weight:700}
+.boot .logo{width:56px;height:56px;margin:0 auto 14px;display:block;animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(.92);opacity:.7}}
+.demo-bar{background:linear-gradient(90deg,#7C3AED,#2563EB);color:#fff;font-size:12.5px;font-weight:600;padding:6px 14px;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+.demo-bar button{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:8px;padding:2px 8px;cursor:pointer;font-weight:700}
+.app.with-demo{height:calc(100dvh - 31px)}
+.msg{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--surface);padding:12px 16px;border-radius:12px;font-weight:600;display:flex;gap:10px;align-items:center;box-shadow:var(--shadow-lg);max-width:min(720px,calc(100% - 32px));animation:msgIn .25s ease}
+.msg.error{background:var(--red);color:#fff}
+.msg button{background:none;border:0;color:inherit;opacity:.8;cursor:pointer;font-weight:700}
+@keyframes msgIn{from{opacity:0;transform:translateX(-50%) translateY(20px)}}
+.field .hint{font-size:11.5px;color:var(--muted)}
+.err{color:var(--red);font-weight:600;font-size:13px;margin-top:10px}
+.chip.sm{height:28px;font-size:12px;padding:0 10px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.block{width:100%;justify-content:center}
+.ro-note{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.kv dd{word-break:break-word}
+.linkish{background:none;border:0;padding:0;color:var(--brand);font-weight:700;cursor:pointer}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.sticky{position:sticky;top:0}
+.print-only{display:none}
+
+/* ---------- 3D stage (slot in the page; the Godot layer is positioned over it) ---------- */
+.stage-slot{position:relative;height:clamp(440px,64vh,940px);border-radius:20px;background:radial-gradient(120% 90% at 50% 10%,#f5fbfc,#dbe8ee);border:1px solid var(--line);overflow:hidden}
+.stage-slot.short{height:clamp(380px,52vh,720px)}
+.stage-fallback{position:absolute;inset:0;padding:18px;overflow:auto;background:var(--surface)}
+.v3d{position:fixed;z-index:4;display:none;border-radius:20px;overflow:hidden}
+.v3d.on{display:block}
+.v3d.fs{inset:0!important;width:auto!important;height:auto!important;border-radius:0;z-index:45;clip-path:none!important;background:#eef5f8}
+.v3d iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;background:#f2f9fb}
+.v3d-ui{position:absolute;inset:0;pointer-events:none;color:#0F1E2E;font-size:13px}
+.v3d-ui>*{pointer-events:auto}
+.v3d-ui .glass{background:rgba(255,255,255,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(15,30,46,.08);border-radius:14px;box-shadow:0 6px 24px rgba(15,30,46,.10)}
+.v3d-top{position:absolute;left:12px;top:12px;right:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;pointer-events:none!important}
+.v3d-top>*{pointer-events:auto}
+.v3d-top .spacer{flex:1;pointer-events:none}
+.v3d-seg{display:inline-flex;padding:3px;gap:2px}
+.v3d-seg button,.v3d-btn{height:32px;min-width:32px;padding:0 11px;border:0;background:transparent;border-radius:10px;font-weight:700;font-size:12.5px;cursor:pointer;color:#334155;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.v3d-seg button:hover,.v3d-btn:hover{background:rgba(15,118,110,.08)}
+.v3d-seg button.on,.v3d-btn.on{background:#0F766E;color:#fff}
+.v3d-btn svg.i{width:16px;height:16px}
+.v3d-lens{position:absolute;left:12px;bottom:12px;padding:10px 12px;max-width:min(560px,calc(100% - 24px))}
+.v3d-lens .row{flex-wrap:wrap;gap:6px}
+.v3d-lens .lchip{height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(15,30,46,.12);background:#fff;font-weight:700;font-size:12px;cursor:pointer;color:#334155}
+.v3d-lens .lchip.on{background:#0F1E2E;color:#fff;border-color:#0F1E2E}
+.v3d-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;font-weight:700;color:#475569}
+.v3d-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.v3d-glance{position:absolute;right:12px;top:12px;bottom:12px;width:272px;padding:14px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+.v3d-glance h5{margin:0;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:#64748B}
+.v3d-glance .big{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.v3d-glance .mini{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.v3d-glance .mini div{background:#fff;border:1px solid rgba(15,30,46,.08);border-radius:10px;padding:7px 9px}
+.v3d-glance .mini b{display:block;font-size:17px}
+.v3d-glance .mini span{font-size:11px;color:#64748B;font-weight:700}
+.v3d-quads{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.v3d-quads button{all:unset;cursor:pointer;background:#fff;border:1px solid rgba(15,30,46,.08);border-radius:10px;padding:7px 9px;font-size:11.5px}
+.v3d-quads button:hover{border-color:#0F766E}
+.v3d-quads b{display:block;font-size:12px}
+.v3d-issue{all:unset;display:flex;gap:8px;align-items:center;cursor:pointer;padding:6px 8px;border-radius:9px;font-size:12px;font-weight:600}
+.v3d-issue:hover{background:rgba(15,118,110,.08)}
+.v3d-issue .k{min-width:34px;height:24px;border-radius:7px;display:grid;place-items:center;font-weight:800;font-size:11.5px;color:#fff}
+.v3d-hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);max-width:40%;white-space:normal!important;text-align:center;font-size:11.5px;font-weight:600;color:#64748B;background:rgba(255,255,255,.7);padding:4px 10px;border-radius:999px;pointer-events:none!important;white-space:nowrap}
+.v3d-loading{position:absolute;inset:0;display:grid;place-items:center;font-weight:800;color:#0F766E;background:radial-gradient(120% 90% at 50% 10%,#f5fbfc,#dbe8ee);font-size:15px}
+.v3d-selrow{flex-basis:100%;display:flex;justify-content:center;pointer-events:none!important}.v3d-selrow:empty{display:none}
+.v3d-sel{pointer-events:auto;padding:8px 12px;display:flex;gap:10px;align-items:center;font-weight:700;flex-wrap:wrap;justify-content:center}
+.v3d-sel .b{background:#0F766E;color:#fff;border-radius:9px;padding:3px 9px;font-weight:800}
+.tip3d{position:fixed;z-index:46;pointer-events:none;width:280px;padding:12px 14px;border-radius:14px;background:rgba(15,30,46,.94);color:#E2E8F0;font-size:12.5px;box-shadow:0 12px 40px rgba(0,0,0,.3);display:none}
+.tip3d.on{display:block}
+.tip3d b{color:#fff}
+.tip3d .t{font-size:15px;font-weight:800;color:#fff;display:flex;gap:8px;align-items:center}
+.tip3d .t span{background:#14B8A6;color:#04211E;border-radius:7px;padding:1px 7px;font-size:12px}
+.tip3d .row{gap:6px;flex-wrap:wrap;margin-top:6px}
+.tip3d .pill{background:rgba(255,255,255,.1);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}
+.tip3d .pill.a{background:rgba(245,158,11,.25);color:#FCD34D}
+.tip3d .pill.t{background:rgba(20,184,166,.25);color:#5EEAD4}
+.tip3d .pill.b{background:rgba(96,165,250,.25);color:#93C5FD}
+.tip3d .money{display:flex;gap:10px;margin-top:8px;font-weight:700;font-size:12px}
+.tip3d hr{border:0;border-top:1px solid rgba(255,255,255,.12);margin:8px 0}
+
+.v3d:not(.wide) .v3d-glance{display:none}
+.v3d.wide iframe{right:296px;width:auto}
+.v3d.wide .v3d-top{right:308px}
+.v3d.wide .v3d-hint{left:auto;right:308px;transform:none}
+.v3d.wide .v3d-lens{max-width:calc(100% - 640px);min-width:360px}
+.v3d.wide .v3d-ui::after{content:"";position:absolute;top:0;bottom:0;right:0;width:296px;background:linear-gradient(90deg,#e3eef2,#eef5f8);z-index:-1;pointer-events:none}
+@media (max-width:767px){
+  .stage-slot{height:58vh}
+  .v3d-lens{left:8px;right:8px;bottom:8px;max-width:none;padding:8px}
+  .v3d-legend{display:none}
+  .v3d-hint{display:none}
+  .v3d-top{left:8px;right:8px;top:8px;gap:6px}
+  .v3d-seg button,.v3d-btn{height:30px;padding:0 8px;font-size:12px}
+  .app.with-demo{height:calc(100dvh - 48px)}
+}
+
+/* patient workspace tweaks */
+.pw .pcenter{min-width:0}
+.pw.collapsed{grid-template-columns:0 minmax(0,1fr) 380px}
+.pw.collapsed .plist{display:none}
+@media (max-width:1599px){.pw.collapsed{grid-template-columns:minmax(0,1fr)}}
+.img-tile{aspect-ratio:1;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface-3);cursor:pointer;display:grid;place-items:center;font-size:11px;color:var(--muted);font-weight:700}
+.img-tile img{width:100%;height:100%;object-fit:cover}
+.history-prev{font-size:11.5px;color:var(--muted);margin-top:4px}
+.slot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.slot-grid button{height:40px;border-radius:10px;border:1.5px dashed var(--line-2);background:var(--surface);font-weight:700;cursor:pointer}
+.slot-grid button.on,.slot-grid button:hover:not(:disabled){border-style:solid;border-color:var(--brand);background:var(--brand-softer);color:var(--brand)}
+.slot-grid button:disabled{opacity:.45;cursor:not-allowed;text-decoration:line-through}
+.wk{display:flex;gap:4px;flex-wrap:wrap}
+.wk button{width:38px;height:32px;border-radius:9px;border:1px solid var(--line-2);background:var(--surface);font-weight:700;cursor:pointer;font-size:12px}
+.wk button.on{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+@media print{
+  body{background:#fff}
+  .app,.v3d,.tip3d,.msg,.demo-bar{display:none!important}
+  .print-only{display:block!important;padding:24px;color:#000;font:13px/1.5 system-ui}
+  .print-only h1{font-size:22px;margin:0 0 4px}
+  .print-only table{width:100%;border-collapse:collapse;margin:8px 0 16px}
+  .print-only td,.print-only th{border-bottom:1px solid #ccc;padding:5px 6px;text-align:left}
+}
+
+/* Patient page: give the 3D chart the room. The sidebar becomes an icon rail. */
+.v3d.wide iframe{width:calc(100% - 296px)}
+.app.compact-nav{--nav-w:76px;grid-template-columns:76px minmax(0,1fr)}
+.app.compact-nav .brand b,.app.compact-nav .brand small,.app.compact-nav .nav h6,.app.compact-nav .nav a span.lbl,.app.compact-nav .side-foot .plan{display:none}
+.app.compact-nav .brand{justify-content:center;padding:0}
+.app.compact-nav .nav a{justify-content:center;padding:11px}
+.app.compact-nav .nav a .badge{position:absolute;top:3px;right:6px;margin:0}
+.pw{grid-template-columns:290px minmax(0,1fr) 360px}
+@media (max-width:1599px){.pw{grid-template-columns:290px minmax(0,1fr)}}
+@media (max-width:1023px){.pw{grid-template-columns:1fr}}
+@media (min-width:2200px){.pw{grid-template-columns:320px minmax(0,1fr) 420px}}
+@media (max-width:767px){.app.compact-nav{grid-template-columns:1fr}}
+@media (max-width:767px){.demo-bar .long{display:none}.app.with-demo{height:calc(100dvh - 31px)}}

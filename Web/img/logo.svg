@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108" role="img" aria-label="Dental Care logo">
+  <rect width="108" height="108" rx="26" fill="#0F766E"/>
+  <path fill="#FFFFFF" d="M38,30 C30,30 29,40 32,49 C35,57 35,76 41,79 C46,82 46,61 54,61 C62,61 62,82 67,79 C73,76 73,57 76,49 C79,40 78,30 70,30 C64,29 60,34 54,34 C48,34 44,29 38,30 Z"/>
+  <path d="M39,38 C42,36 46,39 49,40" fill="none" stroke="#99F6E4" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M77,23 L79.2,29.8 L86,32 L79.2,34.2 L77,41 L74.8,34.2 L68,32 L74.8,29.8 Z" fill="#2563EB" stroke="#CCFBF1" stroke-width="0.7"/>
+</svg>

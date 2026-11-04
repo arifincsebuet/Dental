@@ -19,5 +19,52 @@
     "ui": {
       "enabled": true
     }
+  },
+  "hosting": {
+    "public": "Web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "godot-src/**",
+      "README.md",
+      "FEATURES.md",
+      "**/*.part1",
+      "**/*.part2",
+      "**/*.bat"
+    ],
+    "headers": [
+      {
+        "source": "**/*.wasm",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=604800"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/wasm"
+          }
+        ]
+      },
+      {
+        "source": "**/*.pck",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(html|js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
   }
 }

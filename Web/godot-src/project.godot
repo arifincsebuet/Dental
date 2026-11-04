@@ -1,0 +1,23 @@
+config_version=5
+
+[application]
+config/name="Dental Care Chart"
+run/main_scene="res://chart.tscn"
+config/quit_on_go_back=false
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.961,0.984,0.988,1)
+boot_splash/minimum_display_time=0
+
+[display]
+window/size/viewport_width=1080
+window/size/viewport_height=1600
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+anti_aliasing/quality/msaa_3d=2
+environment/defaults/default_clear_color=Color(0.94,0.98,0.99,1)
+textures/default_filters/use_nearest_mipmap_filter=false
