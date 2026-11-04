@@ -65,12 +65,25 @@ export const hm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAYS_LONG = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+let fmtLang = null;
+/** Date language for formatting (null = the interface language). Used by the PDF reports. */
+export function setFormatLang(l) { fmtLang = l; }
+const dfCache = new Map();
+function localDate(utcMs, opts) {
+  const l = fmtLang ?? document.documentElement.lang ?? "en";
+  if (l === "en" || l === "en-GB") return null;
+  const k = l + JSON.stringify(opts);
+  if (!dfCache.has(k)) { try { dfCache.set(k, new Intl.DateTimeFormat(l + "-u-ca-gregory-nu-latn", { ...opts, timeZone: "UTC" })); } catch { dfCache.set(k, null); } }
+  return dfCache.get(k)?.format(utcMs) ?? null;
+}
 export function fmtIso(iso, long = false) {
   if (!iso) return "";
   const [y, m, d] = iso.split("-").map(Number);
+  const loc = localDate(Date.UTC(y, m - 1, d), long ? { weekday: "long", day: "numeric", month: "long", year: "numeric" } : { day: "numeric", month: "short", year: "numeric" });
+  if (loc) return loc;
   return long ? `${DAYS_LONG[dowOf(iso) - 1]}, ${d} ${MONTHS_LONG[m - 1]} ${y}` : `${d} ${MONTHS[m - 1]} ${y}`;
 }
-export const fmtMonth = (y, m) => `${MONTHS_LONG[m - 1]} ${y}`;
+export const fmtMonth = (y, m) => localDate(Date.UTC(y, m - 1, 1), { month: "long", year: "numeric" }) || `${MONTHS_LONG[m - 1]} ${y}`;
 export function fmtMs(ms, tz, withTime = false) {
   if (!ms) return "Date not recorded";
   const z = zoned(ms, tz);

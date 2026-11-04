@@ -1,7 +1,8 @@
 // PDF reports (A4, vector): full patient record with the 2D dental chart, financial report,
 // appointments list, invoice and receipt. Same layout and content as the Android app
 // (app/src/main/java/com/spala/dental/ReportPdf.kt). Uses jsPDF + AutoTable from /vendor.
-import { zoned, fmtIso, fmtMs, currencyDigits, todayIn, ageFrom } from "./util.js";
+import { zoned, fmtIso, fmtMs, currencyDigits, todayIn, ageFrom, setFormatLang } from "./util.js";
+import { pt, isLatin, currentLang } from "./i18n.js";
 import * as D from "./domain.js";
 import { S } from "./store.js";
 
@@ -22,28 +23,29 @@ const when = (ms) => (ms ? fmtMs(ms, tz(), true) : "-");
 /** PDF-safe money: currency code, no symbol (the built-in PDF fonts have no Taka sign). */
 const money = (minor, code) => { const c = code || D.cur(S.config); const d = currencyDigits(c); const v = (Number(minor) || 0) / 10 ** d; return `${c} ${v.toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(v) ? 0 : d, maximumFractionDigits: d })}`; };
 /** Replace characters the standard PDF fonts can't draw. */
-const safe = (t) => String(t ?? "").replace(/[→]/g, "->").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/৳/g, "BDT ").replace(/[^\x00-\xFF–—•…€]/g, "");
+const safe = (t) => String(t ?? "").replace(/[→]/g, "->").replace(/œ/g, "oe").replace(/Œ/g, "OE").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/৳/g, "BDT ").replace(/[^\x00-\xFF–—•…€]/g, "");
+/** Translated label (Latin-script languages; other languages print in English). */
+const tx = (t) => safe(pt(t));
 const pretty = (c) => String(c || "").replace(/_/g, " ");
 const L = (k) => D.toothLabel(k, S.notation);
 const OPEN = ["Planned", "Accepted", "In progress", "Deferred", "Referred"];
 
 class Report {
   constructor(jsPDF, title, subtitle) {
+    setFormatLang(isLatin() ? document.documentElement.lang : "en");
+    const bc = /^#([0-9a-f]{6})$/i.exec(S.config.brandColor || "");
+    C.teal = bc ? [0, 2, 4].map((i) => parseInt(bc[1].slice(i, i + 2), 16)) : [15, 118, 110];
     this.doc = new jsPDF({ unit: "pt", format: "a4" });
+    this.logo = null;
+    try { if (S.config.logo) { const pr = this.doc.getImageProperties(S.config.logo); this.logo = { data: S.config.logo, r: pr.width / pr.height }; } } catch { this.logo = null; }
+    title = pt(title);
     this.title = title; this.subtitle = subtitle; this.y = 0;
     this.width = W - 2 * M;
     this.pageHeader();
   }
   color(c) { this.doc.setTextColor(...c); }
   font(size, bold = false, c = C.ink) { this.doc.setFont("helvetica", bold ? "bold" : "normal"); this.doc.setFontSize(size); this.color(c); }
-  pageHeader() {
-    const d = this.doc;
-    d.setFillColor(...C.teal); d.rect(0, 0, W, 6, "F");
-    this.font(9, true, C.teal); d.text(safe(S.config.name || "Dental Care"), M, 28);
-    this.font(8.5, false, C.muted); d.text(safe(this.title), W - M, 28, { align: "right" });
-    d.setDrawColor(...C.line); d.setLineWidth(0.7); d.line(M, 36, W - M, 36);
-    this.y = 52;
-  }
+  pageHeader() { this.drawHeaderOnly(); this.y = 58; }
   newPage() { this.doc.addPage(); this.pageHeader(); }
   ensure(h) { if (this.y + h > H - 44) this.newPage(); }
   header() {
@@ -54,12 +56,12 @@ class Report {
   }
   heading(t) {
     this.ensure(64); this.y += 10;
-    this.font(8.5, true, C.teal); this.doc.text(safe(t.toUpperCase()), M, this.y + 9); this.y += 14;
+    this.font(8.5, true, C.teal); this.doc.text(tx(t).toUpperCase(), M, this.y + 9); this.y += 14;
     this.doc.setDrawColor(...C.line); this.doc.line(M, this.y, W - M, this.y); this.y += 8;
   }
   text(t, size = 9.5, c = C.ink, bold = false, indent = 0) {
     this.font(size, bold, c);
-    for (const l of this.doc.splitTextToSize(safe(t), this.width - indent)) { this.ensure(size + 4); this.doc.text(l, M + indent, this.y + size); this.y += size + 4; }
+    for (const l of this.doc.splitTextToSize(tx(t), this.width - indent)) { this.ensure(size + 4); this.doc.text(l, M + indent, this.y + size); this.y += size + 4; }
   }
   space(h = 6) { this.y += h; }
   facts(pairs, cols = 2) {
@@ -67,12 +69,12 @@ class Report {
     for (let i = 0; i < pairs.length; i += cols) {
       const row = pairs.slice(i, i + cols);
       this.font(9.5, true);
-      const wrapped = row.map(([, v]) => this.doc.splitTextToSize(safe(v || "-"), cw - 10));
+      const wrapped = row.map(([, v]) => this.doc.splitTextToSize(tx(v || "-"), cw - 10));
       const h = 12 + Math.max(1, ...wrapped.map((w) => w.length)) * 12 + 6;
       this.ensure(h);
       row.forEach(([label], j) => {
         const x = M + j * cw;
-        this.font(7, true, C.muted); this.doc.text(safe(label.toUpperCase()), x, this.y + 8);
+        this.font(7, true, C.muted); this.doc.text(tx(label).toUpperCase(), x, this.y + 8);
         this.font(9.5, true); wrapped[j].forEach((l, k) => this.doc.text(l, x, this.y + 20 + k * 12));
       });
       this.y += h;
@@ -85,7 +87,7 @@ class Report {
     items.forEach(([label, value, c], i) => {
       const x = M + i * (tile + gap);
       this.doc.setFillColor(248, 250, 252); this.doc.setDrawColor(...C.line); this.doc.roundedRect(x, this.y, tile, 44, 6, 6, "FD");
-      this.font(7.5, true, C.muted); this.doc.text(safe(label), x + 8, this.y + 14);
+      this.font(7.5, true, C.muted); this.doc.text(tx(label), x + 8, this.y + 14);
       this.font(String(value).length > 14 ? 10 : 13, true, c || C.ink); this.doc.text(this.doc.splitTextToSize(safe(value), tile - 14)[0] || "", x + 8, this.y + 33);
     });
     this.y += 52;
@@ -97,7 +99,7 @@ class Report {
     weights.forEach((w, i) => (columnStyles[i] = { cellWidth: (w / total) * this.width, halign: right.includes(i) ? "right" : "left" }));
     this.ensure(36);
     this.doc.autoTable({
-      startY: this.y, margin: { left: M, right: M, top: 52, bottom: 44 }, head: [head.map((h) => safe(h.toUpperCase()))], body: rows.map((r) => r.map(safe)),
+      startY: this.y, margin: { left: M, right: M, top: 58, bottom: 44 }, head: [head.map((h) => tx(h).toUpperCase())], body: rows.map((r) => r.map(tx)),
       theme: "plain", columnStyles,
       styles: { font: "helvetica", fontSize: 8.5, textColor: C.ink, cellPadding: { top: 3, bottom: 3, left: 4, right: 4 }, lineColor: C.line, lineWidth: { bottom: 0.5 } },
       headStyles: { fillColor: C.soft, textColor: C.muted, fontSize: 7.5, fontStyle: "bold", lineWidth: 0 },
@@ -107,11 +109,28 @@ class Report {
     this.y = this.doc.lastAutoTable.finalY + 6;
   }
   drawHeaderOnly() {
-    const d = this.doc;
+    const d = this.doc, cfg = S.config;
     d.setFillColor(...C.teal); d.rect(0, 0, W, 6, "F");
-    this.font(9, true, C.teal); d.text(safe(S.config.name || "Dental Care"), M, 28);
-    this.font(8.5, false, C.muted); d.text(safe(this.title), W - M, 28, { align: "right" });
-    d.setDrawColor(...C.line); d.setLineWidth(0.7); d.line(M, 36, W - M, 36);
+    let x = M;
+    if (this.logo) { const h = 24, w = Math.min(60, h * this.logo.r); try { d.addImage(this.logo.data, "PNG", M, 12, w, h); x = M + w + 8; } catch { /* skip logo */ } }
+    this.font(10, true, C.teal); d.text(safe(cfg.name || "Dental Care"), x, 23);
+    const line2 = [cfg.address, cfg.clinicPhone].filter(Boolean).join("  ·  ");
+    if (line2) { this.font(7, false, C.muted); d.text(d.splitTextToSize(safe(line2), W - M - x - 150)[0] || "", x, 33); }
+    this.font(8.5, false, C.muted); d.text(safe(this.title), W - M, 23, { align: "right" });
+    d.setDrawColor(...C.line); d.setLineWidth(0.7); d.line(M, 40, W - M, 40);
+  }
+  watermark() {
+    const d = this.doc, name = safe(S.config.name || "");
+    try {
+      d.setGState(new d.GState({ opacity: 0.06 }));
+      if (this.logo) { const h = 220, w = Math.min(320, h * this.logo.r); d.addImage(this.logo.data, "PNG", (W - w) / 2, (H - h) / 2, w, h); }
+      if (name.trim()) {
+        d.setGState(new d.GState({ opacity: 0.07 }));
+        this.font(Math.max(28, Math.min(60, 900 / Math.max(8, name.length))), true, C.teal);
+        const tw = d.getTextWidth(name), a = Math.PI / 4;
+        d.text(name, W / 2 - (tw / 2) * Math.cos(a), H / 2 + (tw / 2) * Math.sin(a) + 120, { angle: 45 });
+      }
+    } finally { d.setGState(new d.GState({ opacity: 1 })); }
   }
   /** 2D odontogram: five surfaces per tooth, coloured like the app. */
   chart(chart) {
@@ -139,14 +158,15 @@ class Report {
     const midX = x0 + 8 * step - (step - s) / 2 + gap / 2, midY = top + (rows.length / 2) * rh + 5;
     doc.line(midX, top, midX, this.y); doc.line(x0 - 6, midY, x0 + cw + 6, midY);
     doc.setLineDashPattern([], 0);
-    this.font(6.5, true, C.muted); doc.text("PATIENT RIGHT", x0, top - 2); doc.text("PATIENT LEFT", x0 + cw, top - 2, { align: "right" });
+    this.font(6.5, true, C.muted); doc.text(tx("Right").toUpperCase(), x0, top - 2); doc.text(tx("Left").toUpperCase(), x0 + cw, top - 2, { align: "right" });
     this.y += 6;
     this.ensure(16);
     let x = M;
-    for (const [col, label] of [[[238, 242, 246], "Not assessed"], [[255, 233, 194], "Assessed"], [[96, 165, 250], "Treated / restoration"], [[204, 251, 241], "Planned (+)"], [[245, 158, 11], "Finding"], [[248, 250, 252], "Lost (x)"]]) {
+    for (const [col, label] of [[[238, 242, 246], "Not assessed"], [[255, 233, 194], "Assessed"], [[96, 165, 250], "Treated"], [[204, 251, 241], "Planned"], [[245, 158, 11], "Finding"], [[248, 250, 252], "Missing"]]) {
       doc.setFillColor(...col); doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.5); doc.rect(x, this.y + 2, 8, 8, "FD");
-      this.font(7.5, false, C.muted); doc.text(label, x + 11, this.y + 9.5);
-      x += 11 + doc.getTextWidth(label) + 12;
+      const lt = tx(label);
+      this.font(7.5, false, C.muted); doc.text(lt, x + 11, this.y + 9.5);
+      x += 11 + doc.getTextWidth(lt) + 12;
     }
     this.y += 16;
   }
@@ -183,10 +203,12 @@ class Report {
     const n = this.doc.getNumberOfPages();
     for (let p = 1; p <= n; p++) {
       this.doc.setPage(p);
+      this.watermark();
       this.font(7.5, false, C.muted);
-      this.doc.text(safe(`Generated ${when(Date.now())} · Dental Care · confidential patient information`), M, H - 22);
-      this.doc.text(`Page ${p} of ${n}`, W - M, H - 22, { align: "right" });
+      this.doc.text(safe(`${when(Date.now())} · ${S.config.name || "Dental Care"}`), M, H - 22);
+      this.doc.text(`${p} / ${n}`, W - M, H - 22, { align: "right" });
     }
+    setFormatLang(null);
     this.doc.save(name);
   }
 }

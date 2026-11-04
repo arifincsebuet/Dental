@@ -33,7 +33,8 @@ function applyStaffInvites(config, clinicId, invites) {
   }
 }
 export const publicInfo = (c) => ({ name: c.name || "Dental Care", timeZone: c.timeZone || "Asia/Dhaka", currency: c.currency || "BDT",
-  availability: clone(c.availability || []), patientBooking: c.patientBooking !== false, remindersEnabled: !!c.remindersEnabled, reminderHours: c.reminderHours || 24 });
+  availability: clone(c.availability || []), patientBooking: c.patientBooking !== false, remindersEnabled: !!c.remindersEnabled, reminderHours: c.reminderHours || 24,
+  logo: c.logo || "", address: c.address || "", clinicPhone: c.clinicPhone || "", mapUrl: c.mapUrl || "", brandColor: c.brandColor || "" });
 const clinicView = (c) => ({ name: c.name || "Dental Care", timeZone: c.timeZone || "Asia/Dhaka", currency: c.currency || "BDT" });
 const stripLocal = (p) => { const d = clone(p); LOCAL_FIELDS.forEach((k) => delete d[k]); return d; };
 

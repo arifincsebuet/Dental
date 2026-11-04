@@ -81,8 +81,9 @@ fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
     var section by remember { mutableStateOf("Clinic") }
     var form by remember { mutableStateOf<FeatureForm?>(null) }
     FeatureHeading("Clinic management", "Configure your workspace, services, and reminders. Staff and access are in Team & roles.")
-    FeatureChoices(listOf("Clinic", "Services", "Reminders"), section) { section = it }
+    FeatureChoices(listOf("Clinic", "Clinic branding", "Services", "Reminders"), section) { section = it }
     when (section) {
+        "Clinic branding" -> BrandingPanel(config, onSave)
         "Clinic" -> {
             FeaturePanel(config.optString("name", "Dental Care")) {
                 Text("${config.optString("timeZone", "Asia/Dhaka")} · ${currentCurrency(config)}")
@@ -90,16 +91,15 @@ fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
                 Button(onClick = { form = FeatureForm("Clinic settings", listOf(
                     FeatureField("name", "Clinic name", config.optString("name", "Dental Care")),
                     FeatureField("timeZone", "Time zone (IANA)", config.optString("timeZone", "Asia/Dhaka")),
-                    FeatureField("currency", "Currency code", currentCurrency(config)),
                     FeatureField("tax", "Default tax percent", BigDecimal(config.optInt("taxBps")).movePointLeft(2).toPlainString()),
                     FeatureField("buffer", "Appointment buffer minutes", config.optInt("bufferMinutes", 5).toString())
                 )) { v ->
                     val changed = copyJson(config).put("name", v.getValue("name")).put("timeZone", v.getValue("timeZone"))
-                        .put("currency", v.getValue("currency").uppercase(Locale.ROOT))
                         .put("taxBps", v.getValue("tax").toBigDecimal().movePointRight(2).intValueExact())
                         .put("bufferMinutes", v.getValue("buffer").toInt())
                     ClinicalRules.validateConfig(changed); onSave(changed)
                 } }) { Text("Edit clinic settings") }
+                CurrencyPicker(config, onSave)
             }
         }
         "Services" -> {

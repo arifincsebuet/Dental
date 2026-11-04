@@ -110,6 +110,12 @@ object ClinicCloud {
         "patientBooking" to config.optBoolean("patientBooking", true),
         "remindersEnabled" to config.optBoolean("remindersEnabled"),
         "reminderHours" to config.optInt("reminderHours", 24),
+        // Clinic branding for the patient app (logo, address, map, colour).
+        "logo" to config.optString("logo"),
+        "address" to config.optString("address"),
+        "clinicPhone" to config.optString("clinicPhone"),
+        "mapUrl" to config.optString("mapUrl"),
+        "brandColor" to config.optString("brandColor"),
     )
 
     data class Workspace(val clinicId: String, val role: String)

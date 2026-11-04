@@ -1,5 +1,7 @@
 // Patient workspace: list · record with the Godot 3D chart at the centre · tooth rail.
 import { $, $$, esc, clone, uid, arr, initials, money, compactMoney, parseMinor, minorToText, zoned, zonedMs, todayIn, fmtMs, fmtIso, ageFrom, download, debounce } from "./util.js";
+import { setFormatLang } from "./util.js";
+import { isLatin, currentLang } from "./i18n.js";
 import * as D from "./domain.js";
 import { S, save, can, patient, say, createPatientLogin, removePatientLogin, attachImage, resolveConflict, setPref } from "./store.js";
 import { Viewer } from "./viewer3d.js";
@@ -660,7 +662,8 @@ function loginDialog(p) {
 }
 async function pdf(make) {
   say("Preparing PDF…");
-  try { await make(); say("PDF downloaded"); } catch (err) { say("PDF export failed: " + (err.message || err), "error"); }
+  setFormatLang(isLatin() ? document.documentElement.lang : "en");
+  try { await make(); say("PDF downloaded"); } catch (err) { say("PDF export failed: " + (err.message || err), "error"); } finally { setFormatLang(null); }
 }
 export { pdf };
 function printSummary(p) {

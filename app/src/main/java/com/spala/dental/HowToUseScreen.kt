@@ -319,7 +319,7 @@ private val GuideArticles = listOf(
             "In Schedule › Calendar, pick a day and tap a free (outlined) time.",
             "Find the patient by name, phone or patient app ID, enter the reason or service, and tap Book slot. The time shows the patient's name and is taken for everyone at once.",
             "Tap a booked time to open that patient.",
-            "Schedule › List shows appointments by Day, Week, Month or All. Use + Book appointment for a time outside the slots, Reschedule / edit to change one, and the status buttons (Confirmed, Checked in, In progress, Completed, Cancelled, No show) as the visit goes on. Export appointments PDF saves the shown period as a printable list.",
+            "Schedule › List shows appointments by Day, Week, Month or All. Use + Book appointment for a time outside the slots, Reschedule / edit to change one, and the status buttons (Confirmed, Checked in, In progress, Completed, Cancelled, No show) as the visit goes on.",
             "Bookings made by patients in the patient app arrive with the next Sync. If the time was taken meanwhile it shows as Requested: tap Confirmed (after rescheduling if needed) or Cancelled, and call the patient."
         ),
         "Booking needs the \"Book & change appointments\" access item."
@@ -367,7 +367,7 @@ private val GuideArticles = listOf(
             "Open the patient's Billing tab and choose + Create invoice.",
             "Pick a service or type a line description, unit price and quantity; choose Add line for each item. Set discount and tax, then Issue invoice.",
             "Choose Receive payment on an unpaid invoice and enter the amount, method and optional reference. Partial payments leave a balance.",
-            "Use Share receipt or Share invoice to send a copy, or Invoice PDF / Receipt PDF to save a printable file. Payments for one treatment over several visits are easier from Treatment history (see Take payments for a treatment over several visits).",
+            "Use Share receipt or Share invoice to send a copy. Payments for one treatment over several visits are easier from Treatment history (see Take payments for a treatment over several visits).",
             "To correct: Refund a payment (amount, method and reason), or Void an invoice with a reason after refunding its payments."
         ),
         "Recording a payment doesn't charge a card. Needs the \"Invoices & payments\" access item."
@@ -379,7 +379,7 @@ private val GuideArticles = listOf(
             "Open Reports and choose Day, Week, Month, Custom or All (for Custom pick the first and last dates).",
             "Read billed, received, refunded, net and outstanding amounts, appointment states, clinician workload and treatment activity.",
             "Treatment payments has its own date range: keep Report period, or choose Day, Week, Month, Custom (pick From and To) or All. It shows money received for treatments in that range (by payment method), the treatments whose fee was set or paid in that range (fees, paid to date, due now, fully paid), totals by procedure, and the largest balances still due.",
-            "Choose Financial report PDF for a printable report of every section (summary, payments by method, invoices, treatment payments, balances due, workload), Appointments PDF for the period's appointment list, or Share financial report CSV for a spreadsheet."
+            "Choose Share financial report CSV to share it."
         ),
         "Reports use the records on this device; Sync first for the latest. Needs the \"Reports\" access item."
     ),
@@ -401,7 +401,7 @@ private val GuideArticles = listOf(
             "Tap Sync at the top. It sends your saved changes, applies patient app bookings, fetches others' changes and updates patients' app copies.",
             "If another device changed the same patient, use Review conflict · retain draft and load server version. Your draft is kept under Conflict drafts in Settings for export.",
             "Restore cloud records reloads all clinic records onto this device (sync or resolve your changes first).",
-            "Patient report PDF (full record with the 2D dental chart, treatments, fees, encounters and billing) or Export JSON from a patient's Overview; Import patient JSON as a new record is in Settings."
+            "Export care summary PDF or Export JSON from a patient's Overview; Import patient JSON as a new record is in Settings."
         ),
         "Exported files contain sensitive patient information; choose the destination carefully."
     ),
@@ -415,6 +415,30 @@ private val GuideArticles = listOf(
             "When the plan is full, registering a new patient asks you to upgrade. Tap Upgrade in Settings › Subscription on the phone that bought the subscription; Google Play charges only the difference for the rest of the month. Archiving patients who no longer visit also frees places.",
             "Use Restore purchase after reinstalling, and Manage in Google Play to cancel. Super admin accounts and their clinics are free.",
             "Sign out from ☰ › Sign out (sync first). Settings also has Tooth numbering, Tooth tap sound and notification permission."
+        ),
+        null
+    ),
+    GuideArticle(
+        "branding", "Settings", "Make the app your clinic's own",
+        "Your clinic's name, logo, address, map location and colour replace the Dental Care branding for staff and patients.",
+        listOf(
+            "Owner or admin: open Settings › Clinic management › Clinic branding.",
+            "Tap Choose logo and pick your logo (a square PNG works best). Enter the clinic name, address and phone.",
+            "Google Maps location: in Google Maps find your clinic, tap Share › Copy link and paste it here (or type lat,lng). Open in Google Maps checks it.",
+            "Pick a brand color, then tap Save branding. Buttons and highlights follow the colour on every device after the next sync, on Android and the web.",
+            "From then on the app opens with your logo, the toolbar shows your clinic, and every PDF report has your logo and address in the header and a faint logo and name watermark.",
+            "Patients see your logo and name in the patient app, plus a Find us card with Directions and a call button."
+        ),
+        "The Google Play icon of the app stays the Dental Care icon; everything inside the app shows your clinic."
+    ),
+    GuideArticle(
+        "language", "Settings", "Change the language and currency",
+        "Dental Care speaks 17 languages: English, Bangla, Hindi, Arabic, Chinese (Simplified), Spanish, French, Portuguese, German, Russian, Japanese, Korean, Indonesian, Turkish, Italian, Vietnamese and Thai.",
+        listOf(
+            "Settings › Language (or the language button on the sign-in screen and in the patient app). The choice is for this device; English is the default.",
+            "Menus, buttons and PDF report labels change at once. Patient records, names and notes stay as they were written.",
+            "Currency (owner or admin): Settings › Clinic management › Clinic › Currency. New fees and invoices use it.",
+            "Invoices already issued keep the currency they were issued in, so old totals never change."
         ),
         null
     ),

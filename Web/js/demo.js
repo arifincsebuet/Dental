@@ -36,7 +36,7 @@ export function demoSeed() {
     { id: uid(), doctor: doctors[1], startDate: start, endDate: end, weekdays, start: "17:00", end: "21:00", slotMinutes: 30, active: true, room: "Chair 2" },
     { id: uid(), doctor: doctors[2], startDate: start, endDate: end, weekdays, start: "15:00", end: "20:00", slotMinutes: 30, active: true, room: "Chair 3" },
   ];
-  const config = { name: "Smile Point Dental", currency: "BDT", timeZone: TZ, taxBps: 0, bufferMinutes: 5, reminderHours: 24, remindersEnabled: true,
+  const config = { name: "Smile Point Dental", address: "House 12, Road 7, Dhanmondi, Dhaka 1205", clinicPhone: "01711-204455", mapUrl: "23.7465,90.3760", currency: "BDT", timeZone: TZ, taxBps: 0, bufferMinutes: 5, reminderHours: 24, remindersEnabled: true,
     quietStart: "21:00", quietEnd: "08:00", staff, services, members: { [ownerId]: { role: "owner", active: true } }, availability, patientBooking: true };
 
   const names = ["Rahim Uddin", "Fatema Begum", "Sajid Hossain", "Nadia Islam", "Karim Chowdhury", "Ayesha Siddiqua", "Mehedi Hasan", "Tahmina Akter", "Imran Kabir",

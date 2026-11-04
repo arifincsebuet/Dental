@@ -51,8 +51,9 @@ fun LoginScreen(store: ClinicStore) {
             .padding(horizontal = 24.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
+        LanguagePicker(Modifier.align(Alignment.End))
         DentalAppLogo(Modifier.size(72.dp))
-        Text("Dental Care", style = MaterialTheme.typography.headlineMedium, color = Ink)
+        Text(ClinicBrand.appName, style = MaterialTheme.typography.headlineMedium, color = Ink, textAlign = TextAlign.Center)
         Text("Clinic records, 3D dental charts and treatment history in one place.", style = MaterialTheme.typography.bodyMedium, color = InkMuted, textAlign = TextAlign.Center)
         SegmentedPills(listOf("Clinic team", "Patient"), mode, Modifier.fillMaxWidth()) { mode = it; error = "" }
         SurfaceCard {
@@ -161,7 +162,10 @@ fun PatientPortalScreen(store: ClinicStore) {
             val signature = record.toString() + ToothNotation.current
             val view = remember(signature) { displayChart(record).put("readOnly", true) }
             val records = remember(signature) { toothRecords(record) }
-            Text("Hello, ${record.optString("name").substringBefore(' ')}", style = MaterialTheme.typography.headlineSmall, color = Ink)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Hello, ${record.optString("name").substringBefore(' ')}", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, color = Ink)
+                LanguagePicker()
+            }
             Teeth3DHeroCard(
                 modifier = mark("teeth"),
                 chart = view, title = "Your teeth", subtitle = "${records.count { it.completed > 0 }} treated · ${records.count { it.open > 0 }} planned",
@@ -172,6 +176,7 @@ fun PatientPortalScreen(store: ClinicStore) {
                 Text("This view shows treatment recorded by your clinic. Ask your dentist about anything you don't understand.",
                     style = MaterialTheme.typography.bodySmall, color = InkMuted)
             }
+            FindUsCard(store.portalClinic)
             Spacer(mark("treatments"))
             ToothHistoryList(records, store.portalClinic, focus, canEdit = false,
                 onToggle = { key -> focus = if (focus == key) null else key }, onEdit = {})

@@ -12,8 +12,10 @@ import { P, setCtx, renderPatients, afterRenderPatients, patientAction, register
 import { renderPortal, portalAction, afterPortal } from "./portal.js";
 import * as Reports from "./reports.js";
 import { pdf } from "./patient.js";
+import { langSelect, loadLang, watch } from "./i18n.js";
+import { applyBrand, logoHtml, appName, brandOf, cachedBrand, COLORS, CURRENCIES, mapEmbed, mapLink, mapQuery, logoFromFile } from "./brand.js";
 
-const A = { route: "home", arg: "", day: "", month: "", schedView: "Calendar", selAppt: null, invFilter: "All", selInv: "", period: "Month", from: "", to: "", selStaff: "", helpQ: "", helpTopic: "All topics", helpId: "start", signTab: "team", theme: null };
+const A = { brandDraft: null, route: "home", arg: "", day: "", month: "", schedView: "Calendar", selAppt: null, invFilter: "All", selInv: "", period: "Month", from: "", to: "", selStaff: "", helpQ: "", helpTopic: "All topics", helpId: "start", signTab: "team", theme: null };
 const z = () => D.tz(S.config), c = () => D.cur(S.config);
 const stCls = (s) => "st-" + String(s).replace(/ /g, "-");
 const safeStart = (a) => { try { return D.appointmentMillis(a, S.config); } catch { return 0; } };
@@ -44,7 +46,7 @@ function shell(content) {
   return `${S.backend?.demo ? `<div class="demo-bar">${I("spark")}<span>Demo clinic<span class="long">: data stays in this browser. Deploy to Firebase Hosting (or fill js/config.js) to use your real clinic.</span></span><button data-act="demoreset">Reset demo</button></div>` : ""}
   <div class="app ${S.backend?.demo ? "with-demo" : ""} ${A.route === "patients" && innerWidth < 2400 ? "compact-nav" : ""}" id="app">
   <aside class="side">
-    <div class="brand">${LOGO}<div><b>Dental Care</b><small>${esc(S.config.name)}</small></div></div>
+    <div class="brand">${logoHtml(36)}<div><b>${esc(appName())}</b><small>${esc((S.config.address || "").split(",")[0] || "Clinic")}</small></div></div>
     <nav class="nav" aria-label="Main">
       ${NAV.map(([h, items]) => `<h6>${h}</h6>` + items.filter(([, , , perm]) => !perm || can(perm)).map(([r, l, ic]) => `<a href="#/${r === "patients" && P.pid ? "patients/" + P.pid : r}" class="${A.route === r ? "on" : ""}" title="${l}">${I(ic)}<span class="lbl">${l}</span>${r === "schedule" && n7 ? `<span class="badge count">${n7}</span>` : ""}</a>`).join("")).join("")}
       <a href="#" data-act="signout" title="Sign out">${I("out")}<span class="lbl">Sign out</span></a>
@@ -309,11 +311,13 @@ function pageSettings() {
   return `<div class="page"><div class="page-head"><div><h1 class="h1">Clinic settings</h1><p class="muted small" style="margin:2px 0 0">Signed in as ${esc(S.user?.email || "")} · ${esc(D.roleTitle(St.currentRole()))}${S.backend?.demo ? " · demo" : " · Firebase project " + esc(S.backend?.projectId || "")}</p></div></div>
   <div class="set-grid">
    <form class="card" id="clinicform" onsubmit="return false"><div class="card-h"><h3>Clinic management</h3></div><div class="card-b"><div class="grid-form">
-     ${field("Clinic name", input("name", cfg.name || "", dis))}${field("Time zone", input("timeZone", cfg.timeZone || "Asia/Dhaka", dis + ' list="dl-tz"') + `<datalist id="dl-tz">${["Asia/Dhaka", "Asia/Kolkata", "Asia/Karachi", "Asia/Dubai", "Asia/Singapore", "Europe/London", "America/New_York", "UTC"].map((t) => `<option>${t}</option>`).join("")}</datalist>`)}
-     ${field("Currency", input("currency", cfg.currency || "BDT", dis), "3-letter code, e.g. BDT")}${field("Tax percent", input("tax", String((cfg.taxBps || 0) / 100), dis))}
+     ${field("Time zone", input("timeZone", cfg.timeZone || "Asia/Dhaka", dis + ' list="dl-tz"') + `<datalist id="dl-tz">${["Asia/Dhaka", "Asia/Kolkata", "Asia/Karachi", "Asia/Dubai", "Asia/Singapore", "Europe/London", "America/New_York", "UTC"].map((t) => `<option>${t}</option>`).join("")}</datalist>`)}
+     ${field("Currency", select("currency", [...new Set([cfg.currency || "BDT", ...CURRENCIES])].map((k) => [k, k + " · " + currencyName(k)]), cfg.currency || "BDT", dis), "Existing invoices keep their currency")}${field("Tax percent", input("tax", String((cfg.taxBps || 0) / 100), dis))}
      ${field("Appointment buffer (min)", input("buffer", cfg.bufferMinutes ?? 5, dis + ' type="number" min="0" max="120"'))}</div>
      ${manage ? `<button class="btn primary" style="margin-top:14px" data-act="saveclinic">Save clinic settings</button>` : `<p class="small muted">Only an admin can change clinic settings.</p>`}</div></form>
+   ${brandCard(cfg, manage)}
    <div class="card"><div class="card-h"><h3>Chart & display</h3></div><div class="card-b">
+     <div class="set-row"><div><b>Language</b><small>For this browser. Records are not translated</small></div>${langSelect("input sm")}</div>
      <div class="set-row"><div><b>Tooth numbering</b><small>Records are always stored in FDI</small></div><div class="seg">${[["palmer", "Palmer"], ["fdi", "FDI"], ["universal", "Universal"]].map(([v, l]) => `<button class="${S.notation === v ? "on" : ""}" data-act="notation" data-v="${v}">${l}</button>`).join("")}</div></div>
      <div class="set-row"><div><b>Tooth tap sound</b><small>Soft click when selecting a tooth in 3D</small></div><label class="switch"><input type="checkbox" data-act="sounds" ${S.sounds ? "checked" : ""}><i></i></label></div>
      <div class="set-row"><div><b>Theme</b><small>Follows your system unless chosen</small></div><div class="seg"><button class="${!isDark() ? "on" : ""}" data-act="settheme" data-v="light">Light</button><button class="${isDark() ? "on" : ""}" data-act="settheme" data-v="dark">Dark</button></div></div>
@@ -336,9 +340,31 @@ function pageSettings() {
   </div></div>`;
 }
 
+function currencyName(code) {
+  try { return new Intl.DisplayNames([document.documentElement.lang || "en"], { type: "currency" }).of(code); } catch { return code; }
+}
+function brandCard(cfg, manage) {
+  const dis = manage ? "" : "disabled";
+  const d = A.brandDraft || (A.brandDraft = { logo: cfg.logo || "", color: cfg.brandColor || "" });
+  const b = { ...brandOf(cfg), logo: d.logo };
+  const q = mapQuery(b);
+  return `<form class="card brand-card" id="brandform" onsubmit="return false"><div class="card-h"><h3>Clinic branding</h3><span class="sub">Your clinic's own app for staff and patients</span></div><div class="card-b">
+    <div class="brand-row"><div class="brand-logo">${logoHtml(72, b)}</div><div class="grow">
+      <b>Clinic logo</b><small class="muted" style="display:block">Shown at launch, in the menu, the patient app and on every PDF (with a watermark)</small>
+      ${manage ? `<div class="row" style="gap:8px;margin-top:8px"><label class="btn sm">${I("plus")}Choose logo<input type="file" accept="image/*" data-act="logo" hidden></label>${d.logo ? `<button class="btn ghost sm" data-act="rmlogo">Remove logo</button>` : ""}</div>` : ""}</div></div>
+    <div class="grid-form" style="margin-top:14px">
+      ${field("Clinic name", input("name", cfg.name || "", dis), "", true)}
+      ${field("Address", input("address", cfg.address || "", dis), "", true)}
+      ${field("Phone", input("clinicPhone", cfg.clinicPhone || "", dis + ' type="tel"'))}
+      ${field("Google Maps location", input("mapUrl", cfg.mapUrl || "", dis + ' placeholder="Paste a Google Maps link or lat,lng"'), "Google Maps › Share › Copy link")}</div>
+    <div style="margin-top:12px"><b class="small">Brand color</b><div class="swatches">${COLORS.map((col) => `<button type="button" class="sw ${d.color.toLowerCase() === col.toLowerCase() ? "on" : ""}" style="background:${col}" data-act="brandcolor" data-v="${col}" aria-label="${col}" ${dis}></button>`).join("")}<label class="sw custom" title="Custom"><input type="color" data-act="brandpick" value="${d.color || "#0F766E"}" ${dis}></label><button type="button" class="btn ghost sm" data-act="brandcolor" data-v="" ${dis}>Default</button></div></div>
+    ${q ? `<div class="map-prev"><iframe title="Map" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="${esc(mapEmbed(b))}"></iframe></div><a class="small" style="font-weight:700" target="_blank" rel="noopener" href="${esc(mapLink(b))}">Open in Google Maps</a>` : ""}
+    ${manage ? `<div><button class="btn primary" style="margin-top:14px" data-act="savebrand">Save branding</button></div>` : `<p class="small muted">Only an admin can change clinic settings.</p>`}</div></form>`;
+}
+
 // ============================================================================ help
 function pageHelp() {
-  const order = ["start", "menu", "patients", "three-d", "lens", "multi", "record", "edit-treatment", "treatment-payments", "chart", "encounters", "treatments", "history", "slots", "booking", "reminders", "team", "patient-logins", "billing", "reports", "sync", "subscription"];
+  const order = ["start", "menu", "patients", "three-d", "lens", "multi", "record", "edit-treatment", "treatment-payments", "chart", "encounters", "treatments", "history", "slots", "booking", "reminders", "team", "patient-logins", "billing", "reports", "sync", "subscription", "branding", "language"];
   const guides = GUIDES.slice().sort((x, y) => order.indexOf(x[0]) - order.indexOf(y[0]));
   const q = A.helpQ.trim().toLowerCase();
   const list = guides.filter((g) => (A.helpTopic === "All topics" || g[1] === A.helpTopic) && (!q || [g[1], g[2], g[3], ...g[4], g[5] || ""].join(" ").toLowerCase().includes(q)));
@@ -357,10 +383,10 @@ function pageHelp() {
 // ============================================================================ sign in
 function pageSignin() {
   return `${S.backend?.demo ? `<div class="demo-bar">${I("spark")}Demo mode: Firebase isn't configured in js/config.js yet. Sign in to explore a sample clinic.</div>` : ""}
-  <div class="signin"><div class="hero"><div class="row" style="gap:12px">${LOGO.replace('class="logo"', 'class="logo" style="width:44px;height:44px"')}<b style="font-size:18px">Dental Care</b></div>
+  <div class="signin"><div class="hero"><div class="row" style="gap:12px">${logoHtml(44)}<b style="font-size:18px">${esc(appName())}</b></div>
    <div><h1>Your whole clinic, on the big screen.</h1><p>Patients, the 3D dental chart, appointments, treatment payments and reports in one place. The same records as the Android app, live from your clinic's Firebase.</p></div>
    <div class="feat"><div><b>3D chart at a glance</b>Lenses, info tags and hover details</div><div><b>Doctor columns</b>Every doctor's day in one calendar</div><div><b>Payments by visit</b>Fee, paid and due for each treatment</div><div><b>Roles and access</b>Simple switches per staff member</div></div></div>
-  <div class="form"><div class="box"><h2 style="margin:0 0 6px;font-size:26px;letter-spacing:-.02em">Sign in</h2><p class="muted" style="margin:0 0 20px">Choose who you are.</p>
+  <div class="form"><div class="box"><div class="lang-pick">${langSelect("input sm")}</div><h2 style="margin:0 0 6px;font-size:26px;letter-spacing:-.02em">Sign in</h2><p class="muted" style="margin:0 0 20px">Choose who you are.</p>
    <div class="seg" style="width:100%;margin-bottom:20px"><button style="flex:1" class="on">Clinic team</button><button style="flex:1" data-act="toportal">Patient</button></div>
    ${S.user && S.sessionError ? `<div class="notice red" style="margin-bottom:14px">${I("alert")}<span>${esc(S.sessionError)}</span></div>` : ""}
    <button class="gbtn" data-act="google"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>${S.backend?.demo ? "Open the demo clinic" : "Continue with Google"}</button>
@@ -403,6 +429,7 @@ function parse() {
   const [r, arg] = h.split("/");
   A.route = ["home", "patients", "schedule", "billing", "reports", "team", "settings", "help", "portal", "signin"].includes(r) ? r : "home";
   A.arg = arg || "";
+  if (A.route !== "settings") A.brandDraft = null;
 }
 function pageFor() {
   if (A.route === "patients") return renderPatients(A.arg);
@@ -412,14 +439,15 @@ let lastRoute = "";
 export function render() {
   parse();
   const root = $("#root");
-  if (!S.ready) { root.innerHTML = `<div class="boot"><div>${LOGO}Loading Dental Care…</div></div>`; return; }
+  if (!S.ready) { root.innerHTML = `<div class="boot"><div>${logoHtml(56)}${esc(appName())}</div></div>`; return; }
   if (A.route === "portal") { Viewer.unmount(); root.innerHTML = renderPortal(); afterPortal(); lastRoute = "portal"; return; }
   if (!S.user || (S.user && !S.clinicId)) {
     Viewer.unmount();
     if (A.route === "help") { root.innerHTML = `<div style="padding:16px"><a class="btn" href="#/home">${I("chevl")}Back to sign in</a></div>` + pageHelp(); return; }
     root.innerHTML = pageSignin(); return;
   }
-  if (S.loadingClinic) { root.innerHTML = `<div class="boot"><div>${LOGO}Opening ${esc(S.config.name || "your clinic")}…</div></div>`; return; }
+  if (S.clinicId && !S.loadingClinic) applyBrand(S.config);
+  if (S.loadingClinic) { root.innerHTML = `<div class="boot"><div>${logoHtml(56)}${esc(S.config.name || appName())}</div></div>`; return; }
   if (!A.day) { A.day = todayIn(z()); A.month = A.day.slice(0, 7); }
   const main = $("#main");
   const keep = main && lastRoute === A.route + A.arg ? { m: main.scrollTop, r: $("#prail")?.scrollTop, l: $(".plist .items")?.scrollTop, c: $("#pcenter")?.scrollTop } : null;
@@ -505,10 +533,19 @@ async function appAction(act, el, e) {
       const v = values($("#clinicform"));
       try { new Intl.DateTimeFormat("en", { timeZone: v.timeZone }); } catch { return say("Unknown time zone", "error"); }
       if (!/^[A-Z]{3}$/i.test(v.currency)) return say("Use a 3-letter currency code", "error");
-      const next = { ...clone(S.config), name: v.name.trim() || "Dental Care", timeZone: v.timeZone, currency: v.currency.toUpperCase(), taxBps: Math.round(parseFloat(v.tax || "0") * 100), bufferMinutes: Math.max(0, Math.min(120, +v.buffer || 0)) };
+      const next = { ...clone(S.config), timeZone: v.timeZone, currency: v.currency.toUpperCase(), taxBps: Math.round(parseFloat(v.tax || "0") * 100), bufferMinutes: Math.max(0, Math.min(120, +v.buffer || 0)) };
       await saveConfig(next); return;
     }
     case "saverem": { const v = values($("#remform")); await saveConfig({ ...clone(S.config), remindersEnabled: !!v.remindersEnabled, reminderHours: Math.max(1, Math.min(168, +v.reminderHours || 24)), quietStart: v.quietStart, quietEnd: v.quietEnd }, "Reminders saved"); return; }
+    case "savebrand": {
+      const v = values($("#brandform"));
+      const d = A.brandDraft || {};
+      const next = { ...clone(S.config), name: v.name.trim() || "Dental Care", address: v.address.trim(), clinicPhone: v.clinicPhone.trim(), mapUrl: v.mapUrl.trim(), logo: d.logo || "", brandColor: d.color || "" };
+      if (!next.logo) delete next.logo;
+      await saveConfig(next, "Branding saved"); A.brandDraft = null; applyBrand(S.config); render(); return;
+    }
+    case "rmlogo": A.brandDraft.logo = ""; break;
+    case "brandcolor": A.brandDraft.color = ds.v; break;
     case "notify": if ("Notification" in window) { await Notification.requestPermission(); render(); } return;
     case "notation": St.setPref("dc-notation", ds.v); Viewer.notation = ds.v; Viewer.call("setNotation", ds.v); break;
     case "restore": St.restoreAll(); return;
@@ -551,7 +588,7 @@ function serviceDialog(id) {
 
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-act]");
-  if (!el || el.closest(".v3d") || el.matches("input[type=checkbox],input[type=file],input[type=date]")) return;
+  if (!el || el.closest(".v3d") || el.matches("input[type=checkbox],input[type=file],input[type=date],input[type=color],select")) return;
   if (el.tagName === "A" && el.getAttribute("href") && el.getAttribute("href") !== "#") return;
   const act = el.dataset.act;
   if (A.route === "portal") return portalAction(act, el, e);
@@ -560,8 +597,10 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("change", (e) => {
   const el = e.target.closest("[data-act]");
-  if (!el || !el.matches("input")) return;
+  if (!el || !el.matches("input,select")) return;
   const act = el.dataset.act;
+  if (act === "lang") { loadLang(el.value).then(() => { watch(); render(); }); return; }
+  if (el.tagName === "SELECT") return;
   if (A.route === "portal") return portalAction(act, el, e);
   if (A.route === "patients") return patientAction(act, el, e);
   if (act === "booking") saveConfig({ ...clone(S.config), patientBooking: el.checked }, el.checked ? "Online booking turned on" : "Online booking turned off", true);
@@ -569,6 +608,8 @@ document.addEventListener("change", (e) => {
   if (act === "from") { A.from = el.value; render(); }
   if (act === "to") { A.to = el.value; render(); }
   if (act === "import") importJson(el.files?.[0]);
+  if (act === "brandpick") { A.brandDraft.color = el.value.toUpperCase(); render(); }
+  if (act === "logo") logoFromFile(el.files?.[0]).then((data) => { A.brandDraft.logo = data; render(); }).catch((err) => say(err.message, "error"));
 });
 async function importJson(file) {
   if (!file) return;

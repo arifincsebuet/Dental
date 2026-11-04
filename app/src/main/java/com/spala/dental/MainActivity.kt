@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         ToothNotation.load(this)
         TapSound.load(this)
+        I18n.init(this)
+        ClinicBrand.init(this)
         billing = BillingManager(this) { purchase ->
             // No server: the device acknowledges the purchase and records the clinic subscription.
             billing.acknowledgeLocally(purchase)
@@ -58,17 +60,25 @@ class MainActivity : ComponentActivity() {
         }
         billing.connect()
         setContent {
-            DentalTheme {
-                CompositionLocalProvider(LocalEditorSaveStatus provides { EditorSaveStatus(store.saveSequence, store.saveError) }) {
-                    when (store.session) {
-                        "loading" -> Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            DentalTheme { BrandTheme {
+                // The clinic's brand follows its settings (staff) or the patient app's clinic.
+                LaunchedEffect(store.session, store.config) { if (store.session !in setOf("loading", "login", "patient")) ClinicBrand.apply(store.config) }
+                LaunchedEffect(store.session, store.portalClinic) { if (store.session == "patient" && store.portalClinic.length() > 0) ClinicBrand.apply(store.portalClinic) }
+                // Launch screen with the clinic's own logo (when a clinic brand is cached on this device).
+                var splash by remember { mutableStateOf(ClinicBrand.logo != null || ClinicBrand.name.isNotBlank()) }
+                LaunchedEffect(Unit) { kotlinx.coroutines.delay(900); splash = false }
+                val direction = if (I18n.rtl) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr
+                CompositionLocalProvider(LocalEditorSaveStatus provides { EditorSaveStatus(store.saveSequence, store.saveError) },
+                    androidx.compose.ui.platform.LocalLayoutDirection provides direction) {
+                    if (splash) BrandSplash() else when (store.session) {
+                        "loading" -> BrandSplash()
                         "login" -> LoginScreen(store)
                         "patient" -> PatientPortalScreen(store)
                         // The clinic subscription unlocks the staff app; debug builds skip it for testing.
                         else -> if (store.subscriptionActive || BuildConfig.DEBUG) ClinicApp(store, billing) else PaywallScreen(store, billing)
                     }
                 }
-            }
+            } }
         }
     }
 }
@@ -189,8 +199,8 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 DentalAppLogo(Modifier.size(38.dp))
                 Column {
-                    Text("Dental Care", style = MaterialTheme.typography.titleLarge, color = Ink)
-                    Text(store.config.optString("name").takeIf { it.isNotBlank() && it != "Dental Care" } ?: "Your clinic, connected",
+                    Text(ClinicBrand.appName, style = MaterialTheme.typography.titleLarge, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(ClinicBrand.address.substringBefore(',').ifBlank { "Your clinic, connected" },
                         style = MaterialTheme.typography.bodySmall, color = InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -497,6 +507,15 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                         }
                     }
                     SubscriptionCard(store, billing)
+                    SurfaceCard(padding = 12.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Language", style = MaterialTheme.typography.titleSmall, color = Ink)
+                                Text("For this device. Records are not translated", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                            }
+                            LanguagePicker()
+                        }
+                    }
                     SurfaceCard {
                         Text("Tooth numbering", style = MaterialTheme.typography.titleSmall, color = Ink)
                         Text("How teeth are labelled on the 3D model, charts and history. Records are always stored in FDI.", style = MaterialTheme.typography.bodySmall, color = InkMuted)

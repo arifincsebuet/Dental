@@ -4,7 +4,9 @@ import { $, esc, money, zoned, todayIn, addDaysIso, dowOf, fmtIso, fmtMs, fmtMon
 import * as D from "./domain.js";
 import { S, say, emit } from "./store.js";
 import { Viewer } from "./viewer3d.js";
-import { I, LOGO } from "./icons.js";
+import { I } from "./icons.js";
+import { applyBrand, logoHtml, appName, brandOf, mapEmbed, mapLink, mapQuery } from "./brand.js";
+import { langSelect } from "./i18n.js";
 import { confirmBox } from "./dialogs.js";
 
 const R = { key: "", rec: null, error: "", busy: false, day: "", month: "", doctor: "", slot: null, reason: "", tooth: "" };
@@ -32,9 +34,10 @@ export function renderPortal() {
   const doctors = [...new Set((clinic.availability || []).filter((s) => s.active !== false).map((s) => s.doctor))];
   if (!R.doctor) R.doctor = doctors[0] || "";
   const slots = D.slotsFor(clinic, [], R.day, clinic.busy || [], now).filter((s) => s.doctor === R.doctor);
+  applyBrand(clinic);
   const list = (p.treatments || []).filter((t) => !R.tooth || t.tooth === R.tooth).sort((a, b) => (b.at || 0) - (a.at || 0));
-  return `<div style="min-height:100dvh;background:var(--bg)"><div class="portal-top">${LOGO.replace('class="logo"', 'class="logo" style="width:34px;height:34px"')}<div><b>${esc(clinic.name || "Dental Care")}</b><div class="small muted">Patient app</div></div>
-    <div style="margin-left:auto" class="row"><span class="small hide-sm" style="font-weight:700">${esc(p.name)} · ${esc(R.rec.loginId)}</span><button class="btn sm" data-act="prefresh">${I("sync", R.busy ? "spin" : "")}Refresh my record</button><button class="btn sm" data-act="pout">Sign out</button></div></div>
+  return `<div style="min-height:100dvh;background:var(--bg)"><div class="portal-top">${logoHtml(34, brandOf(clinic))}<div><b>${esc(clinic.name || "Dental Care")}</b><div class="small muted">Patient app</div></div>
+    <div style="margin-left:auto" class="row">${langSelect("input sm")}<span class="small hide-sm" style="font-weight:700">${esc(p.name)} · ${esc(R.rec.loginId)}</span><button class="btn sm" data-act="prefresh">${I("sync", R.busy ? "spin" : "")}Refresh my record</button><button class="btn sm" data-act="pout">Sign out</button></div></div>
   <div class="portal"><h1 class="h1" style="margin-bottom:4px">Hello, ${esc(p.name.split(" ")[0])}</h1><p class="muted" style="margin:0 0 18px">Your clinic's records, read only.${appts[0] ? ` Next visit: <b>${fmtMs(appts[0].startAt, z(), true)}</b> with ${esc(appts[0].doctor)}.` : ""}${R.rec.pending ? ` ${R.rec.pending} request(s) waiting for the clinic.` : ""}</p>
   <div class="portal-grid"><div style="display:grid;gap:16px;align-content:start">
    <div class="card"><div class="card-h"><h3>My teeth</h3><span class="sub">Drag to rotate · scroll to zoom · hover or click a tooth</span></div><div class="card-b"><div class="stage-slot short" id="stage-slot"></div>
@@ -51,7 +54,15 @@ export function renderPortal() {
      <div class="field" style="margin-top:12px"><label>Reason (optional)</label><input class="input" id="preason" value="${esc(R.reason)}" placeholder="e.g. tooth pain"></div>
      <button class="btn primary block" style="margin-top:12px" data-act="pbook" ${R.slot ? "" : "disabled"}>Book${R.slot ? " " + zoned(R.slot, z()).time : ""}</button><p class="small muted" style="margin:8px 0 0">You can hold up to 3 upcoming bookings.</p>`}</div></div>
    <div class="card"><div class="card-h"><h3>Billing</h3></div><div class="card-b"><div class="total-row"><span class="muted">Total fees</span><b class="num">${money(total, cur())}</b></div><div class="total-row"><span class="muted">Paid</span><b class="num" style="color:var(--green)">${money(got, cur())}</b></div><div class="total-row big"><span>Due</span><span class="num" style="color:var(--amber)">${money(Math.max(0, total - got), cur())}</span></div></div></div>
-  </div></div></div></div>`;
+  </div></div>${findUs(clinic)}</div></div>`;
+}
+function findUs(clinic) {
+  const b = brandOf(clinic);
+  if (!mapQuery(b) && !b.phone) return "";
+  return `<div class="card" style="margin-top:16px"><div class="card-h"><h3>Find us</h3></div><div class="card-b find-us"><div style="display:grid;gap:10px;align-content:start">
+    <b style="font-size:16px">${esc(clinic.name || "")}</b>${b.address ? `<div class="muted">${esc(b.address)}</div>` : ""}${b.phone ? `<a class="btn" href="tel:${esc(b.phone.replace(/[^\d+]/g, ""))}">${I("phone")}${esc(b.phone)}</a>` : ""}
+    ${mapQuery(b) ? `<a class="btn primary" target="_blank" rel="noopener" href="${esc(mapLink(b))}">Directions</a>` : ""}</div>
+    ${mapQuery(b) ? `<div class="map-prev"><iframe title="Map" loading="lazy" src="${esc(mapEmbed(b))}"></iframe></div>` : ""}</div></div>`;
 }
 function miniCal(clinic) {
   const [y, m] = R.month.split("-").map(Number);
@@ -64,9 +75,9 @@ function miniCal(clinic) {
   return `<div class="mini-cal" style="padding:0"><div class="between" style="margin-bottom:8px"><b>${fmtMonth(y, m)}</b><div class="row" style="gap:4px"><button class="icon-btn" style="width:30px;height:30px" data-act="pmonth" data-n="-1">${I("chevl")}</button><button class="icon-btn" style="width:30px;height:30px" data-act="pmonth" data-n="1">${I("chev")}</button></div></div><div class="grid">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => `<span class="dow">${d}</span>`).join("")}${cells}</div></div>`;
 }
 function signin() {
-  return `<div class="signin"><div class="hero"><div class="row" style="gap:12px">${LOGO.replace('class="logo"', 'class="logo" style="width:44px;height:44px"')}<b style="font-size:18px">Dental Care</b></div>
+  return `<div class="signin"><div class="hero"><div class="row" style="gap:12px">${logoHtml(44)}<b style="font-size:18px">${esc(appName())}</b></div>
    <div><h1>Your dental care, on any screen.</h1><p>See your teeth in 3D, read your treatment history, check what is paid and due, and book appointments with your clinic.</p></div><div></div></div>
-  <div class="form"><form class="box" id="plogin" onsubmit="return false"><h2 style="margin:0 0 6px;font-size:26px;letter-spacing:-.02em">Sign in</h2><p class="muted" style="margin:0 0 20px">Use the Patient ID and password your clinic gave you.</p>
+  <div class="form"><form class="box" id="plogin" onsubmit="return false"><div class="lang-pick">${langSelect("input sm")}</div><h2 style="margin:0 0 6px;font-size:26px;letter-spacing:-.02em">Sign in</h2><p class="muted" style="margin:0 0 20px">Use the Patient ID and password your clinic gave you.</p>
    <div class="seg" style="width:100%;margin-bottom:20px"><button type="button" style="flex:1" data-act="pstaff">Clinic team</button><button type="button" style="flex:1" class="on">Patient</button></div>
    <div style="display:grid;gap:14px"><div class="field"><label>Patient ID</label><input class="input" name="id" autocomplete="username" placeholder="e.g. RAHIM01" ${S.backend?.demo ? 'value="RAHIM01"' : ""}></div>
    <div class="field"><label>Password</label><input class="input" name="pw" type="password" autocomplete="current-password" ${S.backend?.demo ? 'value="smile123"' : ""}></div>

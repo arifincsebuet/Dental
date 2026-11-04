@@ -26,6 +26,9 @@
 | Sync & conflicts | Revision-checked transactions; conflict review keeps your draft; Firestore offline cache |
 | Patient app (web) | 3D teeth (read only), treatment history with Fee · Paid · Due, upcoming appointments, cancel (2 h rule), book free slots (3 bookings max), billing summary |
 | **PDF reports** | Patient record (profile, 2D dental chart, tooth findings, treatments with Fee · Paid · Due, encounters, appointments, billing, history), financial report, appointments list (day / week / month), invoice and payment receipt. Same layout on Android (save via the file picker) and web (download) |
+| **Clinic branding** | Owner / admin set the clinic name, logo, address, phone, Google Maps location and brand colour (Settings › Clinic branding). The app then shows the clinic everywhere: launch screen, sidebar / toolbar, sign-in, browser tab and icon, patient app (with a **Find us** map, directions and call button) and every PDF (logo + address header, faint logo and name watermark). Same settings on Android and web |
+| **Languages** | 17 languages: English (default), Bangla, Hindi, Arabic, Chinese (Simplified), Spanish, French, Portuguese (Brazil), German, Russian, Japanese, Korean, Indonesian, Turkish, Italian, Vietnamese, Thai. Chosen per device in Settings, on the sign-in page and in the patient app. One shared dictionary (`Web/i18n/*.json` = `app/src/main/assets/i18n/*.json`) |
+| **Currency** | 33 common currencies with local names (BDT, INR, USD, EUR, GBP, JPY, KRW, SAR, AED…); invoices keep the currency they were issued in |
 | How to use | All Android guides, adapted for the web, plus 3D lens and multi-select guides |
 
 ## 2. Made for the big screen
@@ -72,6 +75,6 @@
 **Platform**
 17. Installable web app (PWA) with offline drafts on the PC, like the Android encrypted cache.
 18. Audit log viewer and data export for compliance; automatic Firestore backups.
-19. Bangla language and Bangla numerals; printable letterhead and receipt designs.
+19. Native-language digits (Bangla, Hindi, Arabic numerals), translated guides and per-clinic custom wording; printable letterhead and receipt designs.
 20. AI assistant (optional): draft encounter notes from dictation, summarise a patient's history
     and suggest follow-ups (always reviewed by the dentist, never a diagnosis).

@@ -21,7 +21,7 @@ import java.time.format.DateTimeFormatter
  */
 
 /** Small page-flow layout engine on top of android.graphics.pdf.PdfDocument. */
-class PdfReport(private val title: String, private val subtitle: String, private val config: JSONObject) {
+class PdfReport(title: String, private val subtitle: String, private val config: JSONObject) {
     companion object {
         val INK = Color.rgb(15, 30, 46)
         val MUTED = Color.rgb(100, 116, 139)
@@ -37,6 +37,10 @@ class PdfReport(private val title: String, private val subtitle: String, private
         private const val M = 40f
     }
 
+    private val title = I18n.tr(title)
+    /** Clinic brand: accent colour and logo (header and watermark). */
+    private val accent = ClinicBrand.colorOf(config.optString("brandColor")) ?: TEAL
+    private val logo: android.graphics.Bitmap? = ClinicBrand.decodeLogo(config.optString("logo"))
     private val document = PdfDocument()
     private var page: PdfDocument.Page? = null
     private var pageNumber = 0
@@ -58,17 +62,40 @@ class PdfReport(private val title: String, private val subtitle: String, private
         page?.let { footer(); document.finishPage(it) }
         pageNumber++
         page = document.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNumber).create())
-        canvas.drawRect(0f, 0f, W, 6f, fill(TEAL))
-        canvas.drawText(config.optString("name", "Dental Care"), M, 28f, paint(9f, TEAL, true))
+        watermark()
+        canvas.drawRect(0f, 0f, W, 6f, fill(accent))
+        var x = M
+        logo?.let { bmp ->
+            val h = 24f; val w = minOf(60f, h * bmp.width / bmp.height.coerceAtLeast(1))
+            canvas.drawBitmap(bmp, null, RectF(M, 12f, M + w, 12f + h), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            x = M + w + 8f
+        }
+        canvas.drawText(config.optString("name", "Dental Care"), x, 23f, paint(10f, accent, true))
         val p = paint(8.5f, MUTED)
-        canvas.drawText(title, W - M - p.measureText(title), 28f, p)
-        canvas.drawLine(M, 36f, W - M, 36f, stroke(LINE))
-        y = 52f
+        canvas.drawText(title, W - M - p.measureText(title), 23f, p)
+        val line2 = listOf(config.optString("address"), config.optString("clinicPhone")).filter { it.isNotBlank() }.joinToString("  ·  ")
+        if (line2.isNotBlank()) { val ap = paint(7f, MUTED); canvas.drawText(wrap(line2, ap, W - M - x - 150f).firstOrNull() ?: "", x, 33f, ap) }
+        canvas.drawLine(M, 40f, W - M, 40f, stroke(LINE))
+        y = 58f
+    }
+    /** Faint clinic logo and name across the page (drawn first, under the content). */
+    private fun watermark() {
+        logo?.let { bmp ->
+            val h = 220f; val w = minOf(320f, h * bmp.width / bmp.height.coerceAtLeast(1))
+            canvas.drawBitmap(bmp, null, RectF((W - w) / 2, (H - h) / 2, (W + w) / 2, (H + h) / 2), Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 16 })
+        }
+        val name = config.optString("name", "Dental Care")
+        if (name.isNotBlank()) {
+            val p = paint((900f / name.length.coerceAtLeast(8)).coerceIn(28f, 60f), accent, true).apply { alpha = 20 }
+            canvas.save(); canvas.rotate(-45f, W / 2, H / 2 + 120f)
+            canvas.drawText(name, W / 2 - p.measureText(name) / 2, H / 2 + 120f, p)
+            canvas.restore()
+        }
     }
     private fun footer() {
         val p = paint(7.5f, MUTED)
-        canvas.drawText("Generated ${ClinicalRules.displayTime(System.currentTimeMillis(), config)} · Dental Care · confidential patient information", M, H - 22f, p)
-        val s = "Page $pageNumber"
+        canvas.drawText("${ClinicalRules.displayTime(System.currentTimeMillis(), config)} · ${config.optString("name", "Dental Care")}", M, H - 22f, p)
+        val s = "$pageNumber"
         canvas.drawText(s, W - M - p.measureText(s), H - 22f, p)
     }
     fun ensure(height: Float) { if (y + height > H - 44f) newPage() }
@@ -107,14 +134,14 @@ class PdfReport(private val title: String, private val subtitle: String, private
     fun heading(text: String) {
         ensure(64f)
         y += 10f
-        canvas.drawText(text.uppercase(), M, y + 9f, paint(8.5f, TEAL, true))
+        canvas.drawText(I18n.tr(text).uppercase(), M, y + 9f, paint(8.5f, accent, true))
         y += 14f
         canvas.drawLine(M, y, W - M, y, stroke(LINE))
         y += 8f
     }
     fun text(value: String, size: Float = 9.5f, color: Int = INK, bold: Boolean = false, indent: Float = 0f) {
         val p = paint(size, color, bold)
-        for (line in wrap(value, p, width - indent)) { ensure(size + 4f); canvas.drawText(line, M + indent, y + size, p); y += size + 4f }
+        for (line in wrap(I18n.tr(value), p, width - indent)) { ensure(size + 4f); canvas.drawText(line, M + indent, y + size, p); y += size + 4f }
     }
     fun space(height: Float = 6f) { y += height }
 
@@ -123,12 +150,12 @@ class PdfReport(private val title: String, private val subtitle: String, private
         val colWidth = width / columns
         pairs.chunked(columns).forEach { row ->
             val valuePaint = paint(9.5f, INK, true)
-            val wrapped = row.map { wrap(it.second.ifBlank { "-" }, valuePaint, colWidth - 10f) }
+            val wrapped = row.map { wrap(I18n.tr(it.second.ifBlank { "-" }), valuePaint, colWidth - 10f) }
             val height = 12f + (wrapped.maxOfOrNull { it.size } ?: 1) * 12f + 6f
             ensure(height)
             row.forEachIndexed { i, (label, _) ->
                 val x = M + i * colWidth
-                canvas.drawText(label.uppercase(), x, y + 8f, paint(7f, MUTED, true))
+                canvas.drawText(I18n.tr(label).uppercase(), x, y + 8f, paint(7f, MUTED, true))
                 wrapped[i].forEachIndexed { j, line -> canvas.drawText(line, x, y + 20f + j * 12f, valuePaint) }
             }
             y += height
@@ -145,7 +172,7 @@ class PdfReport(private val title: String, private val subtitle: String, private
             val x = M + i * (tile + gap)
             canvas.drawRoundRect(RectF(x, y, x + tile, y + 44f), 6f, 6f, fill(Color.rgb(248, 250, 252)))
             canvas.drawRoundRect(RectF(x, y, x + tile, y + 44f), 6f, 6f, stroke(LINE))
-            canvas.drawText(label, x + 8f, y + 14f, paint(7.5f, MUTED, true))
+            canvas.drawText(I18n.tr(label), x + 8f, y + 14f, paint(7.5f, MUTED, true))
             val vp = paint(if (value.length > 14) 10f else 13f, color, true)
             canvas.drawText(wrap(value, vp, tile - 14f).firstOrNull() ?: value, x + 8f, y + 33f, vp)
         }
@@ -164,7 +191,7 @@ class PdfReport(private val title: String, private val subtitle: String, private
             canvas.drawRect(M, y, W - M, y + 16f, fill(SOFT))
             var x = M
             headers.forEachIndexed { i, h ->
-                val label = h.uppercase()
+                val label = I18n.tr(h).uppercase()
                 val tx = if (i in right) x + widths[i] - 4f - headPaint.measureText(label) else x + 4f
                 canvas.drawText(label, tx, y + 11f, headPaint)
                 x += widths[i]
@@ -173,7 +200,7 @@ class PdfReport(private val title: String, private val subtitle: String, private
         }
         drawHeader()
         rows.forEach { row ->
-            val wrapped = row.mapIndexed { i, cell -> wrap(cell, cellPaint, widths.getOrElse(i) { 60f } - 8f) }
+            val wrapped = row.mapIndexed { i, cell -> wrap(I18n.tr(cell), cellPaint, widths.getOrElse(i) { 60f } - 8f) }
             val height = (wrapped.maxOfOrNull { it.size } ?: 1).coerceAtLeast(1) * 11f + 6f
             if (y + height > H - 44f) { newPage(); drawHeader() }
             var x = M
@@ -232,17 +259,19 @@ class PdfReport(private val title: String, private val subtitle: String, private
         val midY = top + (rows.size / 2) * rowHeight + 5f
         canvas.drawLine(x0 - 6f, midY, x0 + chartWidth + 6f, midY, dash)
         val pl = paint(6.5f, MUTED, true)
-        canvas.drawText("PATIENT RIGHT", x0, top - 2f, pl)
-        canvas.drawText("PATIENT LEFT", x0 + chartWidth - pl.measureText("PATIENT LEFT"), top - 2f, pl)
+        val rightLabel = I18n.tr("Right").uppercase(); val leftLabel = I18n.tr("Left").uppercase()
+        canvas.drawText(rightLabel, x0, top - 2f, pl)
+        canvas.drawText(leftLabel, x0 + chartWidth - pl.measureText(leftLabel), top - 2f, pl)
         y += 6f
-        legend(listOf(Color.rgb(238, 242, 246) to "Not assessed", Color.rgb(255, 233, 194) to "Assessed", Color.rgb(96, 165, 250) to "Treated / restoration",
-            Color.rgb(204, 251, 241) to "Planned (+)", Color.rgb(245, 158, 11) to "Finding", Color.rgb(248, 250, 252) to "Lost (×)"))
+        legend(listOf(Color.rgb(238, 242, 246) to "Not assessed", Color.rgb(255, 233, 194) to "Assessed", Color.rgb(96, 165, 250) to "Treated",
+            Color.rgb(204, 251, 241) to "Planned", Color.rgb(245, 158, 11) to "Finding", Color.rgb(248, 250, 252) to "Missing"))
     }
     private fun legend(items: List<Pair<Int, String>>) {
         ensure(16f)
         var x = M
         val p = paint(7.5f, MUTED)
-        items.forEach { (color, label) ->
+        items.forEach { (color, raw) ->
+            val label = I18n.tr(raw)
             canvas.drawRect(x, y + 2f, x + 8f, y + 10f, fill(color))
             canvas.drawRect(x, y + 2f, x + 8f, y + 10f, stroke(Color.rgb(203, 213, 225), 0.5f))
             canvas.drawText(label, x + 11f, y + 9.5f, p)
@@ -291,7 +320,7 @@ class PdfReport(private val title: String, private val subtitle: String, private
             canvas.drawLine(x + 5f, y + 5f, x + s - 5f, y + s - 5f, cross)
             canvas.drawLine(x + s - 5f, y + 5f, x + 5f, y + s - 5f, cross)
         } else if ((state?.optJSONArray("treatmentStates")?.length() ?: 0) > 0) {
-            val plus = paint(11f, TEAL, true)
+            val plus = paint(11f, accent, true)
             canvas.drawText("+", x + s / 2 - plus.measureText("+") / 2, y + s / 2 + 4f, plus)
         }
     }
