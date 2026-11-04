@@ -147,6 +147,7 @@ fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
 fun BillingScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject, String) -> Unit) {
     val saveStatus = LocalEditorSaveStatus.current
     val context = LocalContext.current
+    val savePdf = rememberPdfSaver()
     var creating by remember { mutableStateOf(false) }
     var form by remember { mutableStateOf<FeatureForm?>(null) }
     Text("Billing and receipts", fontWeight = FontWeight.Bold, fontSize = 20.sp)
@@ -174,12 +175,20 @@ fun BillingScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject
                     onChange(changed, "Invoice voided: ${v.getValue("reason")}")
                 } }) { Text("Void") }
                 TextButton(onClick = { shareText(context, "Invoice", invoiceText(patient, invoice, config)) }) { Text("Share invoice") }
+                TextButton(onClick = {
+                    val snapshot = copyJson(patient); val bill = copyJson(invoice); val settings = copyJson(config)
+                    savePdf(pdfName("invoice", patient.optString("name"), invoice.optString("id").take(8))) { out -> ReportPdfs.invoicePdf(snapshot, bill, settings, out) }
+                }) { Text("Invoice PDF") }
             }
             records(invoice, "payments").forEach { payment ->
                 val alreadyRefunded = records(invoice, "refunds").filter { it.optString("paymentId") == payment.optString("id") }.sumOf { it.optLong("amount") }
                 Text("Receipt ${payment.optString("id").take(8)} · ${ClinicalRules.money(payment.optLong("amount"), currency)} · ${payment.optString("method")}", fontSize = 13.sp)
                 Row {
                     TextButton(onClick = { shareText(context, "Payment receipt", "${config.optString("name", "Dental Care")}\nPAYMENT RECEIPT\nPatient: ${patient.optString("name")}\nInvoice: ${invoice.optString("id")}\nReceipt: ${payment.optString("id")}\n${ClinicalRules.displayTime(payment.optLong("at"), config)}\nReceived: ${ClinicalRules.money(payment.optLong("amount"), currency)}\nMethod: ${payment.optString("method")}\nReference: ${payment.optString("reference")}") }) { Text("Share receipt") }
+                    TextButton(onClick = {
+                        val snapshot = copyJson(patient); val bill = copyJson(invoice); val pay = copyJson(payment); val settings = copyJson(config)
+                        savePdf(pdfName("receipt", patient.optString("name"), payment.optString("id").take(8))) { out -> ReportPdfs.receiptPdf(snapshot, bill, pay, settings, out) }
+                    }) { Text("Receipt PDF") }
                     TextButton(enabled = !voided && alreadyRefunded < payment.optLong("amount"), onClick = { form = FeatureForm("Refund payment", listOf(FeatureField("amount", "Refund amount ($currency)"), FeatureField("method", "Refund method", payment.optString("method")), FeatureField("reason", "Required reason"))) { v ->
                         val amount = ClinicalRules.parseMinor(v.getValue("amount"), currency)
                         require(amount in 1..(payment.optLong("amount") - alreadyRefunded)) { "Refund exceeds the unrefunded payment" }
@@ -247,6 +256,7 @@ private fun invoiceText(patient: JSONObject, invoice: JSONObject, config: JSONOb
 @Composable
 fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (JSONObject, String) -> Unit, onOpenPatient: (String) -> Unit) {
     val saveStatus = LocalEditorSaveStatus.current
+    val savePdf = rememberPdfSaver()
     var period by remember { mutableStateOf("Day") }
     var reference by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).toString()) }
     var editing by remember { mutableStateOf<Pair<JSONObject, JSONObject?>?>(null) }
@@ -268,6 +278,11 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
         if (period == "All") Long.MIN_VALUE..Long.MAX_VALUE else start.atStartOfDay(zone).toInstant().toEpochMilli() until end.atStartOfDay(zone).toInstant().toEpochMilli()
     }.getOrNull()
     if (range == null) Text("Enter a valid calendar date", color = MaterialTheme.colorScheme.error)
+    else OutlinedButton(onClick = {
+        val snapshot = patients.map { copyJson(it) }; val settings = copyJson(config)
+        val label = ReportPdfs.rangeLabel(period, range, config)
+        savePdf(pdfName("appointments", if (period == "All") "all" else reference)) { out -> ReportPdfs.appointmentsReport(snapshot, settings, label, range, out) }
+    }) { Text("Export appointments PDF") }
     val entries = patients.flatMap { patient -> records(patient, "appointments").map { patient to it } }
         .filter { (_, appointment) -> range != null && runCatching { ClinicalRules.appointmentMillis(appointment, config) in range }.getOrDefault(false) }
         .sortedBy { ClinicalRules.appointmentMillis(it.second, config) }
@@ -351,6 +366,7 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
 @Composable
 fun AdvancedReportsScreen(patients: List<JSONObject>, config: JSONObject) {
     val context = LocalContext.current
+    val savePdf = rememberPdfSaver()
     // Separate date range for the treatment payments section.
     var tpPeriod by remember { mutableStateOf("Report period") }
     var tpStart by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).withDayOfMonth(1).toString()) }
@@ -472,6 +488,18 @@ fun AdvancedReportsScreen(patients: List<JSONObject>, config: JSONObject) {
         Text("Current treatment-plan states (all dates)", fontWeight = FontWeight.SemiBold)
         ClinicalRules.treatmentStates.forEach { state -> Text("$state: ${treatments.count { it.optString("status") == state }}") }
         Text("${patients.count { patient -> records(patient, "history").firstOrNull { it.optString("text") == "Patient registered" }?.optLong("at")?.let { it in range } == true }} newly registered patients in period")
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = {
+            val snapshot = patients.map { copyJson(it) }; val settings = copyJson(config)
+            val label = ReportPdfs.rangeLabel(period, range, config)
+            savePdf(pdfName("financial-report", period, LocalDate.now(ClinicalRules.zone(config)).toString())) { out -> ReportPdfs.financialReport(snapshot, settings, label, range, out) }
+        }, modifier = Modifier.weight(1f)) { Text("Financial report PDF") }
+        OutlinedButton(onClick = {
+            val snapshot = patients.map { copyJson(it) }; val settings = copyJson(config)
+            val label = ReportPdfs.rangeLabel(period, range, config)
+            savePdf(pdfName("appointments-report", period, LocalDate.now(ClinicalRules.zone(config)).toString())) { out -> ReportPdfs.appointmentsReport(snapshot, settings, label, range, out) }
+        }, modifier = Modifier.weight(1f)) { Text("Appointments PDF") }
     }
     OutlinedButton(onClick = { shareText(context, "Clinic financial report", csv.toString(), "text/csv") }) { Text("Share financial report CSV") }
 }

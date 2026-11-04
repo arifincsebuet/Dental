@@ -4,6 +4,7 @@ import * as D from "./domain.js";
 import { S, save, can, patient, say, createPatientLogin, removePatientLogin, attachImage, resolveConflict, setPref } from "./store.js";
 import { Viewer } from "./viewer3d.js";
 import { I } from "./icons.js";
+import * as Reports from "./reports.js";
 import { modal, field, input, textarea, select, check, chips, values, bookDialog, invoiceDialog, receivePaymentDialog, refundDialog, voidDialog, receiptText, shareText, setAppointmentStatus, confirmBox } from "./dialogs.js";
 
 export const P = { pid: "", tab: "overview", tooth: "", surface: "", multi: [], multiMode: false, q: "", filter: "All", archived: false, collapsed: false, listmode: false, earlier: null, dentition: "" };
@@ -253,7 +254,7 @@ function payBlock(p, t) {
   const pays = fee.invoice.payments || [];
   return `<div class="pay ${fee.due ? "due" : ""}"><div class="nums num"><span>Fee ${money(fee.total, c())}</span><span style="color:var(--green)">Paid ${money(fee.paid, c())}</span><span style="color:${fee.due ? "var(--amber)" : "var(--green)"}">${fee.due ? "Due " + money(fee.due, c()) : "Fully paid"}</span></div>
     <div class="track"><i style="width:${pc}%"></i></div>
-    ${pays.length ? `<div class="small muted">${pays.map((x, i) => `Visit ${i + 1} · ${fmtMs(x.at, z())} · ${money(x.amount, c())} · ${esc(x.method)}${x.reference ? " · " + esc(x.reference) : ""} <button class="linkish small" data-act="receipt" data-inv="${fee.invoice.id}" data-pay="${x.id}">Receipt</button>`).join("<br>")}</div>` : ""}
+    ${pays.length ? `<div class="small muted">${pays.map((x, i) => `Visit ${i + 1} · ${fmtMs(x.at, z())} · ${money(x.amount, c())} · ${esc(x.method)}${x.reference ? " · " + esc(x.reference) : ""} <button class="linkish small" data-act="receipt" data-inv="${fee.invoice.id}" data-pay="${x.id}">Receipt</button> · <button class="linkish small" data-act="rcptpdf" data-inv="${fee.invoice.id}" data-pay="${x.id}">PDF</button>`).join("<br>")}</div>` : ""}
     ${billing ? `<div class="row" style="margin-top:8px"><button class="btn sm" data-act="pay" data-id="${t.id}">${I("plus")}${fee.due ? "Add payment" : "Change fee"}</button></div>` : ""}</div>`;
 }
 function timeline(p, tooth) {
@@ -306,7 +307,7 @@ function tabOverview(p) {
       ${can("patientLogins") ? `<div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="btn sm" data-act="login">Change ID / password</button><button class="btn sm danger" data-act="logoutapp">Turn off</button></div>` : ""}`
       : `<p class="muted small" style="margin:0 0 10px">No patient app login yet. The patient signs in with a Patient ID and password you choose.</p>${can("patientLogins") ? `<button class="btn sm primary" data-act="login">Create patient login</button>` : ""}`}</div></div>
     <div class="card"><div class="card-h"><h3>Clinical images</h3><div class="r">${clin ? `<label class="btn sm">${I("img")}Attach image<input type="file" accept="image/*" data-act="attach" hidden></label>` : ""}</div></div><div class="card-b"><div class="imgs">${(p.images || []).map((im, i) => `<div class="img-tile" data-act="viewimg" data-i="${i}" data-path="${esc(im.path)}"><span>${esc(im.format?.toUpperCase() || "IMG")} · ${Math.round((im.bytes || 0) / 1024)} KB</span></div>`).join("") || `<p class="muted small" style="margin:0">No images attached.</p>`}</div></div></div>
-    <div class="card"><div class="card-h"><h3>Records</h3></div><div class="card-b"><div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="pdf">${I("print")}Care summary PDF</button><button class="btn sm" data-act="json">${I("download")}Export JSON</button>${editP ? `<button class="btn sm ${p.archived ? "" : "danger"}" data-act="archive">${I("archive")}${p.archived ? "Restore patient" : "Archive patient"}</button>` : ""}</div><p class="small muted" style="margin:10px 0 0">Exported files contain sensitive patient information; choose the destination carefully.</p></div></div>
+    <div class="card"><div class="card-h"><h3>Records</h3></div><div class="card-b"><div class="row" style="flex-wrap:wrap"><button class="btn sm" data-act="pdf">${I("print")}Patient report PDF</button><button class="btn sm" data-act="json">${I("download")}Export JSON</button>${editP ? `<button class="btn sm ${p.archived ? "" : "danger"}" data-act="archive">${I("archive")}${p.archived ? "Restore patient" : "Archive patient"}</button>` : ""}</div><p class="small muted" style="margin:10px 0 0">Exported files contain sensitive patient information; choose the destination carefully.</p></div></div>
   </div>`;
 }
 function apptRow(p, a, actions) {
@@ -362,9 +363,9 @@ function invoiceCard(p, v) {
   <div class="card-b"><div class="small muted" style="margin-bottom:6px">${fmtMs(v.at, z())}${v.treatmentRef ? " · treatment fee" : ""}</div><table style="width:100%" class="inv-lines">${(v.lines || [{ description: v.description, unitPrice: v.amount, quantity: 1 }]).map((l) => `<tr><td>${esc(l.description)}${l.quantity > 1 ? " × " + l.quantity : ""}</td><td class="num" style="text-align:right">${money(l.unitPrice * l.quantity, cc)}</td></tr>`).join("")}</table>
   ${v.discount ? `<div class="total-row"><span class="muted">Discount</span><span class="num">- ${money(v.discount, cc)}</span></div>` : ""}${v.taxBps ? `<div class="total-row"><span class="muted">Tax ${v.taxBps / 100}%</span><span></span></div>` : ""}
   <div class="total-row big"><span>Total</span><span class="num">${money(tot, cc)}</span></div><div class="total-row"><span class="muted">Received</span><span class="num" style="color:var(--green)">${money(got, cc)}</span></div><div class="total-row"><span class="muted">Balance</span><span class="num" style="color:${due ? "var(--amber)" : "var(--muted)"}">${money(due, cc)}</span></div>
-  ${(v.payments || []).map((x) => `<div class="small muted">${fmtMs(x.at, z())} · ${money(x.amount, cc)} · ${esc(x.method)} <button class="linkish small" data-act="receipt" data-inv="${v.id}" data-pay="${x.id}">Receipt</button></div>`).join("")}
+  ${(v.payments || []).map((x) => `<div class="small muted">${fmtMs(x.at, z())} · ${money(x.amount, cc)} · ${esc(x.method)} <button class="linkish small" data-act="receipt" data-inv="${v.id}" data-pay="${x.id}">Receipt</button> · <button class="linkish small" data-act="rcptpdf" data-inv="${v.id}" data-pay="${x.id}">PDF</button></div>`).join("")}
   ${(v.refunds || []).map((x) => `<div class="small" style="color:var(--red)">Refund ${money(x.amount, cc)} · ${esc(x.reason)}</div>`).join("")}${v.voidReason ? `<div class="small" style="color:var(--red)">Voided: ${esc(v.voidReason)}</div>` : ""}
-  ${b && st !== "Voided" ? `<div class="row" style="margin-top:10px;flex-wrap:wrap">${due ? `<button class="btn sm primary" data-act="receive" data-inv="${v.id}">${I("wallet")}Receive payment</button>` : ""}<button class="btn sm" data-act="shareinv" data-inv="${v.id}">${I("share")}Share invoice</button><button class="btn sm ghost" data-act="refund" data-inv="${v.id}">Refund</button><button class="btn sm ghost danger" data-act="void" data-inv="${v.id}">Void</button></div>` : ""}</div></div>`;
+  ${b && st !== "Voided" ? `<div class="row" style="margin-top:10px;flex-wrap:wrap">${due ? `<button class="btn sm primary" data-act="receive" data-inv="${v.id}">${I("wallet")}Receive payment</button>` : ""}<button class="btn sm" data-act="shareinv" data-inv="${v.id}">${I("share")}Share invoice</button><button class="btn sm" data-act="invpdf" data-inv="${v.id}">${I("download")}Invoice PDF</button><button class="btn sm ghost" data-act="refund" data-inv="${v.id}">Refund</button><button class="btn sm ghost danger" data-act="void" data-inv="${v.id}">Void</button></div>` : ""}</div></div>`;
 }
 export { invoiceCard };
 function tabBilling(p) {
@@ -480,7 +481,9 @@ export async function patientAction(act, el, e) {
     case "logoutapp": confirmBox("Turn off patient app access", `${esc(p.name)} will no longer be able to sign in to the patient app.`, "Turn off", async () => { await removePatientLogin(p.id); say("Patient app access turned off"); }); return;
     case "attach": { const f = el.files?.[0]; if (!f) return; say("Compressing and uploading…"); try { await attachImage(p.id, f); } catch (err) { say(err.message, "error"); } return; }
     case "viewimg": { const url = await S.backend.imageUrl(ds.path).catch(() => ""); modal({ title: "Clinical image", wide: true, noFooter: true, body: url ? `<img src="${esc(url)}" style="max-width:100%;border-radius:12px" alt="Clinical image">` : `<div class="empty">The image couldn't be loaded.</div>` }); return; }
-    case "pdf": printSummary(p); return;
+    case "pdf": pdf(() => Reports.patientPdf(p)); return;
+    case "invpdf": { const v = p.invoices.find((x) => x.id === ds.inv); pdf(() => Reports.invoicePdf(p, v)); return; }
+    case "rcptpdf": { const v = p.invoices.find((x) => x.id === ds.inv); pdf(() => Reports.receiptPdf(p, v, v.payments.find((x) => x.id === ds.pay))); return; }
     case "json": download(`patient-${p.id}.json`, JSON.stringify(Object.fromEntries(Object.entries(p).filter(([k]) => !["remoteVersion"].includes(k))), null, 2)); return;
     case "archive": modal({ title: p.archived ? "Restore archived patient" : "Archive patient", body: field("Reason", input("reason", "")), saveLabel: p.archived ? "Restore" : "Archive", danger: !p.archived,
       onSave: (v) => { if (!v.reason.trim()) return "A reason is required"; const copy = clone(p); copy.archived = !p.archived; return save(copy, `Patient archive state amended: ${v.reason.trim()}`); } }); return;
@@ -655,6 +658,11 @@ function loginDialog(p) {
     },
   });
 }
+async function pdf(make) {
+  say("Preparing PDF…");
+  try { await make(); say("PDF downloaded"); } catch (err) { say("PDF export failed: " + (err.message || err), "error"); }
+}
+export { pdf };
 function printSummary(p) {
   const el = $("#print");
   const ct = D.chartCounts(p);

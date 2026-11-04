@@ -210,29 +210,8 @@ private fun ClinicalFormDialog(form: ClinicalForm?, close: () -> Unit) {
 }
 
 object ClinicExports {
-    fun patientPdf(patient: JSONObject, config: JSONObject, output: OutputStream) {
-        val lines = mutableListOf(config.optString("name", "Dental Care"), "PATIENT CARE SUMMARY", "Patient: ${patient.optString("name")}", "DOB: ${patient.optString("dob")}",
-            "Generated: ${stamp(System.currentTimeMillis(), config)}", if (patient.optBoolean("dirty")) "DEVICE RECORD · cloud confirmation pending" else "Cloud revision ${patient.optLong("remoteVersion")}",
-            "Medical alerts: ${patient.optString("allergies")}", "", "CLINICAL STORY", patient.optString("story"), "", "DENTAL CHART · FDI")
-        lines += chartSummary(patient.optJSONObject("chart"))
-        lines += listOf("", "TREATMENT PLAN")
-        patient.optJSONArray("treatments")?.objects().orEmpty().forEach { lines += "Tooth ${it.optString("tooth")}: ${it.optString("procedure")} · ${it.optString("status")}" }
-        lines += listOf("", "PERFORMED CARE")
-        patient.optJSONArray("performedProcedures")?.objects().orEmpty().forEach { lines += "${it.optString("procedure")} · ${it.optString("doctor")} · ${it.optString("outcome")}" }
-        val document = PdfDocument()
-        try {
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 10f; color = AndroidColor.rgb(30, 41, 59) }
-            val wrapped = lines.flatMap { wrap(it, paint, 510f) }
-            wrapped.chunked(45).forEachIndexed { index, chunk ->
-                val page = document.startPage(PdfDocument.PageInfo.Builder(595, 842, index + 1).create())
-                paint.color = AndroidColor.rgb(15, 118, 110); page.canvas.drawRect(0f, 0f, 595f, 12f, paint); paint.color = AndroidColor.rgb(30, 41, 59)
-                chunk.forEachIndexed { row, line -> page.canvas.drawText(line, 42f, 48f + row * 16f, paint) }
-                page.canvas.drawText("Page ${index + 1} · Dental Care", 42f, 812f, paint)
-                document.finishPage(page)
-            }
-            document.writeTo(output)
-        } finally { document.close() }
-    }
+    /** Full patient record PDF (profile, 2D dental chart, treatments with fees, encounters, billing). See ReportPdf.kt. */
+    fun patientPdf(patient: JSONObject, config: JSONObject, output: OutputStream) = ReportPdfs.patientReport(patient, config, output)
     private fun wrap(text: String, paint: Paint, width: Float): List<String> {
         val result = mutableListOf<String>()
         for (paragraph in text.split('\n')) {

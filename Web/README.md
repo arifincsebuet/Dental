@@ -17,6 +17,7 @@ exported for the browser (`godot/`, built from `godot-src/`).
 | `js/store.js`, `js/cloud.js`, `js/domain.js` | Data, Firestore access and clinic rules (ports of ClinicStore, ClinicCloud, ClinicalRules…) |
 | `js/app.js`, `js/patient.js`, `js/portal.js` | Pages: clinic, patient workspace with 3D, patient app |
 | `js/viewer3d.js` | Connects the page to the Godot 3D chart |
+| `js/reports.js`, `vendor/` | PDF reports (jsPDF 2.5.1 + AutoTable 3.8.2, bundled so no CDN is needed) |
 | `godot/` | Godot 4.5.1 web export of the 3D chart (do not edit by hand). The engine file `index.wasm` (38 MB) is delivered as `index.wasm.part1` + `.part2`; `deploy.bat web` joins them, or double-click `godot/join-wasm.bat` |
 | `godot-src/` | Godot project used for the web export (not uploaded to Hosting) |
 

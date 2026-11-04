@@ -25,6 +25,7 @@
 | Settings | Clinic (name, time zone, currency, tax, buffer), services & fees, reminders, tooth numbering (Palmer / FDI / Universal), tap sound, theme, subscription status and plan usage, restore cloud records, conflict drafts, import / export JSON, care summary PDF (print) |
 | Sync & conflicts | Revision-checked transactions; conflict review keeps your draft; Firestore offline cache |
 | Patient app (web) | 3D teeth (read only), treatment history with Fee · Paid · Due, upcoming appointments, cancel (2 h rule), book free slots (3 bookings max), billing summary |
+| **PDF reports** | Patient record (profile, 2D dental chart, tooth findings, treatments with Fee · Paid · Due, encounters, appointments, billing, history), financial report, appointments list (day / week / month), invoice and payment receipt. Same layout on Android (save via the file picker) and web (download) |
 | How to use | All Android guides, adapted for the web, plus 3D lens and multi-select guides |
 
 ## 2. Made for the big screen

@@ -10,6 +10,8 @@ import { GUIDES } from "./help.js";
 import { modal, closeModal, field, input, select, check, chips, values, bookDialog, openSlotsDialog, availabilityDialog, closeDayForDoctor, invoiceDialog, setAppointmentStatus, confirmBox } from "./dialogs.js";
 import { P, setCtx, renderPatients, afterRenderPatients, patientAction, registerDialog, invoiceCard } from "./patient.js";
 import { renderPortal, portalAction, afterPortal } from "./portal.js";
+import * as Reports from "./reports.js";
+import { pdf } from "./patient.js";
 
 const A = { route: "home", arg: "", day: "", month: "", schedView: "Calendar", selAppt: null, invFilter: "All", selInv: "", period: "Month", from: "", to: "", selStaff: "", helpQ: "", helpTopic: "All topics", helpId: "start", signTab: "team", theme: null };
 const z = () => D.tz(S.config), c = () => D.cur(S.config);
@@ -204,6 +206,7 @@ function pageSchedule() {
   return `<div class="page"><div class="page-head"><div><h1 class="h1">${fmtIso(day, true)}</h1><p class="muted small" style="margin:2px 0 0">${esc(z())} · ${S.config.bufferMinutes ?? 5} min buffer</p></div>
    <div class="r"><div class="row" style="gap:4px"><button class="btn" data-act="dayshift" data-n="-1" aria-label="Previous day">${I("chevl")}</button><button class="btn" data-act="day" data-d="${todayIn(z())}">Today</button><button class="btn" data-act="dayshift" data-n="1" aria-label="Next day">${I("chev")}</button></div>
    <div class="seg">${["Calendar", "List"].map((v) => `<button class="${A.schedView === v ? "on" : ""}" data-act="schedview" data-v="${v}">${v}</button>`).join("")}</div>
+   <button class="btn" data-act="schedpdf" title="Save the shown day (or list period) as PDF">${I("download")}PDF</button>
    ${can("manageSlots") ? `<label class="row small" style="font-weight:700;padding:0 6px">Online booking by patients <label class="switch"><input type="checkbox" data-act="booking" ${S.config.patientBooking !== false ? "checked" : ""}><i></i></label></label><button class="btn" data-act="openslots" data-date="${day}">${I("clock")}Open slots</button>` : ""}
    ${can("manageAppointments") ? `<button class="btn primary" data-act="book" data-date="${day}">${I("plus")}Book appointment</button>` : ""}</div></div>
   <div class="sched"><div class="side-col" style="display:grid;gap:16px">${miniCal()}${detail}</div>
@@ -259,7 +262,7 @@ function pageReports() {
   return `<div class="page"><div class="page-head"><div><h1 class="h1">Reports</h1><p class="muted small" style="margin:2px 0 0">${esc(z())} · figures reconcile to source payments</p></div>
    <div class="r"><div class="seg">${["Day", "Week", "Month", "Custom", "All"].map((x) => `<button class="${A.period === x ? "on" : ""}" data-act="period" data-p="${x}">${x}</button>`).join("")}</div>
    ${A.period === "Custom" ? `<input class="input" style="width:auto" type="date" data-act="from" value="${A.from}"><input class="input" style="width:auto" type="date" data-act="to" value="${A.to}">` : ""}
-   <button class="btn" data-act="repcsv">${I("share")}Financial report CSV</button></div></div>
+   <button class="btn primary" data-act="reppdf">${I("download")}Financial report PDF</button><button class="btn" data-act="apptpdf">${I("cal")}Appointments PDF</button><button class="btn" data-act="repcsv">${I("share")}CSV</button></div></div>
   <div class="kpis">${[["Billed in period", billed, ""], ["Payments received", received, "var(--green)"], ["Refunds paid out", refunded, "var(--red)"], ["Net cash", received - refunded, "var(--brand)"], ["Outstanding (all dates)", outstanding, "var(--amber)"]].map(([l, v, col]) => `<div class="card kpi"><div class="lbl">${l}</div><div class="val num" style="color:${col || "var(--ink)"}">${money(v, c())}</div></div>`).join("")}</div>
   <div class="dash">
    <div class="card wide"><div class="card-h"><h3>Payments received per day</h3><span class="sub">cash basis</span></div><div class="card-b"><div class="bars" style="height:220px">${days.map(([d, v], i) => `<div class="b" title="${fmtIso(d)}: ${money(v, c())}"><i style="height:${(v / dm) * 100}%"></i><span class="hide-sm">${i % Math.ceil(days.length / 12) === 0 ? +d.slice(8) : ""}</span></div>`).join("")}</div></div></div>
@@ -474,8 +477,24 @@ async function appAction(act, el, e) {
     case "resched": bookDialog({ pid: ds.pid, appointment: patient(ds.pid).appointments.find((a) => a.id === ds.id) }); return;
     case "invfilter": A.invFilter = ds.f; break;
     case "selinv": A.selInv = ds.id; break;
+    case "invpdf": case "rcptpdf": case "receive": case "refund": case "void": case "shareinv": case "receipt": {
+      const owner = S.patients.find((p) => (p.invoices || []).some((v) => v.id === ds.inv));
+      if (!owner) return;
+      P.pid = owner.id;
+      return patientAction(act, el, e);
+    }
     case "invcsv": { const rows = [["Date", "Patient", "Description", "Total", "Received", "Balance", "Status"], ...S.patients.flatMap((p) => (p.invoices || []).map((v) => [zoned(v.at, z()).date, p.name, v.description, D.invoiceTotal(v) / 100, (D.paid(v) - D.refunded(v)) / 100, Math.max(0, D.balance(v)) / 100, D.invoiceState(v)]))]; download("invoices.csv", csv(rows), "text/csv"); return; }
     case "period": A.period = ds.p; break;
+    case "reppdf": { const [a, b] = D.periodRange(A.period, A.from, A.to, S.config); pdf(() => Reports.financialPdf(Reports.rangeLabel(A.period, a, b), a, b)); return; }
+    case "apptpdf": { const [a, b] = D.periodRange(A.period, A.from, A.to, S.config); pdf(() => Reports.appointmentsPdf(Reports.rangeLabel(A.period, a, b), a, b)); return; }
+    case "schedpdf": {
+      const r = A.schedView === "List" ? (A.listRange || "Day") : "Day";
+      const d0 = A.day, start = r === "Week" ? addDaysIso(d0, -(dowOf(d0) - 1)) : r === "Month" ? d0.slice(0, 8) + "01" : d0;
+      const end = r === "Week" ? addDaysIso(start, 7) : addDaysIso(d0, 1);
+      const endM = r === "Month" ? (() => { const [y, m] = start.split("-").map(Number); return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`; })() : end;
+      const a = r === "All" ? -Infinity : zonedMs(start, "00:00", z()), b = r === "All" ? Infinity : zonedMs(endM, "00:00", z());
+      pdf(() => Reports.appointmentsPdf(Reports.rangeLabel(r, a, b), a, b)); return;
+    }
     case "repcsv": download(`financial-report-${A.period.toLowerCase()}.csv`, csv(A._csv()), "text/csv"); return;
     case "selstaff": A.selStaff = ds.id; A.permDraft = null; break;
     case "newstaff": A.selStaff = "new"; A.permDraft = null; break;

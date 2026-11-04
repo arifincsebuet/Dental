@@ -323,7 +323,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                                 if (p.has("allergies")) fields.add(Field("allergies", "Medical alerts", p.optString("allergies")))
                                 form = Form("Edit profile", fields) { values -> editRecord(p, "Profile amended") { changed -> values.forEach { (key, value) -> changed.put(key, value) } } }
                             }
-                            ActionTile("Care summary PDF", Glyph.Export, Modifier.weight(1f)) { store.stageExport(JSONObject().put("kind", "pdf").put("patient", p).put("config", store.config)) { pdfExporter.launch("care-summary-${p.optString("id")}.pdf") } }
+                            ActionTile("Patient report PDF", Glyph.Export, Modifier.weight(1f)) { store.stageExport(JSONObject().put("kind", "pdf").put("patient", p).put("config", store.config)) { pdfExporter.launch(pdfName("patient-report", p.optString("name"))) } }
                             ActionTile("Export JSON", Glyph.Clipboard, Modifier.weight(1f)) { store.stageExport(JSONObject().put("kind", "json").put("text", p.toString(2))) { exporter.launch("patient-${p.optString("id")}.json") } }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
