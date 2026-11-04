@@ -378,6 +378,7 @@ private val GuideArticles = listOf(
         listOf(
             "Open Reports and choose Day, Week, Month, Custom or All (for Custom pick the first and last dates).",
             "Read billed, received, refunded, net and outstanding amounts, appointment states, clinician workload and treatment activity.",
+            "Treatment payments shows money received for treatments in the period (by payment method), every treatment with a fee (fees, paid, due, fully paid), totals by procedure, and the largest balances still due.",
             "Choose Share financial report CSV to share it."
         ),
         "Reports use the records on this device; Sync first for the latest. Needs the \"Reports\" access item."
