@@ -101,6 +101,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     val selection = remember(patientId) { mutableStateListOf<String>() }
     var recordTeeth by remember { mutableStateOf<List<String>?>(null) }
     var editTreatmentId by remember { mutableStateOf<String?>(null) }
+    var paymentTreatmentId by remember { mutableStateOf<String?>(null) }
     var recordSurface by remember { mutableStateOf("") }
     var chartPatientId by rememberSaveable { mutableStateOf<String?>(null) }
     var chartToken by rememberSaveable { mutableStateOf("") }
@@ -293,7 +294,8 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     }
                     ToothHistoryList(records, store.config, focusTooth, canEdit,
                         onToggle = { key -> focusTooth = if (focusTooth == key) null else key },
-                        onEdit = { id -> editTreatmentId = id })
+                        onEdit = { id -> editTreatmentId = id },
+                        canBill = store.can("billing"), onPayments = { id -> paymentTreatmentId = id })
                 } else {
                     PatientHeader(p)
                     if (p.has("operationId")) OutlinedButton(onClick = { store.resolveConflict(p.optString("id")) }, enabled = !store.busy, modifier = Modifier.fillMaxWidth()) { Text("Review conflict · retain draft and load server version") }
@@ -413,6 +415,13 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
             } else when (page) {
                 "Home" -> {
                     HomeHero(store)
+                    store.patientLimit?.let { limit ->
+                        if (store.activePatientCount >= limit * 95 / 100) SurfaceCard(onClick = { page = "Settings" }, background = Amber100) {
+                            Text(if (store.activePatientCount >= limit) "Your plan is full" else "Your plan is almost full", style = MaterialTheme.typography.titleSmall, color = Ink)
+                            Text("%,d of %,d patients. Upgrade in Settings › Subscription: each further 1,000 patients adds US\$5 a month during the offer.".format(store.activePatientCount, limit),
+                                style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         StatTile("Patients", store.patients.count { !it.optBoolean("archived") }.toString(), Teal700, Glyph.Person, Modifier.weight(1f))
                         StatTile("Open plans", store.patients.sumOf { it.optJSONArray("treatments")?.objects().orEmpty().count { t -> t.optString("status") !in listOf("Completed", "Declined", "Cancelled") } }.toString(), Color(0xFF7C3AED), Glyph.Clipboard, Modifier.weight(1f))
@@ -559,6 +568,15 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
         store.save(changed, action)
         store.saveError ?: run { selecting = false; selection.clear(); focusTooth = teeth.first(); null }
     } }
+    paymentTreatmentId?.let { id ->
+        if (patient != null && store.can("billing")) key(id) {
+            TreatmentPaymentDialog(patient, id, store.config, onClose = { paymentTreatmentId = null }) { changed, action ->
+                store.save(changed, action)
+                // Share the payment at once so the clinic and the patient app see the new balance.
+                store.saveError ?: run { store.syncSoon(); null }
+            }
+        } else LaunchedEffect(id) { paymentTreatmentId = null }
+    }
     editTreatmentId?.let { id ->
         val item = patient?.optJSONArray("treatments").objectList().firstOrNull { it.optString("id") == id }
         if (patient != null && item != null && store.can("recordTreatment")) key(id) { RecordTreatmentDialog(

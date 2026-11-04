@@ -198,7 +198,12 @@ object PatientValidation {
             }
             if (normalized(invoice.optString("status")) in setOf("void", "voided")) require(paid == refunded && invoice.optString("voidReason").isNotBlank()) { "Voiding requires a reason and all payments refunded" }
             old[invoice.optString("id")]?.let { original ->
-                listOf("amount", "currency", "description", "lines", "discount", "taxBps").forEach { field -> require(same(original.opt(field), invoice.opt(field))) { "Issued invoice prices and lines cannot be rewritten" } }
+                // A treatment's fee invoice (paid over several visits) may have its total fee revised; the
+                // payment checks above keep it from going below what was already paid. Each change is logged.
+                val revisable = original.optString("treatmentRef").isNotBlank() && original.optString("treatmentRef") == invoice.optString("treatmentRef")
+                val fixed = if (revisable) listOf("currency", "discount", "taxBps") else listOf("amount", "currency", "description", "lines", "discount", "taxBps")
+                fixed.forEach { field -> require(same(original.opt(field), invoice.opt(field))) { "Issued invoice prices and lines cannot be rewritten" } }
+                if (revisable && !same(original.opt("amount"), invoice.opt("amount"))) appendOnly(original.optJSONArray("feeChanges"), optionalObjects(invoice, "feeChanges", 1000), "Fee changes")
                 appendOnly(original.optJSONArray("payments"), payments, "Payments"); appendOnly(original.optJSONArray("refunds"), refunds, "Refunds")
                 if (normalized(original.optString("status")) in setOf("void", "voided")) require(same(original, invoice)) { "Voided invoices are immutable" }
             }

@@ -230,6 +230,20 @@ private val GuideArticles = listOf(
         "A treatment can't be moved to another tooth; record a new one for the right tooth and cancel the wrong one."
     ),
     GuideArticle(
+        "treatment-payments", "3D teeth", "Take payments for a treatment over several visits",
+        "Set the total fee once, then add each visit's payment (e.g. root canal 5,000 tk, 1,000 tk per visit).",
+        listOf(
+            "Open the patient and, in Treatment history below the 3D model, tap the tooth to expand its timeline.",
+            "Tap Set fee / add payment on the treatment (for example Root canal).",
+            "Enter the total fee for the treatment (e.g. 5000). If the procedure matches one of your Services, its default fee is filled in.",
+            "Enter the amount paid at this visit (e.g. 1000), choose Cash, bKash, Nagad, Card or Bank, check the date and add a note such as \"visit 1 of 5\". Tap Save.",
+            "At every later visit tap Add payment and enter that visit's amount; the last amount and method are filled in for you.",
+            "The treatment shows Fee · Paid · Due (amber while money is due, green when fully paid). Earlier payments are listed with a Receipt button to share each one.",
+            "If the treatment ends up costing more or less, change the total fee in the same dialog (it can't go below what was already paid)."
+        ),
+        "The fee and payments are an invoice in the patient's Billing tab too, so receipts, refunds and Reports include them. The patient sees Fee, Paid and Due in the patient app. Needs the \"Invoices & payments\" access item."
+    ),
+    GuideArticle(
         "full-3d", "3D teeth", "Use the full-screen 3D chart",
         "A larger chart with views, arch filters, roots and surface selection.",
         listOf(
@@ -353,7 +367,7 @@ private val GuideArticles = listOf(
             "Open the patient's Billing tab and choose + Create invoice.",
             "Pick a service or type a line description, unit price and quantity; choose Add line for each item. Set discount and tax, then Issue invoice.",
             "Choose Receive payment on an unpaid invoice and enter the amount, method and optional reference. Partial payments leave a balance.",
-            "Use Share receipt or Share invoice to send a copy.",
+            "Use Share receipt or Share invoice to send a copy. Payments for one treatment over several visits are easier from Treatment history (see Take payments for a treatment over several visits).",
             "To correct: Refund a payment (amount, method and reason), or Void an invoice with a reason after refunding its payments."
         ),
         "Recording a payment doesn't charge a card. Needs the \"Invoices & payments\" access item."
@@ -391,12 +405,14 @@ private val GuideArticles = listOf(
         "Exported files contain sensitive patient information; choose the destination carefully."
     ),
     GuideArticle(
-        "subscription", "Settings", "Subscription and account",
-        "One subscription covers the whole clinic; patients never pay.",
+        "subscription", "Settings", "Subscription price and account",
+        "One subscription covers the whole clinic and is priced by the number of patients; patients never pay.",
         listOf(
-            "Settings › Subscription shows the plan from Google Play (currently a launch offer, then the regular monthly price).",
-            "The owner or an admin subscribes; every staff device of the clinic then unlocks. Use Restore purchase after reinstalling, and Manage in Google Play to cancel.",
-            "Super admin accounts and their clinics are free.",
+            "Price: up to 1,000 patients US\$5 a month during the launch offer (normally US\$10). Each further 1,000 patients adds US\$5 (normally US\$10): 1,001–2,000 patients US\$10, 2,001–3,000 US\$15, and so on. Google Play shows the price in your currency.",
+            "The owner or an admin subscribes from the paywall or Settings › Subscription. The plan offered matches your current number of active (not archived) patients. Every staff device of the clinic then unlocks.",
+            "Settings › Subscription shows how many patients your plan covers. When it is almost full, Home shows a reminder.",
+            "When the plan is full, registering a new patient asks you to upgrade. Tap Upgrade in Settings › Subscription on the phone that bought the subscription; Google Play charges only the difference for the rest of the month. Archiving patients who no longer visit also frees places.",
+            "Use Restore purchase after reinstalling, and Manage in Google Play to cancel. Super admin accounts and their clinics are free.",
             "Sign out from ☰ › Sign out (sync first). Settings also has Tooth numbering, Tooth tap sound and notification permission."
         ),
         null
@@ -416,6 +432,7 @@ private val GuideArticles = listOf(
         "patient-teeth", "Patient app", "See your teeth and treatment history",
         "Your clinic's records shown in 3D, read only.",
         listOf(
+            "Each treatment shows its fee, what you have paid and what is still due.",
             "After signing in you see your teeth in 3D. Drag to rotate, pinch to zoom; it turns slowly on its own.",
             "Blue teeth were treated, + means planned care, amber means a finding.",
             "Tap a tooth to see its treatment history below the model.",

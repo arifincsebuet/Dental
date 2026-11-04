@@ -45,6 +45,8 @@ data class HistoryEntry(
     val doctor: String, val notes: String, val outcome: String,
     /** Id of the editable treatment item ("" for older standalone performed-care records). */
     val treatmentId: String = "",
+    /** Total fee and payments so far, when a fee was set for this treatment. */
+    val fee: TreatmentFee? = null,
 )
 
 /** Everything recorded for one tooth slot, newest first. */
@@ -74,6 +76,7 @@ fun toothRecords(patient: JSONObject): List<ToothRecord> {
             notes = treatment.optString("notes"),
             outcome = outcome?.optString("outcome").orEmpty(),
             treatmentId = treatment.optString("id"),
+            fee = treatmentFee(patient, treatmentRef(treatment)),
         )
         keysOf(treatment).forEach { entries.getOrPut(it) { mutableListOf() } += entry }
     }
@@ -145,6 +148,9 @@ fun ToothHistoryList(
     canEdit: Boolean,
     onToggle: (String) -> Unit,
     onEdit: (String) -> Unit,
+    /** Staff with billing access can add payments; everyone sees the fee summary. */
+    canBill: Boolean = false,
+    onPayments: (String) -> Unit = {},
 ) {
     val procedures = records.sumOf { it.entries.size }
     SectionHeader("Treatment history · ${records.size} teeth · $procedures procedures")
@@ -157,9 +163,9 @@ fun ToothHistoryList(
     }
     // A tooth tapped on the model that has no history yet still gets a detail card.
     if (expanded != null && records.none { it.key == expanded }) {
-        ToothRow(ToothRecord(expanded, emptyList(), emptyList(), emptyList(), "unknown", "none"), config, true, canEdit, onToggle, onEdit)
+        ToothRow(ToothRecord(expanded, emptyList(), emptyList(), emptyList(), "unknown", "none"), config, true, canEdit, onToggle, onEdit, canBill, onPayments)
     }
-    records.forEach { record -> ToothRow(record, config, record.key == expanded, canEdit, onToggle, onEdit) }
+    records.forEach { record -> ToothRow(record, config, record.key == expanded, canEdit, onToggle, onEdit, canBill, onPayments) }
 }
 
 /** Actions for the tooth selected on the 3D model; shown above (outside) the treatment history. */
@@ -188,7 +194,7 @@ fun SelectedToothActions(key: String, onRecord: (String) -> Unit, onEditStatus: 
 @Composable
 private fun ToothRow(
     record: ToothRecord, config: JSONObject, open: Boolean, canEdit: Boolean,
-    onToggle: (String) -> Unit, onEdit: (String) -> Unit,
+    onToggle: (String) -> Unit, onEdit: (String) -> Unit, canBill: Boolean, onPayments: (String) -> Unit,
 ) {
     val lost = record.presence in setOf("missing", "extracted", "exfoliated", "congenitally_absent")
     Surface(
@@ -253,6 +259,14 @@ private fun ToothRow(
                                     .filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = InkMuted)
                                 if (entry.outcome.isNotBlank()) Text("Outcome: ${entry.outcome}", style = MaterialTheme.typography.bodySmall, color = Ink)
                                 if (entry.notes.isNotBlank()) Text(entry.notes, style = MaterialTheme.typography.bodySmall, color = Ink)
+                                entry.fee?.let { fee ->
+                                    Text(feeText(fee) + if (fee.visits > 0) " · ${fee.visits} payment${if (fee.visits == 1) "" else "s"}" else "",
+                                        style = MaterialTheme.typography.bodySmall, color = if (fee.due > 0) Amber600 else Green600, fontWeight = FontWeight.SemiBold)
+                                }
+                                if (canBill && entry.treatmentId.isNotBlank() && entry.status != "Cancelled") TextButton(onClick = { onPayments(entry.treatmentId) },
+                                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp), modifier = Modifier.height(30.dp)) {
+                                    Text(if (entry.fee == null) "Set fee / add payment" else if (entry.fee.due > 0) "Add payment" else "Payments", style = MaterialTheme.typography.labelLarge, color = Blue600)
+                                }
                             }
                         }
                     }
