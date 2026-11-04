@@ -380,6 +380,48 @@ fun AdvancedReportsScreen(patients: List<JSONObject>, config: JSONObject) {
         csv.appendLine(listOf(currency, decimal(billed), decimal(paid), decimal(refunds), decimal(paid - refunds), decimal(outstanding)).joinToString(","))
     }
     if (currencies.isEmpty()) FeaturePanel("No financial activity") { Text("Issued invoices and received payments will appear here.") }
+    // Treatment payments: fees set on treatments and paid over several visits (linked invoices).
+    val treatmentInvoices = patients.flatMap { patient -> records(patient, "invoices")
+        .filter { it.optString("treatmentRef").isNotBlank() && it.optString("status") != "Voided" }.map { patient to it } }
+    if (treatmentInvoices.isNotEmpty()) {
+        treatmentInvoices.groupBy { it.second.optString("currency", currentCurrency(config)) }.toSortedMap().forEach { (currency, items) ->
+            fun money(value: Long) = runCatching { ClinicalRules.money(value, currency) }.getOrDefault(value.toString())
+            val periodPayments = items.flatMap { (_, invoice) -> records(invoice, "payments").filter { it.optLong("at") in range } }
+            val received = periodPayments.sumOf { it.optLong("amount") }
+            val refunded = items.sumOf { (_, invoice) -> records(invoice, "refunds").filter { it.optLong("at") in range }.sumOf { it.optLong("amount") } }
+            val fees = items.sumOf { (_, invoice) -> ClinicalRules.invoiceTotal(invoice) }
+            val paidToDate = items.sumOf { (_, invoice) -> ClinicalRules.paid(invoice) - ClinicalRules.refunded(invoice) }
+            val due = items.sumOf { (_, invoice) -> ClinicalRules.balance(invoice) }
+            val withBalance = items.filter { ClinicalRules.balance(it.second) > 0 }
+            FeaturePanel("Treatment payments · $currency") {
+                Text("Received in period: ${money(received)} from ${periodPayments.size} payment${if (periodPayments.size == 1) "" else "s"}", fontWeight = FontWeight.SemiBold)
+                if (refunded > 0) Text("Refunded in period: ${money(refunded)} · net ${money(received - refunded)}")
+                periodPayments.groupBy { it.optString("method").ifBlank { "Other" } }.toSortedMap().forEach { (method, list) ->
+                    Text("  $method: ${money(list.sumOf { it.optLong("amount") })} (${list.size})", fontSize = 13.sp)
+                }
+                Text("All treatments with a fee (all dates)", fontWeight = FontWeight.SemiBold)
+                Text("${items.size} treatments · fees ${money(fees)} · paid ${money(paidToDate)} · due ${money(due)}")
+                Text("${items.size - withBalance.size} fully paid · ${withBalance.size} with a balance due", fontSize = 13.sp)
+                Text("By procedure", fontWeight = FontWeight.SemiBold)
+                items.groupBy { (patient, invoice) ->
+                    records(patient, "treatments").firstOrNull { it.optString("id") == invoice.optString("treatmentId") || treatmentRef(it) == invoice.optString("treatmentRef") }
+                        ?.optString("procedure")?.ifBlank { null } ?: invoice.optString("description").substringBefore(" · ")
+                }.toSortedMap().forEach { (procedure, list) ->
+                    val inPeriod = list.sumOf { (_, invoice) -> records(invoice, "payments").filter { it.optLong("at") in range }.sumOf { it.optLong("amount") } }
+                    Text("  $procedure: ${list.size} · received in period ${money(inPeriod)} · due ${money(list.sumOf { ClinicalRules.balance(it.second) })}", fontSize = 13.sp)
+                }
+                if (withBalance.isNotEmpty()) {
+                    Text("Largest balances due", fontWeight = FontWeight.SemiBold)
+                    withBalance.sortedByDescending { ClinicalRules.balance(it.second) }.take(5).forEach { (patient, invoice) ->
+                        Text("  ${patient.optString("name")} · ${invoice.optString("description").substringBefore(" (FDI")} · due ${money(ClinicalRules.balance(invoice))}", fontSize = 13.sp)
+                    }
+                }
+            }
+            val digits = ClinicalRules.currencyDigits(currency)
+            fun decimal(value: Long) = BigDecimal.valueOf(value).movePointLeft(digits).toPlainString()
+            csv.appendLine("Treatment payments $currency,Fees (all dates),${decimal(fees)},Received in period,${decimal(received)},Refunded in period,${decimal(refunded)},Paid to date,${decimal(paidToDate)},Due now,${decimal(due)}")
+        }
+    }
     val appointments = patients.flatMap { records(it, "appointments") }.filter { runCatching { ClinicalRules.appointmentMillis(it, config) in range }.getOrDefault(false) }
     FeaturePanel("Appointments") {
         Text("${appointments.size} appointments in period", fontWeight = FontWeight.SemiBold)
