@@ -351,6 +351,10 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
 @Composable
 fun AdvancedReportsScreen(patients: List<JSONObject>, config: JSONObject) {
     val context = LocalContext.current
+    // Separate date range for the treatment payments section.
+    var tpPeriod by remember { mutableStateOf("Report period") }
+    var tpStart by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).withDayOfMonth(1).toString()) }
+    var tpEnd by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).toString()) }
     var period by remember { mutableStateOf("Month") }; var start by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).withDayOfMonth(1).toString()) }; var end by remember { mutableStateOf(LocalDate.now(ClinicalRules.zone(config)).toString()) }
     FeatureHeading("Practice reports", "Payment dates and clinic time zone determine the reporting period")
     FeatureChoices(listOf("Day", "Week", "Month", "Custom", "All"), period) { period = it }
@@ -381,45 +385,72 @@ fun AdvancedReportsScreen(patients: List<JSONObject>, config: JSONObject) {
     }
     if (currencies.isEmpty()) FeaturePanel("No financial activity") { Text("Issued invoices and received payments will appear here.") }
     // Treatment payments: fees set on treatments and paid over several visits (linked invoices).
+    // It has its own date range (default: the report's period).
     val treatmentInvoices = patients.flatMap { patient -> records(patient, "invoices")
         .filter { it.optString("treatmentRef").isNotBlank() && it.optString("status") != "Voided" }.map { patient to it } }
     if (treatmentInvoices.isNotEmpty()) {
-        treatmentInvoices.groupBy { it.second.optString("currency", currentCurrency(config)) }.toSortedMap().forEach { (currency, items) ->
-            fun money(value: Long) = runCatching { ClinicalRules.money(value, currency) }.getOrDefault(value.toString())
-            val periodPayments = items.flatMap { (_, invoice) -> records(invoice, "payments").filter { it.optLong("at") in range } }
-            val received = periodPayments.sumOf { it.optLong("amount") }
-            val refunded = items.sumOf { (_, invoice) -> records(invoice, "refunds").filter { it.optLong("at") in range }.sumOf { it.optLong("amount") } }
-            val fees = items.sumOf { (_, invoice) -> ClinicalRules.invoiceTotal(invoice) }
-            val paidToDate = items.sumOf { (_, invoice) -> ClinicalRules.paid(invoice) - ClinicalRules.refunded(invoice) }
-            val due = items.sumOf { (_, invoice) -> ClinicalRules.balance(invoice) }
-            val withBalance = items.filter { ClinicalRules.balance(it.second) > 0 }
-            FeaturePanel("Treatment payments · $currency") {
-                Text("Received in period: ${money(received)} from ${periodPayments.size} payment${if (periodPayments.size == 1) "" else "s"}", fontWeight = FontWeight.SemiBold)
-                if (refunded > 0) Text("Refunded in period: ${money(refunded)} · net ${money(received - refunded)}")
-                periodPayments.groupBy { it.optString("method").ifBlank { "Other" } }.toSortedMap().forEach { (method, list) ->
-                    Text("  $method: ${money(list.sumOf { it.optLong("amount") })} (${list.size})", fontSize = 13.sp)
+        val zone = ClinicalRules.zone(config)
+        FeaturePanel("Treatment payments") {
+            Text("Date range for this section", fontWeight = FontWeight.SemiBold)
+            FeatureChoices(listOf("Report period", "Day", "Week", "Month", "Custom", "All"), tpPeriod) { tpPeriod = it }
+            if (tpPeriod == "Custom") {
+                DateField(tpStart, { tpStart = it }, "From", today = LocalDate.now(zone))
+                DateField(tpEnd, { tpEnd = it }, "To (inclusive)", today = LocalDate.now(zone))
+            }
+            val tpResult = runCatching { if (tpPeriod == "Report period") range else ClinicalRules.range(tpPeriod, tpStart, tpEnd, config) }
+            val tpRange = tpResult.getOrNull()
+            if (tpRange == null) Text(tpResult.exceptionOrNull()?.localizedMessage ?: "Review the date range", color = MaterialTheme.colorScheme.error)
+            else {
+                val whole = tpRange.first == Long.MIN_VALUE
+                Text(if (whole) "All dates" else runCatching {
+                    val fmt = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")
+                    java.time.Instant.ofEpochMilli(tpRange.first).atZone(zone).toLocalDate().format(fmt) + " – " +
+                        java.time.Instant.ofEpochMilli(tpRange.last).atZone(zone).toLocalDate().format(fmt)
+                }.getOrDefault(""), fontSize = 13.sp, color = FeatureTeal)
+                // Treatments counted: fee set in the range, or a payment received in the range.
+                val inScope = treatmentInvoices.filter { (_, invoice) ->
+                    whole || invoice.optLong("at") in tpRange || records(invoice, "payments").any { it.optLong("at") in tpRange }
                 }
-                Text("All treatments with a fee (all dates)", fontWeight = FontWeight.SemiBold)
-                Text("${items.size} treatments · fees ${money(fees)} · paid ${money(paidToDate)} · due ${money(due)}")
-                Text("${items.size - withBalance.size} fully paid · ${withBalance.size} with a balance due", fontSize = 13.sp)
-                Text("By procedure", fontWeight = FontWeight.SemiBold)
-                items.groupBy { (patient, invoice) ->
-                    records(patient, "treatments").firstOrNull { it.optString("id") == invoice.optString("treatmentId") || treatmentRef(it) == invoice.optString("treatmentRef") }
-                        ?.optString("procedure")?.ifBlank { null } ?: invoice.optString("description").substringBefore(" · ")
-                }.toSortedMap().forEach { (procedure, list) ->
-                    val inPeriod = list.sumOf { (_, invoice) -> records(invoice, "payments").filter { it.optLong("at") in range }.sumOf { it.optLong("amount") } }
-                    Text("  $procedure: ${list.size} · received in period ${money(inPeriod)} · due ${money(list.sumOf { ClinicalRules.balance(it.second) })}", fontSize = 13.sp)
-                }
-                if (withBalance.isNotEmpty()) {
-                    Text("Largest balances due", fontWeight = FontWeight.SemiBold)
-                    withBalance.sortedByDescending { ClinicalRules.balance(it.second) }.take(5).forEach { (patient, invoice) ->
-                        Text("  ${patient.optString("name")} · ${invoice.optString("description").substringBefore(" (FDI")} · due ${money(ClinicalRules.balance(invoice))}", fontSize = 13.sp)
+                if (inScope.isEmpty()) Text("No treatment fees or payments in this range.")
+                inScope.groupBy { it.second.optString("currency", currentCurrency(config)) }.toSortedMap().forEach { (currency, items) ->
+                    fun money(value: Long) = runCatching { ClinicalRules.money(value, currency) }.getOrDefault(value.toString())
+                    val periodPayments = items.flatMap { (_, invoice) -> records(invoice, "payments").filter { it.optLong("at") in tpRange } }
+                    val received = periodPayments.sumOf { it.optLong("amount") }
+                    val refunded = items.sumOf { (_, invoice) -> records(invoice, "refunds").filter { it.optLong("at") in tpRange }.sumOf { it.optLong("amount") } }
+                    val fees = items.sumOf { (_, invoice) -> ClinicalRules.invoiceTotal(invoice) }
+                    val paidToDate = items.sumOf { (_, invoice) -> ClinicalRules.paid(invoice) - ClinicalRules.refunded(invoice) }
+                    val due = items.sumOf { (_, invoice) -> ClinicalRules.balance(invoice) }
+                    val withBalance = items.filter { ClinicalRules.balance(it.second) > 0 }
+                    HorizontalDivider()
+                    Text(currency, fontWeight = FontWeight.Bold, color = FeatureTeal)
+                    Text("Received: ${money(received)} from ${periodPayments.size} payment${if (periodPayments.size == 1) "" else "s"}", fontWeight = FontWeight.SemiBold)
+                    if (refunded > 0) Text("Refunded: ${money(refunded)} · net ${money(received - refunded)}")
+                    periodPayments.groupBy { it.optString("method").ifBlank { "Other" } }.toSortedMap().forEach { (method, list) ->
+                        Text("  $method: ${money(list.sumOf { it.optLong("amount") })} (${list.size})", fontSize = 13.sp)
                     }
+                    Text(if (whole) "All treatments with a fee" else "Treatments with a fee set or paid in this range", fontWeight = FontWeight.SemiBold)
+                    Text("${items.size} treatments · fees ${money(fees)} · paid to date ${money(paidToDate)} · due now ${money(due)}")
+                    Text("${items.size - withBalance.size} fully paid · ${withBalance.size} with a balance due", fontSize = 13.sp)
+                    Text("By procedure", fontWeight = FontWeight.SemiBold)
+                    items.groupBy { (patient, invoice) ->
+                        records(patient, "treatments").firstOrNull { it.optString("id") == invoice.optString("treatmentId") || treatmentRef(it) == invoice.optString("treatmentRef") }
+                            ?.optString("procedure")?.ifBlank { null } ?: invoice.optString("description").substringBefore(" · ")
+                    }.toSortedMap().forEach { (procedure, list) ->
+                        val inRange = list.sumOf { (_, invoice) -> records(invoice, "payments").filter { it.optLong("at") in tpRange }.sumOf { it.optLong("amount") } }
+                        Text("  $procedure: ${list.size} · received ${money(inRange)} · due ${money(list.sumOf { ClinicalRules.balance(it.second) })}", fontSize = 13.sp)
+                    }
+                    if (withBalance.isNotEmpty()) {
+                        Text("Largest balances due", fontWeight = FontWeight.SemiBold)
+                        withBalance.sortedByDescending { ClinicalRules.balance(it.second) }.take(5).forEach { (patient, invoice) ->
+                            val label = invoice.optString("description").substringBefore(" (FDI")
+                            Text("  " + patient.optString("name") + " · " + label + " · due " + money(ClinicalRules.balance(invoice)), fontSize = 13.sp)
+                        }
+                    }
+                    val digits = ClinicalRules.currencyDigits(currency)
+                    fun decimal(value: Long) = BigDecimal.valueOf(value).movePointLeft(digits).toPlainString()
+                    csv.appendLine("Treatment payments $currency (${if (whole) "all dates" else "selected range"}),Fees,${decimal(fees)},Received in range,${decimal(received)},Refunded in range,${decimal(refunded)},Paid to date,${decimal(paidToDate)},Due now,${decimal(due)}")
                 }
             }
-            val digits = ClinicalRules.currencyDigits(currency)
-            fun decimal(value: Long) = BigDecimal.valueOf(value).movePointLeft(digits).toPlainString()
-            csv.appendLine("Treatment payments $currency,Fees (all dates),${decimal(fees)},Received in period,${decimal(received)},Refunded in period,${decimal(refunded)},Paid to date,${decimal(paidToDate)},Due now,${decimal(due)}")
         }
     }
     val appointments = patients.flatMap { records(it, "appointments") }.filter { runCatching { ClinicalRules.appointmentMillis(it, config) in range }.getOrDefault(false) }
