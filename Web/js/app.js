@@ -287,7 +287,7 @@ function pageTeam() {
   const joined = (email) => Object.values(S.config.members || {}).some((m) => m.email === String(email || "").toLowerCase() && m.active !== false);
   return `<div class="page"><div class="page-head"><div><h1 class="h1">Team & roles</h1><p class="muted small" style="margin:2px 0 0">Staff join your clinic when they sign in with the Google email you add here</p></div><div class="r">${manage ? `<button class="btn primary" data-act="newstaff">${I("plus")}Add staff member</button>` : ""}</div></div>
   ${manage ? "" : `<div class="notice" style="margin-bottom:16px">${I("lock")}<span>Only the owner and people with "Clinic settings, team & roles" can change the team.</span></div>`}
-  <div class="split"><div class="card"><div class="table-wrap"><table class="t matrix"><thead><tr><th>Member</th><th>Role</th>${D.ACCESS.map((a) => `<th class="c hide-sm" title="${a[1]}" style="writing-mode:vertical-rl;transform:rotate(180deg);height:150px;font-size:10.5px;letter-spacing:.03em;text-transform:none;padding:8px 6px">${a[1]}</th>`).join("")}<th>Status</th></tr></thead><tbody>
+  <div class="split"><div class="card"><div class="table-wrap"><table class="t matrix"><thead><tr><th>Member</th><th>Role</th>${D.ACCESS.map((a, i) => `<th class="c hide-sm perm-h" title="${esc(a[1])}"><span>${PERM_SHORT[i] || a[1]}</span></th>`).join("")}<th>Status</th></tr></thead><tbody>
    ${staff.map((m) => `<tr class="click ${s && m.id === s.id ? "sel" : ""}" data-act="selstaff" data-id="${m.id}"><td><div class="row"><div class="avatar">${initials(m.name)}</div><div><b>${esc(m.name || "Unnamed")}</b><div class="small muted">${esc(m.email || "No sign-in email")}</div></div></div></td><td><span class="badge">${D.roleTitle(m.role)}</span></td>
      ${D.ACCESS.map(([k]) => { const on = D.allowed(m.role, m.permissions, k); return `<td class="c hide-sm"><span class="tick ${on ? "" : "no"}">${I(on ? "check" : "x")}</span></td>`; }).join("")}
      <td>${m.active === false ? '<span class="badge">Inactive</span>' : joined(m.email) ? '<span class="badge green">Joined</span>' : '<span class="badge amber">Invited</span>'}</td></tr>`).join("") || `<tr><td colspan="12" class="empty">No staff yet. Add a doctor or receptionist to give them access.</td></tr>`}
@@ -301,6 +301,9 @@ function pageTeam() {
     ${manage ? `<div class="row" style="margin-top:12px"><button class="btn primary" data-act="savestaff" data-role="${role}">${s.id ? "Save changes" : "Add to team"}</button>${s.id ? `<button class="btn danger" data-act="removestaff">Remove from team</button>` : ""}</div>` : ""}</div></form>` : ""}
   </div></div>`;
 }
+
+// Short column titles for the access matrix (full text in the tooltip), in D.ACCESS order.
+const PERM_SHORT = ["Chart", "Treatments", "Patients", "Appointments", "Open slots", "Billing", "Patient app", "Reports", "Settings"];
 
 // ============================================================================ settings
 function pageSettings() {

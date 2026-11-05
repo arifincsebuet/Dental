@@ -154,3 +154,43 @@ img.logo.clinic-logo{object-fit:contain;border-radius:12px;background:#fff;paddi
 @media (max-width:760px){.find-us{grid-template-columns:1fr}}
 a.btn{text-decoration:none}
 .find-us .btn{justify-content:center}
+/* layout fixes */
+table.t td.num,table.t th.num,.nowrap{white-space:nowrap}
+.btn.xs{height:26px;padding:0 9px;font-size:12px;border-radius:8px;gap:4px}
+.wf-cell{width:1%;min-width:150px}
+.wf{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;max-width:250px;margin-left:auto}
+.inv-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.inv-actions .btn{white-space:nowrap}
+.inv-more{display:inline-flex;gap:2px;margin-left:auto}
+.app.compact-nav .nav a{position:relative}
+.app.compact-nav .nav a .badge{top:2px;right:2px;height:16px;min-width:16px;padding:0 4px;font-size:9.5px;line-height:16px;border:2px solid var(--surface);box-sizing:content-box}
+.v3d:not(.wide) .v3d-hint{display:none}
+.tabs{scrollbar-width:thin}
+.btn{white-space:nowrap}
+.perm-h{vertical-align:bottom!important;padding:8px 4px!important;text-transform:none!important}
+.perm-h span{writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;max-height:140px;font-size:11px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search button{min-width:0;overflow:hidden}
+.search button span.t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search kbd{white-space:nowrap;flex:none}
+.topbar .ttl,.topbar h1,.page-title{min-width:0}
+@media (max-width:1279px){
+  .nav a{position:relative}
+  .nav a .badge{top:2px;right:2px;height:16px;min-width:16px;padding:0 4px;font-size:9.5px;line-height:16px;border:2px solid var(--surface);box-sizing:content-box}
+}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.seg{max-width:100%;overflow-x:auto;scrollbar-width:none}
+.seg::-webkit-scrollbar{display:none}
+.seg button{flex:none}
+.wf-cell{min-width:230px}
+.card-h{flex-wrap:wrap;row-gap:8px}
+.card-h h3{white-space:nowrap}
+.card-h .sub{min-width:0}
+.msg{left:0;right:0;margin:0 auto;transform:none;width:fit-content;animation:none}
+.msg span{min-width:0}
+.msg button{flex:none;white-space:nowrap}
+@media (max-width:767px){.msg{bottom:78px}}
+.portal-top{flex-wrap:wrap;row-gap:8px}
+.portal-top>div:last-child{flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.portal-top select.input{width:auto;max-width:170px}
+.portal-top .hide-sm{white-space:nowrap}
+@media (max-width:600px){.portal-top>div:last-child .btn{padding:0 10px}}
