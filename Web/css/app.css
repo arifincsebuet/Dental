@@ -194,3 +194,4 @@ table.t td.num,table.t th.num,.nowrap{white-space:nowrap}
 .portal-top select.input{width:auto;max-width:170px}
 .portal-top .hide-sm{white-space:nowrap}
 @media (max-width:600px){.portal-top>div:last-child .btn{padding:0 10px}}
+.v3d-legend.mat{opacity:.85;font-size:11px;margin-top:2px}

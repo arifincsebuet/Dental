@@ -109,6 +109,8 @@ export async function setAppointmentStatus(pid, aid, status) {
   const copy = clone(patient(pid));
   const a = copy.appointments.find((x) => x.id === aid);
   const from = a.status;
+  if (status === from) return null;
+  if (!(D.APPOINTMENT_NEXT[from] || []).includes(status)) { say(`An appointment that is ${from} can't be changed to ${status}`, "error"); return null; }
   Object.assign(a, { status, statusAt: Date.now() });
   arr(a, "statusLog").push({ id: uid(), from, to: status, at: Date.now() });
   return save(copy, `Appointment ${a.date}: ${from} → ${status}`);

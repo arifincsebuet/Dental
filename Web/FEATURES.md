@@ -7,6 +7,7 @@
 | Sign-in | Google sign-in for the clinic team; first account creates the clinic (owner); invited staff join by email. Patient app sign-in with Patient ID + password (no Firebase account) |
 | Roles & access | Admin, Dentist, Assistant, Receptionist, Cashier, Auditor + 9 access switches, enforced in the UI and by the same Firestore rules |
 | Patients | Register (duplicate hint), search by name / phone / ID / app ID, filters (Today, Dues, Alerts), edit profile, medical alerts, clinical story, reminder consent, archive / restore with reason |
+| **3D at a glance** | Every tooth number sits on a status disc (blue treated, teal planned, amber finding, grey missing) in front of the gum, with a matching collar ring; restorations show their material (composite blue, amalgam silver, crown gold); root canal treatment shows a red filled canal in the X-ray view; missing teeth show as a faint ghost with a cross. Same on Android (profile model and full 3D chart) and web. The Android full 3D tooth sheet lists the tooth's treatments with Fee · Paid · Due |
 | **3D chart (Godot)** | Same Godot model as Android: rotate, pan, zoom, views (Front/Upper/Lower/Left/Right), arch filter, tooth numbers, roots (X-ray look), tap sound, auto-turn, surface pad |
 | Record treatment | One or several teeth, procedure, status, surfaces, doctor, date, notes; completed care writes performed procedures and chart outcomes (restorations, extraction, implant, root canal) |
 | Edit treatment | Any field, change log kept, linked performed care follows |

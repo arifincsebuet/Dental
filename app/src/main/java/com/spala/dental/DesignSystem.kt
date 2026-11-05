@@ -252,7 +252,7 @@ fun MiniMetric(value: String, label: String, accent: Color, modifier: Modifier =
     Column(modifier.clip(RoundedCornerShape(14.dp)).background(accent.copy(alpha = .08f)).padding(horizontal = 10.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = accent)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = InkMuted, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false)
     }
 }
 
@@ -292,6 +292,31 @@ fun SegmentedPills(options: List<String>, selected: String, modifier: Modifier =
         }
     }
 }
+
+/**
+ * Buttons side by side while each gets at least [minItemWidth]; otherwise they wrap onto more
+ * rows (full width on a narrow phone). Keeps long labels and translations from being squeezed or
+ * clipped. Each item receives the Modifier it must use (equal widths in its row).
+ */
+@Composable
+fun ButtonRow(items: List<@Composable (Modifier) -> Unit>, modifier: Modifier = Modifier, minItemWidth: Dp = 160.dp, spacing: Dp = 8.dp) {
+    if (items.isEmpty()) return
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val perRow = ((maxWidth + spacing) / (minItemWidth + spacing)).toInt().coerceIn(1, items.size)
+        Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+            items.chunked(perRow).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing), verticalAlignment = Alignment.CenterVertically) {
+                    row.forEach { item -> item(Modifier.weight(1f)) }
+                }
+            }
+        }
+    }
+}
+
+/** Button label that wraps neatly (centred) instead of being clipped. */
+@Composable
+fun ButtonLabel(text: String, color: Color = Color.Unspecified) =
+    Text(text, color = color, textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
 
 @Composable
 fun InfoRow(glyph: Glyph, label: String, value: String) {
@@ -388,7 +413,8 @@ fun Teeth3DHeroCard(
 fun BoxScope.HeroHint(text: String, highlight: Boolean = false) {
     Text(
         text, style = MaterialTheme.typography.labelSmall, color = if (highlight) Color.White else InkMuted,
-        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
             .clip(RoundedCornerShape(50)).background(if (highlight) Teal700 else Color.White.copy(alpha = .75f))
             .padding(horizontal = 12.dp, vertical = 5.dp),
     )

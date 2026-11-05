@@ -45,14 +45,23 @@ const RUGA := Color("edb3b7")
 const CEMENTUM := Color("e6d2a8")
 const APEX := Color("c9ad7c")
 const FISSURE := Color("c4a57a")
+# --- Status colours (same as the web "Clinical status" lens and the Android profile model) ------
+const STATUS_COLORS := {"finding": Color("f59e0b"), "open": Color("14b8a6"), "treated": Color("3b82f6"), "lost": Color("94a3b8")}
+# Restoration materials, readable at a glance: composite blue, amalgam silver, crown gold,
+# inlay / onlay violet, sealant green.
+const MATERIALS := {"composite": Color("4f7fe8"), "glass_ionomer": Color("78a6f2"), "amalgam": Color("8e99a6"), "crown": Color("e3b341"),
+	"inlay": Color("9b7be8"), "onlay": Color("9b7be8"), "sealant": Color("2fbf8f"), "other": Color("4f7fe8")}
+const CANAL := Color("e11d48")
+# Recorded facts that describe completed care rather than a problem (not shown as a finding).
+const NON_PATHOLOGY := ["endodontically_treated"]
 
 # --- Camera presets: [pitch, yaw, distance, arch filter] --------------------------------------
 const VIEWS := {
-	"Front": [0.0, 0.0, 12.0, "Both"],
-	"Upper": [-1.22, 0.0, 12.0, "Upper"],
-	"Lower": [1.22, 0.0, 12.0, "Lower"],
-	"Left": [0.0, -1.2, 12.5, "Both"],
-	"Right": [0.0, 1.2, 12.5, "Both"],
+	"Front": [0.0, 0.0, 13.2, "Both"],
+	"Upper": [-1.22, 0.0, 13.6, "Upper"],
+	"Lower": [1.22, 0.0, 13.6, "Lower"],
+	"Left": [0.0, -1.2, 14.2, "Both"],
+	"Right": [0.0, 1.2, 14.2, "Both"],
 }
 
 var bridge
@@ -68,7 +77,7 @@ var gum_materials: Array[StandardMaterial3D] = []
 var target := Vector3.ZERO
 var yaw := 0.0
 var pitch := 0.0
-var distance := 12.0
+var distance := 13.2
 var cur_target := Vector3.ZERO
 var cur_yaw := -0.6
 var cur_pitch := 0.0
@@ -111,6 +120,10 @@ var selected_before_clear := ""
 var pending_hover := Vector2(-1, -1)
 var lens: Dictionary = {}
 var badges: Dictionary = {}
+var lens_from_host := false
+var active_lens: Dictionary = {}
+var care_box := VBoxContainer.new()
+var disc_texture: ImageTexture
 
 # UI
 var canvas := CanvasLayer.new()
@@ -143,6 +156,12 @@ func mat(color: Color, roughness: float = 0.26) -> StandardMaterial3D:
 	return result
 
 func _ready() -> void:
+	# Android: use the phone's fonts so Bangla, Hindi, Arabic, CJK, Thai text and the Taka sign show.
+	if not OS.has_feature("web"):
+		var system_font := SystemFont.new()
+		system_font.font_names = PackedStringArray(["sans-serif", "Roboto", "Noto Sans"])
+		system_font.fallbacks = [ThemeDB.fallback_font]
+		ThemeDB.fallback_font = system_font
 	chart = {"schemaVersion": 2, "dentition": "permanent", "teeth": {}}
 	if Engine.has_singleton("DentalBridge"):
 		bridge = Engine.get_singleton("DentalBridge")
@@ -294,21 +313,35 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 				var color := ENAMEL if state.get("assessment", "not_assessed") == "assessed" else UNKNOWN
 				if presence == "unerupted": color = Color("d5dee5")
 				if absent: color = Color("e9eef2") if replacement == "implant" else Color("f1ecf8")
-				if state.get("treated", false): color = color.lerp(TREATED, 0.22)
-				if not state.get("findings", []).is_empty(): color = color.lerp(FINDING, 0.28)
+				if state.get("treated", false): color = color.lerp(TREATED, 0.10)
+				var crowned := "crown" in restoration_codes(state)
+				if crowned: color = color.lerp(MATERIALS["crown"], 0.62)
+				if has_finding(state) and not state.get("findings", []).is_empty() and not crowned: color = color.lerp(FINDING, 0.28)
 				var crown := MeshInstance3D.new()
 				crown.name = "Crown"
 				crown.mesh = crown_mesh(kind, dimensions, sign_y, surface_colors(state, color, position <= 3), 1.0 if patient_right else -1.0)
 				var crown_material := mat(Color(1, 1, 1, 0.5) if presence == "unerupted" else Color.WHITE, 0.18)
 				crown_material.vertex_color_use_as_albedo = true
+				if crowned:
+					crown_material.metallic = 0.45
+					crown_material.roughness = 0.16
 				apply_enamel_texture(crown_material)
 				crown.material_override = crown_material
 				body.set_meta("crownMaterial", crown_material)
 				body.add_child(crown)
 				if replacement == "implant": add_implant(body, dimensions, sign_y)
-				else: add_roots(body, kind, dimensions, sign_y, is_upper, position, primary, 1.0 if patient_right else -1.0)
+				else: add_roots(body, kind, dimensions, sign_y, is_upper, position, primary, 1.0 if patient_right else -1.0, is_endodontic(state))
 				add_state_markers(body, state, dimensions, sign_y)
 			else:
+				# Ghost of the missing tooth keeps the arch readable; the cross marks the recorded loss.
+				var ghost := MeshInstance3D.new()
+				ghost.name = "Ghost"
+				ghost.mesh = crown_mesh(kind, dimensions * 0.96, sign_y, {"base": Color("cbd5e1")}, 1.0 if patient_right else -1.0)
+				var ghost_material := mat(Color(1, 1, 1, 0.20), 0.6)
+				ghost_material.vertex_color_use_as_albedo = true
+				ghost_material.no_depth_test = false
+				ghost.material_override = ghost_material
+				body.add_child(ghost)
 				add_absent_marker(body, dimensions, sign_y)
 			var collision := CollisionShape3D.new()
 			var box := BoxShape3D.new()
@@ -316,23 +349,84 @@ func build_jaw(first_quadrant: int, primary: bool, parent: Node3D, factor: float
 			collision.position.y = sign_y * dimensions.y * 0.45
 			collision.shape = box
 			body.add_child(collision)
-			var tooth_label := Label3D.new()
-			tooth_label.name = "SlotLabel"
-			tooth_label.text = notation_short(key)
-			tooth_label.font_size = 40
-			tooth_label.outline_size = 12
-			tooth_label.pixel_size = 0.0042
-			tooth_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			tooth_label.modulate = Color("334155")
-			tooth_label.outline_modulate = Color(1, 1, 1, 0.95)
-			# Numbers are drawn on top and faded by depth in _process (update_label_fade), instead of
-			# popping in and out as they pass behind gum and teeth while the model turns.
-			tooth_label.no_depth_test = true
-			tooth_label.render_priority = 2
-			tooth_label.position = Vector3(0, sign_y * (dimensions.y + 0.24), dimensions.z * 0.35)
-			tooth_label.visible = show_labels
-			body.add_child(tooth_label)
+			add_number_disc(body, key, state, dimensions, sign_y)
 			teeth[key] = body
+
+## One status per tooth for the number disc and the collar ring: missing, finding, open care, treated.
+func tooth_status(state: Dictionary) -> String:
+	if state.is_empty(): return ""
+	if state.get("presence", "unknown") in LOST and str(state.get("replacement", "none")) in ["none", ""]: return "lost"
+	if has_finding(state): return "finding"
+	if not state.get("treatmentStates", []).is_empty(): return "open"
+	if is_treated(state): return "treated"
+	return ""
+
+func has_finding(state: Dictionary) -> bool:
+	for code in state.get("findings", []):
+		if not str(code) in NON_PATHOLOGY: return true
+	for observation in state.get("surfaces", {}).values():
+		if observation is Dictionary and not observation.get("findings", []).is_empty(): return true
+	return false
+
+func restoration_codes(state: Dictionary) -> Array:
+	var codes := []
+	for observation in state.get("surfaces", {}).values():
+		if observation is Dictionary:
+			for code in observation.get("restorations", []):
+				if not code in codes: codes.append(str(code))
+	return codes
+
+func is_endodontic(state: Dictionary) -> bool:
+	return "endodontically_treated" in state.get("findings", [])
+
+func is_treated(state: Dictionary) -> bool:
+	return state.get("treated", false) or is_endodontic(state) or not restoration_codes(state).is_empty() \
+		or str(state.get("replacement", "none")) not in ["none", ""]
+
+## Round disc texture (anti-aliased) used behind tooth numbers.
+func get_disc_texture() -> ImageTexture:
+	if disc_texture: return disc_texture
+	var n := 96
+	var image := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	var c := (n - 1) / 2.0
+	for y in range(n):
+		for x in range(n):
+			var d := Vector2(x - c, y - c).length()
+			image.set_pixel(x, y, Color(1, 1, 1, clampf(c - 1.0 - d, 0.0, 1.0)))
+	disc_texture = ImageTexture.create_from_image(image)
+	return disc_texture
+
+func disc_sprite(node_name: String, color: Color, scale_factor: float, priority: int) -> Sprite3D:
+	var sprite := Sprite3D.new()
+	sprite.name = node_name
+	sprite.texture = get_disc_texture()
+	sprite.pixel_size = 0.0036 * scale_factor
+	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	sprite.no_depth_test = true
+	sprite.render_priority = priority
+	sprite.modulate = color
+	return sprite
+
+## Tooth number on a status-coloured disc, floating in front of the gum (apical side), so upper and
+## lower numbers never collide and the status of every tooth reads at a glance.
+func add_number_disc(body: Node3D, key: String, state: Dictionary, dimensions: Vector3, sign_y: float) -> void:
+	var status := tooth_status(state)
+	var tooth_label := Label3D.new()
+	tooth_label.name = "SlotLabel"
+	tooth_label.text = notation_short(key)
+	tooth_label.font_size = 34
+	tooth_label.outline_size = 0
+	tooth_label.pixel_size = 0.0040
+	tooth_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tooth_label.modulate = Color.WHITE if status != "" else Color("334155")
+	tooth_label.outline_modulate = Color(1, 1, 1, 0)
+	tooth_label.no_depth_test = true
+	tooth_label.render_priority = 4
+	tooth_label.position = Vector3(0, -sign_y * 0.58, dimensions.z * 0.5 + 0.34)
+	tooth_label.visible = show_labels
+	tooth_label.add_child(disc_sprite("DiscRim", Color(1, 1, 1, 0.96) if status != "" else Color("cbd5e1"), 1.0, 2))
+	tooth_label.add_child(disc_sprite("Disc", STATUS_COLORS.get(status, Color.WHITE), 0.84, 3))
+	body.add_child(tooth_label)
 
 func dentition_is_primary_only() -> bool:
 	return chart.get("dentition", "permanent") == "primary"
@@ -344,7 +438,8 @@ func surface_colors(state: Dictionary, base: Color, anterior: bool) -> Dictionar
 	for surface in ["M", "D", "F", "L", "I" if anterior else "O"]:
 		var observation: Dictionary = surfaces.get(surface, {})
 		var color := base
-		if not observation.get("restorations", []).is_empty(): color = base.lerp(RESTORATION, 0.72)
+		var codes: Array = observation.get("restorations", [])
+		if not codes.is_empty(): color = base.lerp(MATERIALS.get(str(codes[0]), RESTORATION), 0.80)
 		if not observation.get("findings", []).is_empty(): color = base.lerp(FINDING, 0.78)
 		colors["top" if surface in ["I", "O"] else surface] = color
 	return colors
@@ -664,7 +759,7 @@ func root_point(spec: Array, angle: float, t: float, size: Vector3, sign_y: floa
 	var cz: float = spec[1] * size.z * 0.5 * (1.0 - 0.25 * t) + spec[6] * length * pow(t, 1.5)
 	return Vector3(edge.x + cx * mesial_sign, -sign_y * (t * length - 0.02), edge.y + cz)
 
-func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_upper: bool, position: int = 1, primary: bool = false, mesial_sign: float = 1.0) -> void:
+func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_upper: bool, position: int = 1, primary: bool = false, mesial_sign: float = 1.0, endodontic: bool = false) -> void:
 	var root_group := Node3D.new()
 	root_group.name = "Roots"
 	root_group.visible = show_roots
@@ -696,6 +791,32 @@ func add_roots(body: Node3D, kind: String, size: Vector3, sign_y: float, is_uppe
 	material.vertex_color_use_as_albedo = true
 	root.material_override = material
 	root_group.add_child(root)
+	# Root canal treatment: a red filled canal inside every root (visible in the X-ray view).
+	if endodontic:
+		var canal_material := glow(CANAL)
+		canal_material.no_depth_test = true
+		canal_material.render_priority = 1
+		for spec in root_specs(kind, position, is_upper, primary):
+			var previous := Vector3.ZERO
+			for step in range(9):
+				var t := 0.02 + 0.9 * step / 8.0
+				var center := root_point(spec, 0.0, t, size, sign_y, mesial_sign).lerp(root_point(spec, PI, t, size, sign_y, mesial_sign), 0.5)
+				if step > 0:
+					var piece := MeshInstance3D.new()
+					var tube := CylinderMesh.new()
+					var length := previous.distance_to(center)
+					tube.top_radius = 0.028
+					tube.bottom_radius = 0.028
+					tube.height = length
+					tube.radial_segments = 8
+					tube.rings = 1
+					piece.mesh = tube
+					piece.material_override = canal_material
+					piece.position = previous.lerp(center, 0.5)
+					var axis := (center - previous).normalized()
+					if abs(axis.dot(Vector3.UP)) < 0.999: piece.basis = Basis(Quaternion(Vector3.UP, axis))
+					root_group.add_child(piece)
+				previous = center
 
 func add_implant(body: Node3D, size: Vector3, sign_y: float) -> void:
 	var titanium := mat(Color("9aa8b0"), 0.22)
@@ -981,13 +1102,14 @@ func build_ui() -> void:
 	var legend := HFlowContainer.new()
 	legend.add_theme_constant_override("h_separation", 26)
 	legend.add_theme_constant_override("v_separation", 12)
-	legend.add_child(legend_item(ENAMEL.darkened(0.12), "Assessed"))
-	legend.add_child(legend_item(Color("94a3b8"), "Unassessed", true))
-	legend.add_child(legend_item(AMBER, "Finding"))
-	legend.add_child(legend_item(BLUE, "Restoration"))
-	legend.add_child(legend_item(Color("60a5fa"), "Treated"))
-	legend.add_child(legend_item(TEAL, "Planned care (+)"))
-	legend.add_child(legend_item(Color("64748b"), "Recorded loss (×)"))
+	legend.add_child(legend_item(STATUS_COLORS["treated"], "Treated"))
+	legend.add_child(legend_item(STATUS_COLORS["open"], "Planned care (+)"))
+	legend.add_child(legend_item(STATUS_COLORS["finding"], "Finding"))
+	legend.add_child(legend_item(STATUS_COLORS["lost"], "Missing (×)", true))
+	legend.add_child(legend_item(MATERIALS["composite"], "Filling"))
+	legend.add_child(legend_item(MATERIALS["amalgam"], "Amalgam"))
+	legend.add_child(legend_item(MATERIALS["crown"], "Crown"))
+	legend.add_child(legend_item(CANAL, "Root canal"))
 	sheet_idle.add_child(legend)
 
 	# Detail: selected tooth summary, surface pad and the primary action.
@@ -1026,6 +1148,8 @@ func build_ui() -> void:
 	chip_row.add_theme_constant_override("h_separation", 10)
 	chip_row.add_theme_constant_override("v_separation", 10)
 	sheet_detail.add_child(chip_row)
+	care_box.add_theme_constant_override("separation", 6)
+	sheet_detail.add_child(care_box)
 
 	var pad_row := HBoxContainer.new()
 	pad_row.add_theme_constant_override("separation", 24)
@@ -1106,7 +1230,11 @@ func set_arch_visible(arch: Node3D, visible_now: bool) -> void:
 
 func update_camera() -> void:
 	rig.rotation = Vector3(cur_pitch, cur_yaw, 0)
-	camera.position = cur_target + Vector3(0, cur_distance * 0.30, cur_distance)
+	# Portrait phones: step back so the whole arch fits the narrow width.
+	var size := get_viewport().get_visible_rect().size
+	var aspect := size.x / maxf(size.y, 1.0)
+	var fit := maxf(1.0, 0.92 / maxf(aspect, 0.3))
+	camera.position = cur_target + Vector3(0, cur_distance * fit * 0.30, cur_distance * fit)
 	camera.look_at(cur_target)
 
 func _process(delta: float) -> void:
@@ -1151,10 +1279,17 @@ func update_label_fade() -> void:
 			if not tooth_label.visible: continue
 			var alpha := 1.0
 			if body.get_meta("toothKey") != selected:
+				# Fade by how much the tooth's facial side turns away from the camera (works for the
+				# front, side and biting-surface views alike), plus a little depth fade.
+				var facing: float = body.global_transform.basis.z.normalized().dot((camera.global_position - body.global_position).normalized())
 				var depth := -(view * tooth_label.global_position).z
-				alpha = clampf(1.0 - (depth - center_depth + 0.4) / 1.6, 0.0, 1.0)
+				alpha = clampf((facing + 0.45) / 0.45, 0.0, 1.0) * clampf(1.0 - (depth - center_depth - 1.2) / 2.4, 0.25, 1.0)
 			tooth_label.modulate.a = alpha
-			tooth_label.outline_modulate.a = 0.95 * alpha
+			tooth_label.outline_modulate.a = 0.95 * alpha if node_name == "InfoBadge" else 0.0
+			for disc_name in ["DiscRim", "Disc"]:
+				if tooth_label.has_node(disc_name):
+					var disc: Sprite3D = tooth_label.get_node(disc_name)
+					disc.modulate.a = alpha * (0.96 if disc_name == "DiscRim" else 1.0)
 
 # ==============================================================================================
 # Selection
@@ -1339,6 +1474,14 @@ func refresh_details(state: Dictionary) -> void:
 	for code in findings: chip_row.add_child(chip("Finding · " + str(code).replace("_", " "), Color("fef3c7"), Color("92400e")))
 	for code in restorations: chip_row.add_child(chip("Restoration · " + str(code).replace("_", " "), Color("dbeafe"), Color("1e40af")))
 	for code in state.get("treatmentStates", []): chip_row.add_child(chip("Care · " + str(code).replace("_", " "), TEAL_TINT, TEAL))
+	for child in care_box.get_children(): child.queue_free()
+	var care = chart.get("care", {})
+	var lines: Array = care.get(selected, []) if care is Dictionary else []
+	if not lines.is_empty():
+		care_box.add_child(label("Treatment history", 22, MUTED, true))
+		for line in lines.slice(0, 6):
+			var row := label("•  " + str(line), 24, INK, false, true)
+			care_box.add_child(row)
 	if chip_row.get_child_count() == 0:
 		chip_row.add_child(chip("No coded findings recorded" + ("" if selected_surface == "" else " on " + surface_name(selected_surface)), Color("eef3f6"), MUTED))
 	if selected_surface == "":
@@ -1618,6 +1761,7 @@ func _js_set_notation(args: Array) -> void:
 func _js_set_lens(args: Array) -> void:
 	var parsed = JSON.parse_string(arg_text(args))
 	lens = parsed if parsed is Dictionary else {}
+	lens_from_host = true
 	apply_lens()
 
 func _js_set_badges(args: Array) -> void:
@@ -1628,15 +1772,23 @@ func _js_set_badges(args: Array) -> void:
 ## Lens: the host colours each tooth by a clinical or financial question (status, balance due, last visit…).
 ## A glowing collar ring at the gum line plus a soft emission tint keep the anatomy colours readable.
 func apply_lens() -> void:
+	var map: Dictionary = lens
+	if not lens_from_host:
+		# Android and the stand-alone chart: colour each tooth by its clinical status.
+		map = {}
+		for key in teeth.keys():
+			var status := tooth_status(chart.get("teeth", {}).get(key, {}))
+			if status in ["finding", "open", "treated"]: map[key] = "#" + STATUS_COLORS[status].to_html(false)
+	active_lens = map
 	for key in teeth.keys():
 		var body: Node3D = teeth[key]
 		if body.has_node("LensRing"):
 			var old := body.get_node("LensRing")
 			body.remove_child(old)
 			old.queue_free()
-		restore_emission(body)
-		if not lens.has(key): continue
-		var color := Color.from_string(str(lens[key]), Color(0, 0, 0, 0))
+		restore_emission(body, map)
+		if not map.has(key): continue
+		var color := Color.from_string(str(map[key]), Color(0, 0, 0, 0))
 		if color.a <= 0.0: continue
 		var ring := MeshInstance3D.new()
 		ring.name = "LensRing"
@@ -1652,7 +1804,8 @@ func apply_lens() -> void:
 		ring.material_override = glow(color)
 		body.add_child(ring)
 
-func restore_emission(body) -> void:
+func restore_emission(body, map = null) -> void:
+	if map == null: map = active_lens
 	if body == null or not is_instance_valid(body) or not body.has_meta("crownMaterial"): return
 	var key: String = body.get_meta("toothKey")
 	if key == selected: return
@@ -1661,11 +1814,11 @@ func restore_emission(body) -> void:
 		material.emission_enabled = true
 		material.emission = TEAL_LIGHT
 		material.emission_energy_multiplier = 0.16
-	elif lens.has(key):
-		var color := Color.from_string(str(lens[key]), Color(0, 0, 0, 0))
+	elif map.has(key):
+		var color := Color.from_string(str(map[key]), Color(0, 0, 0, 0))
 		material.emission_enabled = color.a > 0.0
 		material.emission = color
-		material.emission_energy_multiplier = 0.42
+		material.emission_energy_multiplier = 0.30
 	else:
 		material.emission_enabled = false
 
@@ -1684,8 +1837,8 @@ func apply_badges() -> void:
 		var badge := Label3D.new()
 		badge.name = "InfoBadge"
 		badge.text = text
-		badge.font_size = 34
-		badge.outline_size = 16
+		badge.font_size = 36
+		badge.outline_size = 18
 		badge.pixel_size = 0.0044
 		badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		badge.no_depth_test = true
@@ -1694,7 +1847,7 @@ func apply_badges() -> void:
 		badge.outline_modulate = Color(1, 1, 1, 0.96)
 		var size: Vector3 = body.get_meta("dimensions")
 		var sign_y: float = body.get_meta("signY")
-		badge.position = Vector3(0, sign_y * (size.y + 0.62), size.z * 0.35)
+		badge.position = Vector3(0, -sign_y * 1.12, size.z * 0.5 + 0.40)
 		body.add_child(badge)
 
 func hover(screen: Vector2) -> void:

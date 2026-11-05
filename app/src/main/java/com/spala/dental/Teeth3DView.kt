@@ -170,7 +170,39 @@ private class Vec(val x: Float, val y: Float, val z: Float) {
 }
 
 /** One selectable slot: anchor points for badges/picking/labels. */
-private class SlotInfo(val key: String, val tip: Vec, val cervical: Vec, val facial: Vec, val label: Vec, val lost: Boolean, val planned: Boolean)
+private class SlotInfo(val key: String, val tip: Vec, val cervical: Vec, val facial: Vec, val label: Vec, val lost: Boolean, val planned: Boolean,
+    /** "lost", "finding", "open", "treated" or "" (chart.gd tooth_status). */
+    val status: String = "",
+    /** Collar ring around the crown at the gum line (status colour), as in the Godot chart. */
+    val ring: List<Vec> = emptyList())
+
+// chart.gd: STATUS_COLORS / MATERIALS — keep in step with the Godot chart and the web lens.
+private val STATUS_COLOR = mapOf("finding" to 0xFFF59E0B.toInt(), "open" to 0xFF14B8A6.toInt(), "treated" to 0xFF3B82F6.toInt(), "lost" to 0xFF94A3B8.toInt())
+private val MATERIAL_COLOR = mapOf("composite" to 0xFF4F7FE8.toInt(), "glass_ionomer" to 0xFF78A6F2.toInt(), "amalgam" to 0xFF8E99A6.toInt(),
+    "crown" to 0xFFE3B341.toInt(), "inlay" to 0xFF9B7BE8.toInt(), "onlay" to 0xFF9B7BE8.toInt(), "sealant" to 0xFF2FBF8F.toInt(), "other" to 0xFF4F7FE8.toInt())
+
+private fun restorationCodes(state: JSONObject?): List<String> {
+    val surfaces = state?.optJSONObject("surfaces") ?: return emptyList()
+    val out = mutableListOf<String>()
+    surfaces.keys().forEach { s -> surfaces.optJSONObject(s)?.optJSONArray("restorations")?.let { a -> for (i in 0 until a.length()) a.optString(i).let { if (it !in out) out += it } } }
+    return out
+}
+private fun hasProblem(state: JSONObject?): Boolean {
+    if (state == null) return false
+    state.optJSONArray("findings")?.let { a -> for (i in 0 until a.length()) if (a.optString(i) != "endodontically_treated") return true }
+    val surfaces = state.optJSONObject("surfaces") ?: return false
+    return surfaces.keys().asSequence().any { (surfaces.optJSONObject(it)?.optJSONArray("findings")?.length() ?: 0) > 0 }
+}
+/** chart.gd tooth_status: one status per tooth for the number disc and the collar ring. */
+internal fun toothStatus(state: JSONObject?): String {
+    if (state == null || state.length() == 0) return ""
+    if (isLost(state.optString("presence", "unknown")) && state.optString("replacement", "none") in setOf("none", "")) return "lost"
+    if (hasProblem(state)) return "finding"
+    if ((state.optJSONArray("treatmentStates")?.length() ?: 0) > 0) return "open"
+    val endo = state.optJSONArray("findings")?.let { a -> (0 until a.length()).any { a.optString(it) == "endodontically_treated" } } == true
+    if (state.optBoolean("treated") || endo || restorationCodes(state).isNotEmpty() || state.optString("replacement", "none") !in setOf("none", "")) return "treated"
+    return ""
+}
 
 private class DentalScene(
     val vertices: FloatArray,      // 9 per triangle
@@ -387,21 +419,30 @@ private fun buildJaw(builder: SceneBuilder, slots: MutableList<SlotInfo>, teeth:
             val showCrown = !lost || replacement !in setOf("none", "")
             val planned = (state?.optJSONArray("treatmentStates")?.length() ?: 0) > 0
             val slotIndex = slots.size
+            val status = toothStatus(state)
+            val ring = if (status in setOf("finding", "open", "treated")) (0 until 28).map { i ->
+                val a = (2.0 * Math.PI * i / 28).toFloat()
+                world(cos(a) * sx * 0.60f, signY * sy * 0.30f, sin(a) * sz * 0.60f)
+            } else emptyList()
+            // Numbers float in front of the gum (apical side), so upper and lower numbers never collide.
             slots.add(SlotInfo(key, world(0f, signY * sy * 1.02f, 0f), world(0f, -signY * 0.05f, 0f), facial,
-                world(0f, signY * (sy + 0.24f), sz * 0.35f), lost && !showCrown, planned))
+                world(0f, -signY * 0.58f, sz * 0.5f + 0.34f), lost && !showCrown, planned, status, ring))
             if (!showCrown) continue
 
             // chart.gd: base colour and surface_colors
             var base = if (state?.optString("assessment", "not_assessed") == "assessed") Palette.ENAMEL else Palette.UNKNOWN
             if (presence == "unerupted") base = Palette.UNERUPTED
             if (lost) base = if (replacement == "implant") Palette.IMPLANT else Palette.PONTIC
-            if (state?.optBoolean("treated") == true) base = mix(base, Palette.TREATED, 0.22f)
-            if ((state?.optJSONArray("findings")?.length() ?: 0) > 0) base = mix(base, Palette.FINDING, 0.28f)
+            if (state?.optBoolean("treated") == true) base = mix(base, Palette.TREATED, 0.10f)
+            val crowned = "crown" in restorationCodes(state)
+            if (crowned) base = mix(base, MATERIAL_COLOR.getValue("crown"), 0.62f)
+            else if (hasProblem(state) && (state?.optJSONArray("findings")?.length() ?: 0) > 0) base = mix(base, Palette.FINDING, 0.28f)
             val surfaces = state?.optJSONObject("surfaces")
             fun surfaceColor(code: String): Int {
                 val observation = surfaces?.optJSONObject(code)
                 var color = base
-                if ((observation?.optJSONArray("restorations")?.length() ?: 0) > 0) color = mix(base, Palette.RESTORATION, 0.72f)
+                val codes = observation?.optJSONArray("restorations")
+                if ((codes?.length() ?: 0) > 0) color = mix(base, MATERIAL_COLOR[codes!!.optString(0)] ?: Palette.RESTORATION, 0.80f)
                 if ((observation?.optJSONArray("findings")?.length() ?: 0) > 0) color = mix(base, Palette.FINDING, 0.78f)
                 return color
             }
@@ -846,6 +887,20 @@ fun Teeth3DView(
                 drawLine(Color.White, at - Offset(0f, badge * 0.5f), at + Offset(0f, badge * 0.5f), 1.8f * density.density)
             }
             if (index in selectedIndices) drawCircle(Color(0xFF14B8A6), badge * 2.2f, point, style = Stroke(2f * density.density))
+            // Status collar ring: only the half facing the viewer, so it never paints over the crown.
+            if (slot.ring.isNotEmpty()) {
+                val ringColor = Color(STATUS_COLOR[slot.status] ?: 0xFF3B82F6.toInt())
+                val n = slot.ring.size
+                for (i in 0 until n) {
+                    val p0 = slot.ring[i]; val p1 = slot.ring[(i + 1) % n]
+                    val mid = (p0 + p1) * 0.5f
+                    val out = mid - slot.cervical
+                    val towardViewer = r20 * out.x + r21 * out.y + r22 * out.z
+                    if (towardViewer < 0f) continue
+                    val a = project(p0); val b = project(p1)
+                    drawLine(ringColor, Offset(a.first, a.second), Offset(b.first, b.second), 2.6f * density.density)
+                }
+            }
         }
         holder.anchors = anchors
 
@@ -883,13 +938,17 @@ fun Teeth3DView(
                 val a = alpha[index]
                 val text = ToothNotation.short(slot.key)
                 val x = labels[index * 2]; val y = labels[index * 2 + 1]
-                buffers.label.textSize = (if (selected) 13f else 9.5f) * density.density
-                val tw = buffers.label.measureText(text) / 2f + (if (selected) 8f else 4f) * density.density
-                val th = buffers.label.textSize * 0.8f
-                buffers.label.color = faded(if (selected) 0xFF0F766E.toInt() else 0xE6FFFFFF.toInt(), a)
-                canvas.nativeCanvas.drawRoundRect(x - tw, y - th, x + tw, y + th * 0.55f, th, th, buffers.label)
-                buffers.label.color = faded(if (selected) android.graphics.Color.WHITE else 0xFF334155.toInt(), a)
-                canvas.nativeCanvas.drawText(text, x, y + th * 0.18f, buffers.label)
+                // Number on a status-coloured disc (blue treated, teal planned, amber finding, grey missing).
+                buffers.label.textSize = (if (selected) 12f else 9.5f) * density.density
+                val radius = maxOf(buffers.label.measureText(text) / 2f + 4f * density.density, (if (selected) 11f else 8.5f) * density.density)
+                val fill = when { selected -> 0xFF0F766E.toInt(); else -> STATUS_COLOR[slot.status] ?: 0xFFFFFFFF.toInt() }
+                val colored = selected || slot.status.isNotEmpty()
+                buffers.label.color = faded(if (colored) 0xF2FFFFFF.toInt() else 0xFFCBD5E1.toInt(), a)
+                canvas.nativeCanvas.drawCircle(x, y, radius + 1.4f * density.density, buffers.label)
+                buffers.label.color = faded(fill, a)
+                canvas.nativeCanvas.drawCircle(x, y, radius, buffers.label)
+                buffers.label.color = faded(if (colored) android.graphics.Color.WHITE else 0xFF334155.toInt(), a)
+                canvas.nativeCanvas.drawText(text, x, y + buffers.label.textSize * 0.36f, buffers.label)
             }
         }
     }

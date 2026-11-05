@@ -244,7 +244,7 @@ fun SlotCalendarScreen(
     SectionHeader(selected.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.getDefault())),
         action = if (canManage && engine.sessions.isNotEmpty()) "All availability" else null, onAction = { managing = true })
     if (canManage) {
-        Button(onClick = { opening = true }, enabled = !busy && !selected.isBefore(today), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(50.dp)) {
+        Button(onClick = { opening = true }, enabled = !busy && !selected.isBefore(today), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
             GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp))
             Text(if (selected.isBefore(today)) "Past day" else "Open slots on ${selected.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))}")
         }

@@ -83,6 +83,8 @@ export function demoSeed() {
   addTreatment(r, "48", "Extraction", "Completed", doctors[1], at(-700), 4000, [[4000, "Cash", at(-700)]], "Impacted, uneventful healing.");
   addTreatment(r, "14", "Crown", "Completed", doctors[1], at(-500), 8000, [[8000, "Bank", at(-500)]]);
   addTreatment(r, "11", "Filling (composite)", "Completed", doctors[0], at(-260), 2000, [[2000, "Nagad", at(-260)]], "", ["M"]);
+  addTreatment(r, "21", "Root canal", "Completed", doctors[1], at(-420), 6000, [[6000, "Cash", at(-420)]], "Single canal, obturated.");
+  addTreatment(r, "16", "Filling (amalgam)", "Completed", doctors[0], at(-900), 1500, [[1500, "Cash", at(-900)]], "", ["O"]);
   addTreatment(r, "46", "Filling (composite)", "Completed", doctors[0], at(-50), 2000, [[2000, "Cash", at(-50)]], "", ["O"]);
   addTreatment(r, "26", "Filling (composite)", "Completed", doctors[0], at(-50), 2500, [[2500, "Card", at(-50)]], "", ["O", "D"]);
   addTreatment(r, "36", "Root canal", "In progress", doctors[1], at(-15), 5000, [[1000, "bKash", at(-29)], [1000, "Cash", at(-15)]], "Visit 2 of 4. Working length 21 mm MB, ML, D.");
@@ -135,7 +137,7 @@ function addTreatment(p, tooth, procedure, status, doctor, atMs, feeTk, payments
     p.performedProcedures.push({ id: uid(), treatmentId: id, tooth, surface, procedure, doctor, outcome: notes || procedure + " completed", at: atMs });
     if (procedure === "Extraction") { slot.presence = "extracted"; delete slot.surfaces; }
     if (procedure === "Root canal") slot.findings = ["endodontically_treated"];
-    const restoration = { "Filling (composite)": "composite", Crown: "crown" }[procedure];
+    const restoration = { "Filling (composite)": "composite", "Filling (amalgam)": "amalgam", Crown: "crown" }[procedure];
     if (restoration && slot.presence === "present") for (const sf of surfaces.length ? surfaces : [+tooth[1] <= 3 ? "I" : "O"]) {
       const o = ((slot.surfaces ||= {})[sf] ||= { assessment: "assessed", findings: [], restorations: [] });
       if (!o.restorations.includes(restoration)) o.restorations.push(restoration);

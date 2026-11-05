@@ -13,6 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -196,7 +197,7 @@ fun BrandingPanel(config: JSONObject, onSave: (JSONObject) -> Unit) {
             OutlinedTextField(mapUrl, { mapUrl = it }, Modifier.fillMaxWidth(), label = { Text("Google Maps location") }, singleLine = true,
                 supportingText = { Text("Google Maps › Share › Copy link, or lat,lng") })
             Text("Brand color", style = MaterialTheme.typography.labelLarge)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().then(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ClinicBrand.colors.take(6).forEach { hex -> Swatch(hex, color.equals(hex, true)) { color = hex } }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -204,18 +205,18 @@ fun BrandingPanel(config: JSONObject, onSave: (JSONObject) -> Unit) {
                 TextButton(onClick = { color = "" }) { Text("Default") }
             }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
+            val draft = JSONObject().put("name", name).put("address", address).put("mapUrl", mapUrl)
+            ButtonRow(buildList<@Composable (Modifier) -> Unit> {
+                add { m -> Button(modifier = m, onClick = {
                     runCatching {
                         val next = JSONObject(config.toString()).put("name", name.trim().ifBlank { "Dental Care" }).put("address", address.trim())
                             .put("clinicPhone", phone.trim()).put("mapUrl", mapUrl.trim()).put("brandColor", color)
                         if (logo.isBlank()) next.remove("logo") else next.put("logo", logo)
                         ClinicalRules.validateConfig(next); next
                     }.onSuccess { onSave(it); ClinicBrand.apply(it) }.onFailure { error = it.localizedMessage ?: "Review the values" }
-                }) { Text("Save branding") }
-                val draft = JSONObject().put("name", name).put("address", address).put("mapUrl", mapUrl)
-                if (ClinicBrand.mapQuery(draft).isNotBlank()) OutlinedButton(onClick = { ClinicBrand.openMap(context, draft) }) { Text("Open in Google Maps") }
-            }
+                }) { ButtonLabel("Save branding") } }
+                if (ClinicBrand.mapQuery(draft).isNotBlank()) add { m -> OutlinedButton(modifier = m, onClick = { ClinicBrand.openMap(context, draft) }) { ButtonLabel("Open in Google Maps") } }
+            }, minItemWidth = 150.dp)
         }
     }
 }
@@ -254,12 +255,12 @@ fun FindUsCard(clinic: JSONObject) {
             Text("Find us", style = MaterialTheme.typography.titleMedium)
             androidx.compose.material3.Text(clinic.optString("name"), style = MaterialTheme.typography.titleSmall)
             if (clinic.optString("address").isNotBlank()) androidx.compose.material3.Text(clinic.optString("address"), style = MaterialTheme.typography.bodyMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (hasMap) Button(onClick = { ClinicBrand.openMap(context, clinic) }) { Text("Directions") }
-                if (phone.isNotBlank()) OutlinedButton(onClick = {
+            ButtonRow(buildList<@Composable (Modifier) -> Unit> {
+                if (hasMap) add { m -> Button(modifier = m, onClick = { ClinicBrand.openMap(context, clinic) }) { ButtonLabel("Directions") } }
+                if (phone.isNotBlank()) add { m -> OutlinedButton(modifier = m, onClick = {
                     runCatching { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone.filter { it.isDigit() || it == '+' }))) }
-                }) { androidx.compose.material3.Text("☎  $phone") }
-            }
+                }) { androidx.compose.material3.Text("☎  $phone", maxLines = 1) } }
+            }, minItemWidth = 140.dp)
         }
     }
 }

@@ -87,7 +87,7 @@ fun TeamScreen(config: JSONObject, canManage: Boolean, busy: Boolean, onBack: ()
     Text("Team & roles", style = MaterialTheme.typography.headlineMedium, color = Ink)
     Text("Add your doctors and staff, choose their role, and switch each access item on or off. They sign in with Google using the email you enter.",
         style = MaterialTheme.typography.bodyMedium, color = InkMuted)
-    if (canManage) Button(onClick = { editing = JSONObject().put("role", "dentist").put("active", true) }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(50.dp)) {
+    if (canManage) Button(onClick = { editing = JSONObject().put("role", "dentist").put("active", true) }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
         GlyphIcon(Glyph.Plus, androidx.compose.ui.graphics.Color.White, 16.dp); Spacer(Modifier.width(6.dp)); Text("Add staff member")
     } else SurfaceCard(background = SurfaceTint) { Text("Only an admin can change the team.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
     if (staff.isEmpty()) SurfaceCard(background = SurfaceTint) {
@@ -189,7 +189,7 @@ fun StaffEditorScreen(person: JSONObject, config: JSONObject, busy: Boolean, onB
             updated.put("staff", JSONArray(others + entry))
             onSave(updated, if (isNew) "Staff member added" else "Staff member updated")
         }.exceptionOrNull()?.localizedMessage.orEmpty()
-    }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (isNew) "Add to team" else "Save changes") }
+    }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text(if (isNew) "Add to team" else "Save changes") }
     if (!isNew) OutlinedButton(enabled = !busy, onClick = {
         val updated = JSONObject(config.toString())
         updated.put("staff", JSONArray(clinicianRecords(config).filter { it.optString("id") != person.optString("id") }))

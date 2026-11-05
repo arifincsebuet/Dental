@@ -30,6 +30,8 @@ export const LENSES = {
   none: { label: "Anatomy only", legend: [] },
 };
 const ABBR = { "Root canal": "RCT", "Filling (composite)": "Filling", "Filling (amalgam)": "Amalgam", "Scaling & polishing": "Scaling", Extraction: "Extract", Orthodontic: "Ortho" };
+/** Findings that are problems (root canal treatment is recorded as "endodontically treated" but is care, not a problem). */
+const problems = (f) => f.findings.filter((x) => !/^endodontically treated/i.test(x));
 function allFacts(p) {
   const keys = new Set([...Object.keys(p.chart?.teeth || {}), ...(p.treatments || []).map((t) => t.tooth)]);
   return [...keys].filter((k) => /^([1-4][1-8]|[5-8][1-5])$/.test(k)).map((k) => D.toothFacts(p, k));
@@ -40,7 +42,7 @@ function lensMap(p, mode) {
   const now = Date.now();
   for (const f of allFacts(p)) {
     let col = "";
-    if (mode === "status") col = f.findings.length ? "#f59e0b" : f.open.length ? "#14b8a6" : f.done.length || p.chart?.teeth?.[f.key]?.treated ? "#3b82f6" : "";
+    if (mode === "status") col = problems(f).length ? "#f59e0b" : f.open.length ? "#14b8a6" : f.done.length || f.restorations.length || f.findings.length || p.chart?.teeth?.[f.key]?.treated ? "#3b82f6" : "";
     else if (mode === "plan") { const s = f.open[0]?.status; col = { Planned: "#14b8a6", Accepted: "#2563eb", "In progress": "#f59e0b", Deferred: "#a855f7", Referred: "#a855f7" }[s] || ""; }
     else if (mode === "balance") col = f.fee ? (f.due === 0 ? "#22c55e" : f.due >= f.fee / 2 ? "#ef4444" : "#f59e0b") : "";
     else if (mode === "recency" && f.lastAt) { const d = (now - f.lastAt) / 86400000; col = d <= 30 ? "#14b8a6" : d <= 183 ? "#3b82f6" : "#94a3b8"; }
@@ -54,7 +56,7 @@ function badgeMap(p) {
     const parts = [];
     if (f.open[0]) parts.push((f.open[0].status === "In progress" ? "In progress: " : "+ ") + (ABBR[f.open[0].procedure] || f.open[0].procedure));
     if (f.due > 0) parts.push("due " + compactMoney(f.due, c()));
-    if (!parts.length && f.findings.length) parts.push(f.findings[0].replace(/ \(.\)$/, ""));
+    if (!parts.length && problems(f).length) parts.push(problems(f)[0].replace(/ \(.\)$/, ""));
     if (!parts.length && f.lost) continue;
     if (parts.length) out[f.key] = { text: parts.slice(0, 2).join(" · "), color: f.due > 0 ? "#b45309" : f.open.length ? "#0f766e" : "#92400e" };
   }
@@ -67,7 +69,7 @@ function tooltip(key) {
   const last = f.items[0];
   const pills = [
     f.lost && `<span class="pill">${esc(D.pretty(f.presence))}</span>`, f.replacement !== "none" && `<span class="pill">${esc(D.pretty(f.replacement))}</span>`,
-    ...f.findings.map((x) => `<span class="pill a">${esc(x)}</span>`), ...f.restorations.map((x) => `<span class="pill b">${esc(x)}</span>`),
+    ...f.findings.map((x) => `<span class="pill ${/^endodontically/i.test(x) ? "b" : "a"}">${esc(/^endodontically/i.test(x) ? "Root canal treated" : x)}</span>`), ...f.restorations.map((x) => `<span class="pill b">${esc(x)}</span>`),
     ...f.open.map((x) => `<span class="pill t">${esc(x.status)}: ${esc(x.procedure)}</span>`),
   ].filter(Boolean);
   return `<div class="t"><span>${esc(L(key))}</span>${esc(D.toothName(key))}</div>
@@ -116,7 +118,7 @@ function stageUi(p) {
   </div>
   <div class="glass v3d-glance">
     ${sf ? `<div><h5>Selected · ${esc(L(sel))}</h5><div style="font-weight:800;margin:2px 0 6px">${esc(D.toothName(sel))}</div>
-      <div class="row" style="flex-wrap:wrap;gap:4px">${[...sf.findings.map((x) => `<span class="badge amber">${esc(x)}</span>`), ...sf.restorations.map((x) => `<span class="badge blue">${esc(x)}</span>`), ...sf.open.map((x) => `<span class="badge teal">${esc(x.status)}: ${esc(x.procedure)}</span>`), sf.lost ? `<span class="badge">${esc(D.pretty(sf.presence))}</span>` : ""].join("") || `<span class="badge">No coded findings</span>`}</div>
+      <div class="row" style="flex-wrap:wrap;gap:4px">${[...sf.findings.map((x) => `<span class="badge ${/^endodontically/i.test(x) ? "blue" : "amber"}">${esc(/^endodontically/i.test(x) ? "Root canal treated" : x)}</span>`), ...sf.restorations.map((x) => `<span class="badge blue">${esc(x)}</span>`), ...sf.open.map((x) => `<span class="badge teal">${esc(x.status)}: ${esc(x.procedure)}</span>`), sf.lost ? `<span class="badge">${esc(D.pretty(sf.presence))}</span>` : ""].join("") || `<span class="badge">No coded findings</span>`}</div>
       ${sf.fee ? `<div class="small" style="margin-top:6px;font-weight:700">Fee ${money(sf.fee, c())} · <span style="color:${sf.due ? "var(--amber)" : "var(--green)"}">${sf.due ? "Due " + money(sf.due, c()) : "Fully paid"}</span></div>` : ""}
       <div class="small muted" style="margin-top:4px">${sf.items.length} treatment${sf.items.length === 1 ? "" : "s"}${sf.items[0] ? " · last " + fmtMs(sf.items[0].at, z()) : ""}</div></div>` : ""}
     <div><h5>At a glance</h5><div class="mini" style="margin-top:6px">
@@ -129,7 +131,8 @@ function stageUi(p) {
     ${issues.length ? `<div><h5>Needs attention</h5>${issues.map((f) => `<button class="v3d-issue" data-v3d="pick" data-arg="${f.key}"><span class="k" style="background:${f.due ? "#b45309" : f.findings.length ? "#f59e0b" : "#0f766e"}">${esc(L(f.key))}</span><span>${esc([f.open[0] && f.open[0].procedure, f.findings[0], f.due && "due " + money(f.due, c())].filter(Boolean).join(" · "))}</span></button>`).join("")}</div>` : ""}
   </div>
   <div class="glass v3d-lens"><div class="row"><span class="small" style="font-weight:800;color:#64748b;margin-right:2px">LENS</span>${Object.entries(LENSES).map(([k, v]) => `<button class="lchip ${st.lens === k ? "on" : ""}" data-v3d="lens" data-arg="${k}">${v.label}</button>`).join("")}</div>
-    ${legend.length ? `<div class="v3d-legend">${legend.map(([col, l]) => `<span><i style="background:${col}"></i>${l}</span>`).join("")}</div>` : ""}</div>
+    ${legend.length ? `<div class="v3d-legend">${legend.map(([col, l]) => `<span><i style="background:${col}"></i>${l}</span>`).join("")}</div>` : ""}
+    <div class="v3d-legend mat">${[["#4f7fe8", "Filling"], ["#8e99a6", "Amalgam"], ["#e3b341", "Crown"], ["#e11d48", "Root canal"], ["#cbd5e1", "Missing"]].map(([col, l]) => `<span><i style="background:${col};border-radius:3px"></i>${l}</span>`).join("")}</div></div>
   <div class="v3d-hint">Drag to rotate · right-drag to pan · scroll to zoom · hover for details</div>`;
 }
 function refreshStage() {
@@ -279,7 +282,7 @@ function railContent(p) {
     top = `<div class="tooth-card"><div class="between" style="align-items:flex-start"><div><div class="rail-title" style="margin:0 0 2px">Selected tooth</div><h4>${esc(L(k))} ${N() !== "fdi" ? `<span class="muted" style="font-weight:600;font-size:13px">(FDI ${k})</span>` : ""}</h4><div class="small muted">${esc(D.toothName(k))}</div>
       <div class="small" style="margin-top:4px">${esc(D.pretty(f.assessment))} · ${esc(D.pretty(f.presence))}${f.replacement !== "none" ? " · " + esc(D.pretty(f.replacement)) : ""}</div></div>
       <div class="surfpad" aria-label="Surface">${layout.map((s, i) => (s ? `<button class="${P.surface === s ? "on" : ""}" data-act="surface" data-s="${s}" title="${esc(D.surfaceName(k, s))}">${s}</button>` : i === 0 ? `<button class="${!P.surface ? "on" : ""}" data-act="surface" data-s="" title="Whole tooth">W</button>` : "<span></span>")).join("")}</div></div>
-      <div class="alerts" style="margin:10px 0">${[...f.findings.map((x) => `<span class="badge amber">${esc(x)}</span>`), ...f.restorations.map((x) => `<span class="badge blue">${esc(x)}</span>`), ...f.open.map((x) => `<span class="badge teal">${esc(x.status)}</span>`)].join("") || `<span class="badge">No coded findings</span>`}</div>
+      <div class="alerts" style="margin:10px 0">${[...f.findings.map((x) => `<span class="badge ${/^endodontically/i.test(x) ? "blue" : "amber"}">${esc(/^endodontically/i.test(x) ? "Root canal treated" : x)}</span>`), ...f.restorations.map((x) => `<span class="badge blue">${esc(x)}</span>`), ...f.open.map((x) => `<span class="badge teal">${esc(x.status)}</span>`)].join("") || `<span class="badge">No coded findings</span>`}</div>
       <div class="row" style="flex-wrap:wrap">${can("recordTreatment") ? `<button class="btn primary sm" data-act="record" data-teeth="${k}">${I("plus")}Record treatment</button><button class="btn sm" data-act="chartstatus">${I("clip")}Chart status</button>` : `<span class="ro-note">${I("lock")}View only · treatment entries are added by the dentist.</span>`}</div></div>`;
   }
   return `${top}<div class="between"><div class="rail-title">Treatment history ${k ? "· " + esc(L(k)) : "· all teeth"}</div>${k ? `<button class="btn ghost sm" data-act="alltheeth">All teeth</button>` : ""}</div>${timeline(p, k)}`;
@@ -609,7 +612,7 @@ function apptDialog(p, id) {
   modal({
     title: `Appointment · ${esc(a.date)}`, noFooter: true,
     body: `<dl class="kv"><dt>Doctor</dt><dd>${esc(a.doctor)}</dd><dt>Reason</dt><dd>${esc(a.reason)}</dd><dt>Status</dt><dd><span class="badge ${stCls(a.status)}">${esc(a.status)}</span></dd></dl>
-      <div class="chips" style="margin-top:14px">${["Confirmed", "Checked in", "In progress", "Completed", "Cancelled", "No show"].map((s) => `<button type="button" class="chip ${a.status === s ? "on" : ""}" data-st="${s}">${s}</button>`).join("")}</div>
+      <div class="chips" style="margin-top:14px">${D.appointmentChoices(a.status).map((s) => `<button type="button" class="chip ${a.status === s ? "on" : ""}" data-st="${s}">${s}</button>`).join("")}</div>
       <div class="row" style="margin-top:14px"><button type="button" class="btn" id="resched">Reschedule / edit</button></div>`,
     onOpen: (f) => {
       f.addEventListener("click", async (e) => { const b = e.target.closest("[data-st]"); if (b) { await setAppointmentStatus(p.id, id, b.dataset.st); apptDialog(patient(p.id), id); } });

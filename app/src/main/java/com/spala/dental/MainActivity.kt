@@ -165,6 +165,8 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     fun open3D(p: JSONObject, chart: JSONObject) {
         chartPatientId = p.optString("id"); chartToken = uid()
         chart.put("notation", ToothNotation.current).put("sounds", TapSound.enabled)
+        // Treatment facts per tooth (procedure, status, date, doctor, fee · paid · due) for the tooth sheet.
+        if (store.can("viewClinical")) chart.put("care", careLines(p, store.config))
         if (!store.can("recordTreatment")) chart.put("readOnly", true)
         chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
     }
@@ -268,11 +270,11 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                         if (selecting) {
                             Text(if (selection.isEmpty()) "Select one or more teeth on the model" else selection.sortedBy { ToothNotation.orderIndex(it) }.joinToString(", ") { ToothNotation.label(it) },
                                 style = MaterialTheme.typography.titleSmall, color = Ink)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { recordTeeth = selection.sortedBy { ToothNotation.orderIndex(it) }; recordSurface = "" }, enabled = selection.isNotEmpty(),
-                                    modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(16.dp)) { Text("Record treatment (${selection.size})") }
-                                OutlinedButton(onClick = { selecting = false; selection.clear() }, modifier = Modifier.height(50.dp), shape = RoundedCornerShape(16.dp)) { Text("Cancel") }
-                            }
+                            ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+                                { m -> Button(onClick = { recordTeeth = selection.sortedBy { ToothNotation.orderIndex(it) }; recordSurface = "" }, enabled = selection.isNotEmpty(),
+                                    modifier = m.heightIn(min = 50.dp), shape = RoundedCornerShape(16.dp)) { ButtonLabel(I18n.tr("Record treatment") + " (${selection.size})") } },
+                                { m -> OutlinedButton(onClick = { selecting = false; selection.clear() }, modifier = m.heightIn(min = 50.dp), shape = RoundedCornerShape(16.dp)) { ButtonLabel("Cancel") } },
+                            ), minItemWidth = 140.dp)
                         } else {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 MiniMetric("${records.count { it.completed > 0 }}", "Treated", Blue600, Modifier.weight(1f))
@@ -281,15 +283,16 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                                 MiniMetric("${records.count { it.presence in setOf("missing", "extracted", "exfoliated", "congenitally_absent") }}", "Missing", InkMuted, Modifier.weight(1f))
                             }
                             ChartLegendRow()
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { open3D(p, displayChart(p)) }, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(16.dp)) {
-                                    GlyphIcon(Glyph.Cube, Color.White, 18.dp); Spacer(Modifier.width(8.dp)); Text("Full 3D chart")
-                                }
-                                if (canEdit) FilledTonalButton(onClick = { selecting = true; selection.clear(); focusTooth?.let { selection.add(it) } },
-                                    modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(16.dp)) {
-                                    GlyphIcon(Glyph.Plus, Teal900, 16.dp); Spacer(Modifier.width(6.dp)); Text("Record treatment")
-                                }
-                            }
+                            ButtonRow(buildList<@Composable (Modifier) -> Unit> {
+                                add { m -> Button(onClick = { open3D(p, displayChart(p)) }, modifier = m.heightIn(min = 50.dp), shape = RoundedCornerShape(16.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                                    GlyphIcon(Glyph.Cube, Color.White, 18.dp); Spacer(Modifier.width(8.dp)); ButtonLabel("Full 3D chart")
+                                } }
+                                if (canEdit) add { m -> FilledTonalButton(onClick = { selecting = true; selection.clear(); focusTooth?.let { selection.add(it) } },
+                                    modifier = m.heightIn(min = 50.dp), shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                                    GlyphIcon(Glyph.Plus, Teal900, 16.dp); Spacer(Modifier.width(6.dp)); ButtonLabel("Record treatment")
+                                } }
+                            }, minItemWidth = 150.dp)
                             if (!canEdit) Text("View only · treatment entries are added by the dentist.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
                         }
                     }
@@ -463,11 +466,10 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                     OutlinedTextField(search, { search = it }, placeholder = { Text("Search name, phone, or patient ID") }, leadingIcon = { GlyphIcon(Glyph.Person, InkMuted, 18.dp) },
                         modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = SurfaceWhite, focusedContainerColor = SurfaceWhite, unfocusedBorderColor = Hairline))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = { addPatient() }, shape = RoundedCornerShape(14.dp)) { GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); Text("Register patient") }
-                        Spacer(Modifier.weight(1f))
-                        FilterChip(selected = showArchived, onClick = { showArchived = !showArchived }, label = { Text("Include archived") })
-                    }
+                    ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+                        { m -> Button(onClick = { addPatient() }, shape = RoundedCornerShape(14.dp), modifier = m) { GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); ButtonLabel("Register patient") } },
+                        { m -> Box(m, contentAlignment = Alignment.CenterEnd) { FilterChip(selected = showArchived, onClick = { showArchived = !showArchived }, label = { Text("Include archived", maxLines = 1) }) } },
+                    ), minItemWidth = 150.dp)
                     store.patients.filter { (showArchived || !it.optBoolean("archived")) && "${it.optString("name")} ${it.optString("phone")} ${it.optString("id")}".contains(search, true) }.forEach { p -> PatientCard(p) { openPatient(p.optString("id")) } }
                     if (store.patients.isEmpty()) SurfaceCard(background = SurfaceTint) { Text("Your patient list starts here", style = MaterialTheme.typography.titleSmall); Text("Register a patient to create their profile and dental chart.", style = MaterialTheme.typography.bodySmall, color = InkMuted) }
                 }
@@ -582,7 +584,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     recordTeeth?.let { teeth -> if (patient != null) RecordTreatmentDialog(
         patient, teeth, recordSurface,
         clinicianRecords(store.config).filter { it.optBoolean("active", true) }.map { it.optString("name") }.filter { it.isNotBlank() },
-        store.config, onDismiss = { recordTeeth = null; recordSurface = "" },
+        store.config, onDismiss = { recordTeeth = null; recordSurface = "" }, canBill = store.can("billing"),
     ) { changed, action ->
         store.save(changed, action)
         store.saveError ?: run { selecting = false; selection.clear(); focusTooth = teeth.first(); null }

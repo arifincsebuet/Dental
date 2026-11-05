@@ -41,6 +41,7 @@ private fun chartSummary(chart: JSONObject?): List<String> {
 }
 private data class ClinicalForm(val title: String, val fields: Map<String, String>, val commit: (Map<String, String>) -> Unit)
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EncountersScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject, String) -> Unit) {
     var form by remember { mutableStateOf<ClinicalForm?>(null) }
@@ -54,7 +55,7 @@ fun EncountersScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObj
                 Text("Amendment · ${stamp(amendment.optLong("at"), config)}", color = Color(0xFF2563EB))
                 Text("${amendment.optString("reason")}\n${amendment.optString("text")}")
             }
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (encounter.optString("status") == "Draft") {
                     TextButton(onClick = { form = ClinicalForm("Edit encounter", listOf("doctor", "complaint", "examination", "diagnosis", "plan").associateWith { encounter.optString(it) }) { values ->
                         require(values["doctor"].orEmpty().isNotBlank()) { "Record the clinician" }
@@ -85,6 +86,7 @@ fun EncountersScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObj
     ClinicalFormDialog(form) { form = null }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TreatmentWorkspaceScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject, String) -> Unit) {
     var form by remember { mutableStateOf<ClinicalForm?>(null) }
@@ -102,7 +104,7 @@ fun TreatmentWorkspaceScreen(patient: JSONObject, config: JSONObject, onChange: 
                 "Deferred", "Referred" -> listOf("Accepted", "Cancelled")
                 else -> emptyList()
             }
-            Row(Modifier.horizontalScroll(rememberScrollState())) { nextStates.forEach { next ->
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) { nextStates.forEach { next ->
                 TextButton(onClick = {
                     val fields = if (next == "Completed") linkedMapOf("doctor" to "", "outcome" to "", "restoration" to "none") else linkedMapOf("reason" to "")
                     form = ClinicalForm("$next · ${treatment.optString("procedure")}", fields) { values ->
@@ -210,8 +212,29 @@ private fun ClinicalFormDialog(form: ClinicalForm?, close: () -> Unit) {
 }
 
 object ClinicExports {
-    /** Full patient record PDF (profile, 2D dental chart, treatments with fees, encounters, billing). See ReportPdf.kt. */
-    fun patientPdf(patient: JSONObject, config: JSONObject, output: OutputStream) = ReportPdfs.patientReport(patient, config, output)
+    fun patientPdf(patient: JSONObject, config: JSONObject, output: OutputStream) {
+        val lines = mutableListOf(config.optString("name", "Dental Care"), "PATIENT CARE SUMMARY", "Patient: ${patient.optString("name")}", "DOB: ${patient.optString("dob")}",
+            "Generated: ${stamp(System.currentTimeMillis(), config)}", if (patient.optBoolean("dirty")) "DEVICE RECORD · cloud confirmation pending" else "Cloud revision ${patient.optLong("remoteVersion")}",
+            "Medical alerts: ${patient.optString("allergies")}", "", "CLINICAL STORY", patient.optString("story"), "", "DENTAL CHART · FDI")
+        lines += chartSummary(patient.optJSONObject("chart"))
+        lines += listOf("", "TREATMENT PLAN")
+        patient.optJSONArray("treatments")?.objects().orEmpty().forEach { lines += "Tooth ${it.optString("tooth")}: ${it.optString("procedure")} · ${it.optString("status")}" }
+        lines += listOf("", "PERFORMED CARE")
+        patient.optJSONArray("performedProcedures")?.objects().orEmpty().forEach { lines += "${it.optString("procedure")} · ${it.optString("doctor")} · ${it.optString("outcome")}" }
+        val document = PdfDocument()
+        try {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 10f; color = AndroidColor.rgb(30, 41, 59) }
+            val wrapped = lines.flatMap { wrap(it, paint, 510f) }
+            wrapped.chunked(45).forEachIndexed { index, chunk ->
+                val page = document.startPage(PdfDocument.PageInfo.Builder(595, 842, index + 1).create())
+                paint.color = AndroidColor.rgb(15, 118, 110); page.canvas.drawRect(0f, 0f, 595f, 12f, paint); paint.color = AndroidColor.rgb(30, 41, 59)
+                chunk.forEachIndexed { row, line -> page.canvas.drawText(line, 42f, 48f + row * 16f, paint) }
+                page.canvas.drawText("Page ${index + 1} · Dental Care", 42f, 812f, paint)
+                document.finishPage(page)
+            }
+            document.writeTo(output)
+        } finally { document.close() }
+    }
     private fun wrap(text: String, paint: Paint, width: Float): List<String> {
         val result = mutableListOf<String>()
         for (paragraph in text.split('\n')) {

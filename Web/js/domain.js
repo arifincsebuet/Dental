@@ -45,6 +45,12 @@ export const SUPER_ADMINS = ["dev.spala@gmail.com", "spalatechnologies@gmail.com
 // ---------------------------------------------------------------- clinic rules
 export const APPOINTMENT_STATES = ["Requested", "Scheduled", "Confirmed", "Checked in", "In progress", "Completed", "Cancelled", "No show"];
 export const TERMINAL_APPOINTMENTS = ["Completed", "Cancelled", "No show"];
+/** Allowed appointment status changes (same as the Android app, ClinicFeatures.SchedulingScreen). */
+export const APPOINTMENT_NEXT = {
+  Requested: ["Confirmed", "Cancelled"], Scheduled: ["Confirmed", "Checked in", "Cancelled", "No show"],
+  Confirmed: ["Checked in", "Cancelled", "No show"], "Checked in": ["In progress", "Cancelled"], "In progress": ["Completed", "Cancelled"],
+};
+export const appointmentChoices = (status) => [status, ...(APPOINTMENT_NEXT[status] || [])];
 export const ACTIVE_APPOINTMENTS = ["Scheduled", "Confirmed", "Checked in", "In progress", "Requested"];
 export const TREATMENT_STATES = ["Planned", "Accepted", "In progress", "Completed", "Deferred", "Declined", "Cancelled", "Referred"];
 export const OPEN_TREATMENT = ["Planned", "Accepted", "In progress", "Deferred", "Referred"];

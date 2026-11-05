@@ -128,6 +128,27 @@ fun displayChart(patient: JSONObject): JSONObject {
     return chart.put("notation", ToothNotation.current)
 }
 
+/**
+ * Short per-tooth treatment lines for the full 3D chart's tooth sheet: procedure · status · date ·
+ * doctor, then Fee · Paid · Due. No notes or other narrative text (the 3D engine gets facts only).
+ */
+fun careLines(patient: JSONObject, config: JSONObject): JSONObject {
+    val out = JSONObject()
+    val byTooth = patient.optJSONArray("treatments").objectList().flatMap { t -> keysOf(t).map { it to t } }.groupBy({ it.first }, { it.second })
+    for ((key, items) in byTooth) {
+        if (!Regex("[1-8][1-8]").matches(key)) continue
+        val lines = JSONArray()
+        items.sortedByDescending { it.optLong("at") }.take(6).forEach { t ->
+            val head = listOf(t.optString("procedure").take(40), I18n.tr(t.optString("status")), shortDate(t.optLong("performedAt").takeIf { it > 0 } ?: t.optLong("at"), config),
+                t.optString("doctor").take(32)).filter { it.isNotBlank() }.joinToString(" · ")
+            val fee = treatmentFee(patient, treatmentRef(t))?.let { feeText(it) }.orEmpty()
+            lines.put((head + if (fee.isNotBlank()) "\n" + fee else "").take(160))
+        }
+        out.put(key, lines)
+    }
+    return out
+}
+
 private fun shortDate(millis: Long, config: JSONObject): String = if (millis <= 0) "Date not recorded" else
     DateTimeFormatter.ofPattern("dd MMM yyyy").withZone(runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault())).format(Instant.ofEpochMilli(millis))
 
@@ -182,12 +203,12 @@ fun SelectedToothActions(key: String, onRecord: (String) -> Unit, onEditStatus: 
             }
             TextButton(onClick = onClose) { Text("Clear") }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { onRecord(key) }, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f)) {
-                GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); Text("Record treatment")
-            }
-            OutlinedButton(onClick = { onEditStatus(key) }, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f)) { Text("Chart status") }
-        }
+        ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+            { m -> Button(onClick = { onRecord(key) }, shape = RoundedCornerShape(14.dp), modifier = m.heightIn(min = 44.dp)) {
+                GlyphIcon(Glyph.Plus, Color.White, 16.dp); Spacer(Modifier.width(6.dp)); ButtonLabel("Record treatment")
+            } },
+            { m -> OutlinedButton(onClick = { onEditStatus(key) }, shape = RoundedCornerShape(14.dp), modifier = m.heightIn(min = 44.dp)) { ButtonLabel("Chart status") } },
+        ), minItemWidth = 150.dp)
     }
 }
 
@@ -305,6 +326,8 @@ fun RecordTreatmentDialog(
     onDismiss: () -> Unit,
     /** A recorded treatment item to correct; null records a new one. */
     editing: JSONObject? = null,
+    /** Show the optional total fee (people with Invoices & payments access), like the web app. */
+    canBill: Boolean = false,
     onSave: (JSONObject, String) -> String?,
 ) {
     val zoneOf = { runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault()) }
@@ -321,6 +344,13 @@ fun RecordTreatmentDialog(
             ?.let { java.time.Instant.ofEpochMilli(it).atZone(zoneOf()).toLocalDate() } ?: LocalDate.now(zoneOf())).toString()) }
     var notes by remember { mutableStateOf(editing?.optString("notes")?.ifBlank { null } ?: linkedOutcome?.optString("outcome").orEmpty()) }
     var error by remember { mutableStateOf("") }
+    val currency = config.optString("currency", "BDT")
+    var feeText by remember { mutableStateOf("") }
+    var feeTyped by remember { mutableStateOf(false) }
+    // Fill the fee from Settings › Services when the procedure matches (until the user types one).
+    LaunchedEffect(procedure) {
+        if (editing == null && !feeTyped) feeText = serviceFee(config, procedure)?.let { java.math.BigDecimal.valueOf(it).movePointLeft(ClinicalRules.currencyDigits(currency)).stripTrailingZeros().toPlainString() }.orEmpty()
+    }
     AlertDialog(
         onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp),
         title = {
@@ -353,6 +383,10 @@ fun RecordTreatmentDialog(
                 }
                 OutlinedTextField(doctor, { doctor = it }, label = { Text("Doctor") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
                 DateField(date, { date = it }, if (status == "Planned") "Planned date" else "Treatment date", today = LocalDate.now(runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault())))
+                if (editing == null && canBill && status != "Cancelled") OutlinedTextField(feeText, { feeText = it; feeTyped = true },
+                    label = { androidx.compose.material3.Text(I18n.tr("Total fee") + " ($currency)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                    supportingText = { Text("Optional · filled from Services · payments are added later") }, shape = RoundedCornerShape(14.dp))
                 OutlinedTextField(notes, { notes = it }, label = { Text("Notes / outcome") }, minLines = 3, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             }
@@ -399,7 +433,13 @@ fun RecordTreatmentDialog(
                         copy.array("treatments").put(item)
                     }
                     val teethText = teeth.joinToString(", ") { ToothNotation.label(it) + " (FDI $it)" }
-                    onSave(copy, "Treatment recorded · $name · $status · $teethText")?.let { throw IllegalStateException(it) }
+                    var feeNote = ""
+                    if (canBill && status != "Cancelled" && feeText.isNotBlank()) {
+                        val fee = ClinicalRules.parseMinor(feeText.trim(), currency)
+                        val first = copy.optJSONArray("treatments").objectList().last { it.optString("groupId") == group }
+                        feeNote = " · " + setTreatmentFee(copy, first, fee, config)
+                    }
+                    onSave(copy, "Treatment recorded · $name · $status · $teethText$feeNote")?.let { throw IllegalStateException(it) }
                 }.onSuccess { onDismiss() }.onFailure { error = it.localizedMessage ?: "Review the treatment details" }
             }, shape = RoundedCornerShape(14.dp)) { Text("Save") }
         },

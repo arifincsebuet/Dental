@@ -52,6 +52,28 @@ fun feeText(fee: TreatmentFee): String = runCatching {
 
 private fun decimal(minor: Long, currency: String) = BigDecimal.valueOf(minor).movePointLeft(ClinicalRules.currencyDigits(currency)).stripTrailingZeros().toPlainString()
 
+/** Default fee of the clinic service with this procedure name (Settings › Services), if any. */
+fun serviceFee(config: JSONObject, procedure: String): Long? =
+    config.optJSONArray("services").objectList().firstOrNull { it.optBoolean("active", true) && it.optString("name").equals(procedure.trim(), true) }?.optLong("fee")
+
+/**
+ * Creates the fee invoice for a newly recorded treatment (all teeth of its group). Same document
+ * shape as the payment dialog and the web app (D.saveTreatmentPayment), so Fee · Paid · Due works
+ * everywhere. Returns the history text.
+ */
+fun setTreatmentFee(patient: JSONObject, treatment: JSONObject, fee: Long, config: JSONObject): String {
+    require(fee > 0) { "The fee must be more than zero" }
+    val ref = treatmentRef(treatment)
+    val currency = config.optString("currency", "BDT")
+    val teeth = patient.optJSONArray("treatments").objectList().filter { treatmentRef(it) == ref }.map { it.optString("tooth") }.distinct()
+    val description = treatment.optString("procedure", "Treatment") + " · " + teeth.joinToString(", ") { ToothNotation.label(it) + " (FDI $it)" }
+    patient.array("invoices").put(JSONObject().put("id", uid()).put("treatmentRef", ref).put("treatmentId", treatment.optString("id")).put("description", description)
+        .put("currency", currency).put("lines", JSONArray().put(JSONObject().put("id", uid()).put("description", description).put("quantity", 1).put("unitPrice", fee)))
+        .put("discount", 0).put("taxBps", 0).put("amount", fee).put("at", System.currentTimeMillis()).put("status", "Issued")
+        .put("payments", JSONArray()).put("refunds", JSONArray()))
+    return "fee ${ClinicalRules.money(fee, currency)}"
+}
+
 /**
  * Fee and payments for one treatment: set or revise the total fee, add a payment for today's visit,
  * see every earlier payment and share a receipt. [onSave] returns null or the reason it was refused.
@@ -66,7 +88,7 @@ fun TreatmentPaymentDialog(patient: JSONObject, treatmentId: String, config: JSO
     val currency = invoice?.optString("currency") ?: config.optString("currency", "BDT")
     val teeth = patient.optJSONArray("treatments").objectList().filter { treatmentRef(it) == ref }.map { it.optString("tooth") }.distinct()
     val procedure = treatment.optString("procedure", "Treatment")
-    val serviceFee = config.optJSONArray("services").objectList().firstOrNull { it.optBoolean("active", true) && it.optString("description").equals(procedure, true) }?.optLong("fee")
+    val serviceFee = config.optJSONArray("services").objectList().firstOrNull { it.optBoolean("active", true) && it.optString("name").equals(procedure, true) }?.optLong("fee")
     val total = invoice?.let { ClinicalRules.invoiceTotal(it) }
     val paid = invoice?.let { ClinicalRules.paid(it) - ClinicalRules.refunded(it) } ?: 0L
     val payments = invoice?.optJSONArray("payments").objectList()
@@ -99,7 +121,7 @@ fun TreatmentPaymentDialog(patient: JSONObject, treatmentId: String, config: JSO
                 OutlinedTextField(amountText, { amountText = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("Amount paid now ($currency)") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), supportingText = { Text("Leave empty to only save the fee") })
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Cash", "bKash", "Nagad", "Card", "Bank").forEach { m -> FilterChip(selected = method == m, onClick = { method = m }, label = { Text(m) }) }
+                    PAYMENT_METHODS.forEach { m -> FilterChip(selected = method == m, onClick = { method = m }, label = { Text(m) }) }
                 }
                 DateField(date, { date = it }, "Payment date", limit = DateLimit.PAST_OR_TODAY, today = LocalDate.now(zone))
                 OutlinedTextField(note, { note = it.take(200) }, label = { Text("Note (optional, e.g. visit 2 of 5)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))

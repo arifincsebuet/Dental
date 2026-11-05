@@ -88,7 +88,18 @@ class DentalBridge(godot: Godot) : GodotPlugin(godot) {
         require(session.length <= 128 && session.all { it.isLetterOrDigit() || it == '-' || it == '_' })
         val version = input.optLong("chartVersion", 0L)
         require(version >= 0)
-        JSONObject().put("schemaVersion", 2).put("dentition", dentition).put("teeth", outputTeeth)
+        // Per-tooth treatment lines (plain text facts, limited size; no notes).
+        val care = JSONObject()
+        input.optJSONObject("care")?.let { source ->
+            for (key in source.keys()) {
+                if (!validKey(key, dentition)) continue
+                val lines = source.optJSONArray(key) ?: continue
+                val clean = JSONArray()
+                for (i in 0 until minOf(lines.length(), 6)) clean.put(lines.optString(i).filter { it == '\n' || !it.isISOControl() }.take(160))
+                care.put(key, clean)
+            }
+        }
+        JSONObject().put("schemaVersion", 2).put("dentition", dentition).put("teeth", outputTeeth).put("care", care)
             .put("catalogVersion", "fdi-v1").put("chartVersion", version)
             .put("sessionToken", session).put("readOnly", input.optBoolean("readOnly", false))
             .put("sounds", input.optBoolean("sounds", true))

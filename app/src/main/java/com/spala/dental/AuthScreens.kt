@@ -68,7 +68,7 @@ fun LoginScreen(store: ClinicStore) {
                         if (!store.cloudConfigured || resource == 0) error = "Firebase is not configured in this build. Add app/src/main/res/values/firebase.xml (see firebase/firebase.xml.example)."
                         else store.staffGoogleSignIn(context, context.getString(resource))
                     },
-                    enabled = !store.busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp),
+                    enabled = !store.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp),
                 ) { Text("Continue with Google") }
                 if (!store.cloudConfigured) OutlinedButton(onClick = { store.useLocally() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Text("Use offline on this device")
@@ -82,7 +82,7 @@ fun LoginScreen(store: ClinicStore) {
                 OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
                 Button(onClick = { error = ""; store.patientSignIn(loginId, password) { problem -> error = problem.orEmpty(); if (problem == null) password = "" } },
-                    enabled = !store.busy, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)) { Text("Sign in") }
+                    enabled = !store.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)) { Text("Sign in") }
                 Text("Forgot your password? Ask your clinic; they can set a new one.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
             }
             if (store.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -211,10 +211,10 @@ fun PatientPortalScreen(store: ClinicStore) {
                 SectionHeader("Billing", mark("billing"))
                 SurfaceCard { InfoRow(Glyph.Clipboard, "Balance due", runCatching { ClinicalRules.money(due, currency) }.getOrDefault("$due")) }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { store.refreshMyRecord() }, enabled = !store.busy, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Refresh") }
-                OutlinedButton(onClick = { store.patientSignOut() }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Text("Sign out") }
-            }
+            ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+                { m -> OutlinedButton(onClick = { store.refreshMyRecord() }, enabled = !store.busy, modifier = m, shape = RoundedCornerShape(14.dp)) { ButtonLabel("Refresh") } },
+                { m -> OutlinedButton(onClick = { store.patientSignOut() }, modifier = m, shape = RoundedCornerShape(14.dp)) { ButtonLabel("Sign out") } },
+            ), minItemWidth = 130.dp)
         }
     }
     } // ModalNavigationDrawer
@@ -250,12 +250,10 @@ fun PatientAccessCard(patient: JSONObject, store: ClinicStore) {
         else if (portal == null) Button(onClick = { loginDialog = false }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Text("Create patient login")
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { loginDialog = true }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = Modifier.weight(1f)) {
-                    Text("Change ID / password")
-                }
-                TextButton(onClick = { store.removePatientLogin(patient.optString("id")) { problem = it.orEmpty() } }, enabled = !store.busy) { Text("Turn off", color = Rose600) }
-            }
+            ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+                { m -> OutlinedButton(onClick = { loginDialog = true }, enabled = !store.busy, shape = RoundedCornerShape(14.dp), modifier = m) { ButtonLabel("Change ID / password") } },
+                { m -> TextButton(onClick = { store.removePatientLogin(patient.optString("id")) { problem = it.orEmpty() } }, enabled = !store.busy, modifier = m) { ButtonLabel("Turn off", color = Rose600) } },
+            ), minItemWidth = 140.dp)
         }
         if (problem.isNotBlank()) Text(problem, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         if (store.cloudConfigured && (patient.optBoolean("dirty") || patient.optLong("remoteVersion") == 0L))

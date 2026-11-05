@@ -249,16 +249,16 @@ fun PaywallScreen(store: ClinicStore, billing: BillingManager) {
         PlanTable(billing, tier)
         if (canBuy) Button(
             onClick = { (context as? Activity)?.let { billing.purchase(it, store.subscriptionClinicId, tier) } },
-            enabled = plan != null && !store.busy, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp),
+            enabled = plan != null && !store.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp), shape = RoundedCornerShape(16.dp),
         ) { Text(if (plan?.introPrice != null) "Subscribe for ${plan.introPrice}" else "Subscribe") }
         else SurfaceCard(background = SurfaceTint) {
             Text("Your clinic's subscription is not active", style = MaterialTheme.typography.titleSmall, color = Ink)
             Text("Ask the clinic owner or administrator to subscribe. You'll get access automatically.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { billing.restore(); store.refreshSubscription() }, shape = RoundedCornerShape(14.dp)) { Text("Restore purchase") }
-            OutlinedButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(billing.manageUrl()))) }, shape = RoundedCornerShape(14.dp)) { Text("Manage") }
-        }
+        ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+            { m -> OutlinedButton(onClick = { billing.restore(); store.refreshSubscription() }, shape = RoundedCornerShape(14.dp), modifier = m) { ButtonLabel("Restore purchase") } },
+            { m -> OutlinedButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(billing.manageUrl()))) }, shape = RoundedCornerShape(14.dp), modifier = m) { ButtonLabel("Manage") } },
+        ), minItemWidth = 140.dp)
         if (plan != null && billing.status.isNotBlank()) Text(billing.status, color = InkMuted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
         if (store.message.isNotBlank()) Text(store.message, color = InkMuted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
         TextButton(onClick = { if (store.session == "local") store.leaveLocalMode() else store.signOut() }) { Text("Sign out") }

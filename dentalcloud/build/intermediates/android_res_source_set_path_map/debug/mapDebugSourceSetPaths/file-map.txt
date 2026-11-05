@@ -1,0 +1,9 @@
+com.spala.dental.cloud.dentalcloud-pngs-0 C:\Users\Admin\Documents\Dental\dentalcloud\build\generated\res\pngs\debug
+com.spala.dental.cloud.dentalcloud-updated_navigation_xml-1 C:\Users\Admin\Documents\Dental\dentalcloud\build\generated\updated_navigation_xml\debug
+com.spala.dental.cloud.dentalcloud-mergeDebugResources-2 C:\Users\Admin\Documents\Dental\dentalcloud\build\intermediates\incremental\debug\mergeDebugResources\merged.dir
+com.spala.dental.cloud.dentalcloud-mergeDebugResources-3 C:\Users\Admin\Documents\Dental\dentalcloud\build\intermediates\incremental\debug\mergeDebugResources\stripped.dir
+com.spala.dental.cloud.dentalcloud-debug-4 C:\Users\Admin\Documents\Dental\dentalcloud\build\intermediates\merged_res\debug\mergeDebugResources
+com.spala.dental.cloud.dentalcloud-debug-5 C:\Users\Admin\Documents\Dental\dentalcloud\build\intermediates\packaged_res\debug\packageDebugResources
+com.spala.dental.cloud.dentalcloud-debug-6 C:\Users\Admin\Documents\Dental\dentalcloud\src\debug\res
+com.spala.dental.cloud.dentalcloud-main-7 C:\Users\Admin\Documents\Dental\dentalcloud\src\main\res
+gradleHome-0 C:\Users\Admin\.gradle

@@ -40,6 +40,9 @@ private fun shareText(context: Context, title: String, text: String, type: Strin
     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(type).putExtra(Intent.EXTRA_SUBJECT, title).putExtra(Intent.EXTRA_TEXT, text), title))
 }
 
+/** Payment methods offered everywhere (treatment payments, invoices, web app). */
+val PAYMENT_METHODS = listOf("Cash", "bKash", "Nagad", "Card", "Bank")
+
 @Composable private fun FeaturePanel(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -143,6 +146,7 @@ fun ClinicManagementScreen(config: JSONObject, onSave: (JSONObject) -> Unit) {
     FeatureDialog(form) { form = null }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BillingScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject, String) -> Unit) {
     val saveStatus = LocalEditorSaveStatus.current
@@ -163,11 +167,14 @@ fun BillingScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject
             if (invoice.has("lines")) Text("Discount ${ClinicalRules.money(invoice.optLong("discount"), currency)} · tax ${BigDecimal(invoice.optInt("taxBps")).movePointLeft(2)}%")
             Text("Total ${ClinicalRules.money(total, currency)}\nReceived ${ClinicalRules.money(paid, currency)} · refunded ${ClinicalRules.money(refunds, currency)}\nOutstanding ${ClinicalRules.money(remaining, currency)}", fontWeight = FontWeight.SemiBold)
             if (voided) Text("Reason: ${invoice.optString("voidReason")}")
-            Row(Modifier.horizontalScroll(rememberScrollState())) {
-                TextButton(enabled = !voided && remaining > 0, onClick = { form = FeatureForm("Receive payment", listOf(FeatureField("amount", "Amount ($currency)"), FeatureField("method", "Payment method", "Cash"), FeatureField("reference", "Reference (optional)", required = false))) { v ->
+            // Wraps onto a second line instead of hiding buttons off-screen.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                TextButton(enabled = !voided && remaining > 0, onClick = { form = FeatureForm("Receive payment", listOf(FeatureField("amount", "Amount ($currency)"), FeatureField("method", "Method: Cash, bKash, Nagad, Card or Bank", "Cash"), FeatureField("reference", "Reference (optional)", required = false))) { v ->
                     val amount = ClinicalRules.parseMinor(v.getValue("amount"), currency); require(amount in 1..remaining) { "Payment must be positive and within the outstanding balance" }
+                    // Same payment methods as treatment payments and the web app.
+                    val method = PAYMENT_METHODS.firstOrNull { it.equals(v.getValue("method").trim(), true) } ?: throw IllegalArgumentException("Choose Cash, bKash, Nagad, Card or Bank")
                     val changed = copyJson(patient); val target = records(changed, "invoices").first { it.optString("id") == invoice.optString("id") }
-                    target.array("payments").put(JSONObject().put("id", uid()).put("amount", amount).put("method", v.getValue("method")).put("reference", v.getValue("reference")).put("at", System.currentTimeMillis()))
+                    target.array("payments").put(JSONObject().put("id", uid()).put("amount", amount).put("method", method).put("reference", v.getValue("reference")).put("at", System.currentTimeMillis()))
                     onChange(changed, "Payment received for invoice ${invoice.optString("id")}: ${ClinicalRules.money(amount, currency)}")
                 } }) { Text("Receive payment") }
                 TextButton(enabled = !voided && paid == refunds, onClick = { form = FeatureForm("Void invoice", listOf(FeatureField("reason", "Required reason"))) { v ->
@@ -183,7 +190,7 @@ fun BillingScreen(patient: JSONObject, config: JSONObject, onChange: (JSONObject
             records(invoice, "payments").forEach { payment ->
                 val alreadyRefunded = records(invoice, "refunds").filter { it.optString("paymentId") == payment.optString("id") }.sumOf { it.optLong("amount") }
                 Text("Receipt ${payment.optString("id").take(8)} · ${ClinicalRules.money(payment.optLong("amount"), currency)} · ${payment.optString("method")}", fontSize = 13.sp)
-                Row {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     TextButton(onClick = { shareText(context, "Payment receipt", "${config.optString("name", "Dental Care")}\nPAYMENT RECEIPT\nPatient: ${patient.optString("name")}\nInvoice: ${invoice.optString("id")}\nReceipt: ${payment.optString("id")}\n${ClinicalRules.displayTime(payment.optLong("at"), config)}\nReceived: ${ClinicalRules.money(payment.optLong("amount"), currency)}\nMethod: ${payment.optString("method")}\nReference: ${payment.optString("reference")}") }) { Text("Share receipt") }
                     TextButton(onClick = {
                         val snapshot = copyJson(patient); val bill = copyJson(invoice); val pay = copyJson(payment); val settings = copyJson(config)
@@ -253,6 +260,7 @@ private fun invoiceText(patient: JSONObject, invoice: JSONObject, config: JSONOb
     }.onFailure { error = it.localizedMessage.orEmpty() } }) { Text("Issue invoice") } }, dismissButton = { TextButton(onClick = close) { Text("Cancel") } })
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (JSONObject, String) -> Unit, onOpenPatient: (String) -> Unit) {
     val saveStatus = LocalEditorSaveStatus.current
@@ -265,11 +273,11 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
     FeatureHeading("Appointments", "Clinic time zone · ${config.optString("timeZone", "Asia/Dhaka")}")
     FeatureChoices(listOf("Day", "Week", "Month", "All"), period) { period = it }
     DateField(reference, { reference = it }, "Calendar date", today = LocalDate.now(ClinicalRules.zone(config)))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).minusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("‹ Previous", maxLines = 1) }
-        OutlinedButton(onClick = { reference = LocalDate.now(ClinicalRules.zone(config)).toString() }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Today", maxLines = 1) }
-        OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).plusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Next ›", maxLines = 1) }
-    }
+    ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+        { m -> OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).minusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }, modifier = m, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("‹ Previous", maxLines = 1) } },
+        { m -> OutlinedButton(onClick = { reference = LocalDate.now(ClinicalRules.zone(config)).toString() }, modifier = m, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Today", maxLines = 1) } },
+        { m -> OutlinedButton(onClick = { runCatching { reference = LocalDate.parse(reference).plusDays(when (period) { "Week" -> 7; "Month" -> 30; else -> 1 }).toString() }.onFailure { error = "Enter a valid calendar date" } }, modifier = m, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Next ›", maxLines = 1) } },
+    ), minItemWidth = 90.dp)
     Button(enabled = patients.isNotEmpty(), onClick = { booking = true }) { Text("+ Book appointment") }
     val range = runCatching {
         val date = LocalDate.parse(reference); val zone = ClinicalRules.zone(config)
@@ -292,7 +300,7 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
         Text("${appointment.optString("doctor")} · ${appointment.optInt("durationMinutes", 30)} min · ${appointment.optString("room").ifBlank { "No room assigned" }}")
         Text(appointment.optString("reason")); Text(appointment.optString("status"), color = FeatureTeal)
         if (appointment.optBoolean("reminderEnabled")) Text("Reminder ${appointment.optInt("reminderHours", 24)}h before · ${if (appointment.optBoolean("consent")) "consented" else "consent missing"}", fontSize = 12.sp)
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             TextButton(onClick = { onOpenPatient(patient.optString("id")) }) { Text("Open patient") }
             TextButton(enabled = appointment.optString("status") !in ClinicalRules.terminalAppointments, onClick = { editing = patient to appointment }) { Text("Reschedule / edit") }
         }
@@ -307,7 +315,7 @@ fun SchedulingScreen(patients: List<JSONObject>, config: JSONObject, onChange: (
                 "In progress" -> listOf("Completed", "Cancelled")
                 else -> emptyList()
             }
-            Row(Modifier.horizontalScroll(rememberScrollState())) { next.forEach { state -> TextButton(onClick = {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) { next.forEach { state -> TextButton(onClick = {
                 val changed = copyJson(patient)
                 records(changed, "appointments").first { it.optString("id") == appointment.optString("id") }.put("status", state).put("statusAt", System.currentTimeMillis())
                 onChange(changed, "Appointment ${appointment.optString("date")}: $state")
@@ -489,17 +497,17 @@ fun AdvancedReportsScreen(patients: List<JSONObject>, config: JSONObject) {
         ClinicalRules.treatmentStates.forEach { state -> Text("$state: ${treatments.count { it.optString("status") == state }}") }
         Text("${patients.count { patient -> records(patient, "history").firstOrNull { it.optString("text") == "Patient registered" }?.optLong("at")?.let { it in range } == true }} newly registered patients in period")
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = {
+    ButtonRow(listOf<@Composable (Modifier) -> Unit>(
+        { m -> Button(onClick = {
             val snapshot = patients.map { copyJson(it) }; val settings = copyJson(config)
             val label = ReportPdfs.rangeLabel(period, range, config)
             savePdf(pdfName("financial-report", period, LocalDate.now(ClinicalRules.zone(config)).toString())) { out -> ReportPdfs.financialReport(snapshot, settings, label, range, out) }
-        }, modifier = Modifier.weight(1f)) { Text("Financial report PDF") }
-        OutlinedButton(onClick = {
+        }, modifier = m) { ButtonLabel("Financial report PDF") } },
+        { m -> OutlinedButton(onClick = {
             val snapshot = patients.map { copyJson(it) }; val settings = copyJson(config)
             val label = ReportPdfs.rangeLabel(period, range, config)
             savePdf(pdfName("appointments-report", period, LocalDate.now(ClinicalRules.zone(config)).toString())) { out -> ReportPdfs.appointmentsReport(snapshot, settings, label, range, out) }
-        }, modifier = Modifier.weight(1f)) { Text("Appointments PDF") }
-    }
+        }, modifier = m) { ButtonLabel("Appointments PDF") } },
+    ), minItemWidth = 160.dp)
     OutlinedButton(onClick = { shareText(context, "Clinic financial report", csv.toString(), "text/csv") }) { Text("Share financial report CSV") }
 }
