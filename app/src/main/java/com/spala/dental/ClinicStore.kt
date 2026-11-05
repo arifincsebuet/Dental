@@ -427,28 +427,19 @@ class ClinicStore(private val context: Context) {
         val patient = patients.first { it.optString("id") == patientId }
         check(patient.optString("cloudOwner", owner) == owner) { "Patient belongs to another account" }
         check(!patient.has("operationId")) { "Resolve the pending submission before attaching images" }
-        val encoded = withContext(Dispatchers.IO) { ImageCompressor.encode(context, uri) }
-        val bytes = encoded.bytes
-        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-        val path = "workspaces/$owner/patients/$patientId/$hash.${encoded.extension}"
-        if (patient.array("images").objects().none { it.optString("path") == path }) {
-            val reference = FirebaseStorage.getInstance().reference.child(path)
-            try { reference.metadata.await() } catch (e: com.google.firebase.storage.StorageException) {
-                if (e.errorCode != com.google.firebase.storage.StorageException.ERROR_OBJECT_NOT_FOUND) throw e
-                reference.putBytes(bytes, com.google.firebase.storage.StorageMetadata.Builder().setContentType(encoded.mimeType).build()).await()
-            }
-            // Store private gs:// reference, not a permanent public download token.
-            val copy = JSONObject(patient.toString())
-            copy.array("images").put(JSONObject().put("path", path).put("reference", reference.toString()).put("bytes", bytes.size)
-                .put("width", encoded.width).put("height", encoded.height).put("format", encoded.extension).put("at", System.currentTimeMillis()))
+        // Dental Cloud SDK: lossless on this device (<= 512 KB), stored once per content hash in
+        // Firebase Storage; the gs:// link and path are kept in this patient's own document.
+        val link = ClinicCloud.sdk.images.upload(context, owner, patientId, uri)
+        if (patient.array("images").objects().none { it.optString("path") == link.path }) {
+            val copy = ClinicCloud.sdk.images.attach(patient, link)
             copy.put("dirty", true)
             copy.remove("operationId")
             copy.array("history").put(JSONObject().put("id", uid()).put("at", System.currentTimeMillis()).put("text", "Clinical image attached"))
-            val next = patients.map { if (it.optString("id") == patientId) copy else it }
             check(copy.toString().toByteArray().size <= 650_000) { "Patient document is full; export/archive before attaching more images." }
+            val next = patients.map { if (it.optString("id") == patientId) copy else it }
             persist(next); patients = next
         }
-        message = "Image uploaded (${bytes.size / 1024} KB, lossless ${encoded.extension.uppercase()}${if (encoded.resized) ", resized to ${encoded.width}×${encoded.height} to fit 512 KB" else ""}). Sync to save it to the patient record."
+        message = "Image uploaded (${link.bytes / 1024} KB, lossless ${link.format.uppercase()}${if (link.resized) ", resized to ${link.width}×${link.height} to fit 512 KB" else ""}). Sync to save it to the patient record."
     }
     suspend fun google(context: Context, clientId: String) {
         check(BuildConfig.GOOGLE_LOGIN_ENABLED) { "Google login is disabled for this release" }

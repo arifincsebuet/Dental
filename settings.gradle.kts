@@ -24,4 +24,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "Dental"
 include(":app")
+// Dental Cloud SDK (Firebase data layer), shareable with other clinic systems.
+include(":dentalcloud")
  

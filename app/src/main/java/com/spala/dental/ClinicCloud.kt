@@ -43,6 +43,11 @@ object ClinicCloud {
     class Conflict(message: String) : Exception(message)
 
     private val db: FirebaseFirestore get() = FirebaseFirestore.getInstance()
+    /** Patient documents and images go through the shared Dental Cloud SDK (:dentalcloud). */
+    val sdk by lazy {
+        com.spala.dental.cloud.DentalCloud(db, options = com.spala.dental.cloud.DentalCloud.Options(maxDocBytes = MAX_BYTES, localFields = LOCAL_FIELDS,
+            conflictMessage = { "${it.optString("name")} was changed on another device or by the patient. Use Review conflict to keep your draft and load the cloud version." }))
+    }
     fun clinicRef(clinicId: String): DocumentReference = db.document("workspaces/$clinicId")
     fun publicRef(clinicId: String): DocumentReference = db.document("workspaces/$clinicId/public/info")
     fun patientRef(clinicId: String, patientId: String): DocumentReference = db.document("workspaces/$clinicId/patients/$patientId")
@@ -51,21 +56,10 @@ object ClinicCloud {
     // JSON <-> Firestore
     // --------------------------------------------------------------------------------------
 
-    fun toMap(json: JSONObject): Map<String, Any?> = json.keys().asSequence().associateWith { key -> toValue(json.get(key)) }
-    private fun toValue(value: Any?): Any? = when (value) {
-        JSONObject.NULL, null -> null
-        is JSONObject -> toMap(value)
-        is JSONArray -> (0 until value.length()).map { toValue(value.get(it)) }
-        else -> value
-    }
-    fun fromValue(value: Any?): Any? = when (value) {
-        null -> JSONObject.NULL
-        is Timestamp -> value.toDate().time
-        is Map<*, *> -> JSONObject().also { out -> value.forEach { (k, v) -> out.put(k.toString(), fromValue(v)) } }
-        is List<*> -> JSONArray().also { out -> value.forEach { out.put(fromValue(it)) } }
-        else -> value
-    }
-    fun fromDoc(snapshot: DocumentSnapshot): JSONObject = (fromValue(snapshot.data ?: emptyMap<String, Any>()) as JSONObject)
+    fun toMap(json: JSONObject): Map<String, Any?> = com.spala.dental.cloud.DocCodec.toMap(json)
+    private fun toValue(value: Any?): Any? = com.spala.dental.cloud.DocCodec.toValue(value)
+    fun fromValue(value: Any?): Any? = com.spala.dental.cloud.DocCodec.fromValue(value)
+    fun fromDoc(snapshot: DocumentSnapshot): JSONObject = com.spala.dental.cloud.DocCodec.fromDoc(snapshot)
 
     // --------------------------------------------------------------------------------------
     // Clinic
@@ -205,40 +199,18 @@ object ClinicCloud {
     // Patients (staff)
     // --------------------------------------------------------------------------------------
 
-    /** Writes one patient document if nobody else changed it since [patient]'s remoteVersion. */
-    suspend fun commitPatient(clinicId: String, uid: String, patient: JSONObject): JSONObject =
-        db.runTransaction { tx ->
-            val ref = patientRef(clinicId, patient.getString("id"))
-            val snap = tx.get(ref)
-            val serverRevision = snap.getLong("revision") ?: 0L
-            if (serverRevision != patient.optLong("remoteVersion"))
-                throw Conflict("${patient.optString("name")} was changed on another device or by the patient. Use Review conflict to keep your draft and load the cloud version.")
-            val doc = JSONObject(patient.toString())
-            LOCAL_FIELDS.forEach { doc.remove(it) }
-            // The patient login is managed separately; always keep the cloud's copy.
-            doc.remove("portal")
-            (fromValue(snap.get("portal")) as? JSONObject)?.let { doc.put("portal", it) }
-            doc.put("revision", serverRevision + 1).put("clinicId", clinicId).put("updatedBy", uid)
-            check(doc.toString().toByteArray().size <= MAX_BYTES) { "Patient document is full. Export and archive older history first." }
-            tx.set(ref, toMap(doc) + ("syncedAt" to FieldValue.serverTimestamp()))
-            doc
-        }.await()
-
-    /** All patients, or only those changed after [since] (server time, ms). Returns records and the newest change time. */
-    suspend fun listPatients(clinicId: String, since: Long?): Pair<List<JSONObject>, Long> {
-        var query: com.google.firebase.firestore.Query = db.collection("workspaces/$clinicId/patients")
-        if (since != null) query = query.whereGreaterThan("syncedAt", Timestamp(java.util.Date(since)))
-        val docs = query.get().await().documents
-        var newest = 0L
-        val records = docs.map { snap ->
-            (snap.getTimestamp("syncedAt")?.toDate()?.time ?: 0L).let { if (it > newest) newest = it }
-            fromDoc(snap).also { doc -> doc.remove("syncedAt"); doc.remove("patientDevices") }
-        }
-        return records to newest
+    /** Writes one patient document if nobody else changed it since [patient]'s remoteVersion (via the SDK). */
+    suspend fun commitPatient(clinicId: String, uid: String, patient: JSONObject): JSONObject = try {
+        sdk.records.commit(clinicId, uid, patient)
+    } catch (e: Exception) {
+        val conflict = e as? com.spala.dental.cloud.DentalCloud.Conflict ?: e.cause as? com.spala.dental.cloud.DentalCloud.Conflict
+        throw if (conflict != null) Conflict(conflict.message.orEmpty()) else e
     }
 
-    suspend fun getPatient(clinicId: String, patientId: String): JSONObject? =
-        patientRef(clinicId, patientId).get().await().takeIf { it.exists() }?.let { fromDoc(it).also { doc -> doc.remove("syncedAt"); doc.remove("patientDevices") } }
+    /** All patients, or only those changed after [since] (server time, ms). Returns records and the newest change time. */
+    suspend fun listPatients(clinicId: String, since: Long?): Pair<List<JSONObject>, Long> = sdk.records.listSince(clinicId, since)
+
+    suspend fun getPatient(clinicId: String, patientId: String): JSONObject? = sdk.records.get(clinicId, patientId)
 
     /**
      * Busy times for patient booking (no names). Rebuilt from the staff device's patients after a

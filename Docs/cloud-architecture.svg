@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 860" width="1280" height="860" font-family="Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#334155"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#B45309"/></marker>
+    <style>
+      .t{font-size:20px;font-weight:700;fill:#0F172A}
+      .h{font-size:15px;font-weight:700;fill:#0F172A}
+      .s{font-size:12.5px;fill:#334155}
+      .m{font-size:11.5px;fill:#475569;font-family:Consolas, "JetBrains Mono", monospace}
+      .w{font-size:12px;font-weight:700;fill:#FFFFFF}
+      .l{font-size:12px;fill:#334155}
+      .lb{font-size:12px;fill:#B45309;font-weight:600}
+    </style>
+  </defs>
+  <rect width="1280" height="860" fill="#FFFFFF"/>
+  <text x="32" y="40" class="t">Dental Care: app ↔ Firebase (Firestore + Storage) through the Dental Cloud SDK</text>
+  <text x="32" y="62" class="s">One Firestore document per patient. Lists and JSON live inside the document. Images are compressed losslessly on the device and stored once per content hash.</text>
+
+  <!-- Clients -->
+  <g>
+    <rect x="32" y="92" width="230" height="560" rx="16" fill="#F1F5F9" stroke="#CBD5E1"/>
+    <text x="48" y="118" class="h">Apps</text>
+    <rect x="48" y="134" width="198" height="92" rx="12" fill="#FFFFFF" stroke="#94A3B8"/>
+    <text x="62" y="158" class="h">Android app</text>
+    <text x="62" y="178" class="s">Kotlin, Jetpack Compose</text>
+    <text x="62" y="196" class="s">Encrypted local copy, offline</text>
+    <text x="62" y="214" class="s">uses :dentalcloud module</text>
+    <rect x="48" y="240" width="198" height="92" rx="12" fill="#FFFFFF" stroke="#94A3B8"/>
+    <text x="62" y="264" class="h">Web app (PC)</text>
+    <text x="62" y="284" class="s">Firebase Hosting, ES modules</text>
+    <text x="62" y="302" class="s">IndexedDB offline cache</text>
+    <text x="62" y="320" class="s">uses sdk/dental-cloud.js</text>
+    <rect x="48" y="346" width="198" height="76" rx="12" fill="#FFFFFF" stroke="#94A3B8"/>
+    <text x="62" y="370" class="h">Patient app</text>
+    <text x="62" y="390" class="s">Patient ID + password</text>
+    <text x="62" y="408" class="s">reads its own portal copy</text>
+    <rect x="48" y="436" width="198" height="200" rx="12" fill="#FFFBEB" stroke="#F59E0B" stroke-dasharray="6 4"/>
+    <text x="62" y="460" class="h">Your existing system</text>
+    <text x="62" y="480" class="s">Add the SDK as a library:</text>
+    <text x="62" y="500" class="m">implementation(</text>
+    <text x="62" y="516" class="m"> project(":dentalcloud"))</text>
+    <text x="62" y="538" class="s">or on the web:</text>
+    <text x="62" y="558" class="m">import { createDentalCloud }</text>
+    <text x="62" y="574" class="m"> from "./sdk/dental-cloud.js"</text>
+    <text x="62" y="598" class="s">Pass your own Firebase</text>
+    <text x="62" y="616" class="s">instances and paths</text>
+  </g>
+
+  <!-- SDK -->
+  <g>
+    <rect x="300" y="92" width="300" height="560" rx="16" fill="#F0FDFA" stroke="#0F766E" stroke-width="1.5"/>
+    <rect x="300" y="92" width="300" height="40" rx="16" fill="#0F766E"/>
+    <rect x="300" y="116" width="300" height="16" fill="#0F766E"/>
+    <text x="318" y="118" class="w" font-size="14">Dental Cloud SDK 1.0 · Android + Web</text>
+    <text x="318" y="160" class="h">records</text>
+    <text x="318" y="180" class="m">commit(clinicId, uid, record)</text>
+    <text x="330" y="196" class="s">transaction: 1 read + 1 write,</text>
+    <text x="330" y="212" class="s">revision check → Conflict</text>
+    <text x="318" y="234" class="m">listSince(clinicId, lastSync)</text>
+    <text x="330" y="250" class="s">reads only changed documents</text>
+    <text x="318" y="272" class="m">get(clinicId, id)</text>
+
+    <text x="318" y="310" class="h">images</text>
+    <rect x="318" y="322" width="264" height="150" rx="10" fill="#FFFFFF" stroke="#99F6E4"/>
+    <text x="332" y="344" class="s" font-weight="700">On the device, before upload</text>
+    <text x="332" y="364" class="s">1. encodeLossless: WebP lossless</text>
+    <text x="346" y="380" class="s">or PNG, the smaller (exact pixels)</text>
+    <text x="332" y="400" class="s">2. Over 512 KB? scale down in steps,</text>
+    <text x="346" y="416" class="s">still lossless, until ≤ 512 KB</text>
+    <text x="332" y="436" class="s">3. SHA-256 of the bytes = file name</text>
+    <text x="332" y="456" class="s">4. upload once (1 metadata check)</text>
+    <text x="318" y="494" class="m">upload(clinicId, id, image) → link</text>
+    <text x="318" y="514" class="m">attach(record, link)</text>
+    <text x="330" y="530" class="s">adds the link to record.images[]</text>
+    <text x="318" y="552" class="m">download(path) / url(path)</text>
+
+    <text x="318" y="590" class="h">paths, options</text>
+    <text x="330" y="610" class="s">root "workspaces", records "patients",</text>
+    <text x="330" y="626" class="s">maxDocBytes 750 KB, maxImage 512 KB</text>
+  </g>
+
+  <!-- client -> SDK arrows -->
+  <path d="M246 180 H298" stroke="#334155" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+  <path d="M246 286 H298" stroke="#334155" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+  <path d="M246 536 H298" stroke="#B45309" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#b)"/>
+
+  <!-- Firestore -->
+  <g>
+    <rect x="660" y="92" width="588" height="436" rx="16" fill="#FFF7ED" stroke="#FB923C"/>
+    <text x="680" y="120" class="h">Cloud Firestore</text>
+    <text x="820" y="120" class="s">documents per clinic = 2 + one per patient (+ 1 per patient-app login)</text>
+
+    <rect x="680" y="134" width="548" height="78" rx="10" fill="#FFFFFF" stroke="#FDBA74"/>
+    <text x="694" y="156" class="m" font-weight="700">workspaces/{clinicId}</text>
+    <text x="910" y="156" class="s">1 doc per clinic</text>
+    <text x="694" y="176" class="s">config { name, logo, address, mapUrl, brandColor, currency, staff[], services[],</text>
+    <text x="694" y="194" class="s">availability[], members{} }, revision, invites{}, inviteEmails[], subscription</text>
+
+    <rect x="680" y="222" width="548" height="58" rx="10" fill="#FFFFFF" stroke="#FDBA74"/>
+    <text x="694" y="244" class="m" font-weight="700">workspaces/{clinicId}/public/info</text>
+    <text x="960" y="244" class="s">1 doc, no patient data</text>
+    <text x="694" y="264" class="s">name, logo, address, map, time zone, currency, availability[], busy[]</text>
+
+    <rect x="680" y="290" width="548" height="150" rx="10" fill="#FFFFFF" stroke="#EA580C" stroke-width="2"/>
+    <text x="694" y="312" class="m" font-weight="700">workspaces/{clinicId}/patients/{patientId}</text>
+    <text x="1030" y="312" class="lb">1 doc per patient</text>
+    <text x="694" y="334" class="s">profile: name, phone, dob, gender, address, allergies, consent</text>
+    <text x="694" y="352" class="s">chart { dentition, teeth { "16": {surfaces, findings[], restorations[]} } }</text>
+    <text x="694" y="370" class="s">treatments[], performed[], encounters[], appointments[], invoices[ {lines[], payments[]} ]</text>
+    <text x="694" y="388" class="s">history[] (who changed what), portal { loginId } , revision, syncedAt</text>
+    <rect x="690" y="398" width="528" height="34" rx="8" fill="#FEF3C7"/>
+    <text x="700" y="420" class="m">images[ { path, reference "gs://…/{sha256}.webp", sha256, bytes, w, h } ]</text>
+
+    <rect x="680" y="450" width="548" height="64" rx="10" fill="#FFFFFF" stroke="#FDBA74" stroke-dasharray="6 4"/>
+    <text x="694" y="472" class="m" font-weight="700">portals/{sha256(loginId:password)}</text>
+    <text x="984" y="472" class="s">optional, only with a login</text>
+    <text x="694" y="492" class="s">read-only copy for the patient app (no staff notes) + requests[] (book / cancel)</text>
+    <text x="694" y="508" class="s">needed because patients have no Firebase account; rules hide the staff document</text>
+  </g>
+
+  <!-- Storage -->
+  <g>
+    <rect x="660" y="548" width="588" height="104" rx="16" fill="#EFF6FF" stroke="#60A5FA"/>
+    <text x="680" y="576" class="h">Firebase Storage</text>
+    <text x="680" y="600" class="m">workspaces/{clinicId}/patients/{patientId}/{sha256}.webp | .png</text>
+    <text x="680" y="622" class="s">≤ 512 KB (rule-enforced), lossless PNG / WebP only, immutable, each image stored once</text>
+    <text x="680" y="640" class="s">read only by clinic staff with clinical access (Storage rules check the clinic document)</text>
+  </g>
+
+  <!-- SDK -> cloud arrows -->
+  <path d="M600 196 H658" stroke="#334155" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+  <text x="604" y="188" class="l">save</text>
+  <path d="M600 250 C630 250 630 360 678 360" stroke="#334155" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+  <text x="604" y="268" class="l">sync</text>
+  <path d="M582 456 C630 456 630 600 658 600" stroke="#1D4ED8" stroke-width="1.6" fill="none" marker-end="url(#a)"/>
+  <text x="606" y="520" class="l" fill="#1D4ED8">upload</text>
+  <path d="M1238 560 V430 H1220" stroke="#B45309" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#b)"/>
+  <text x="1160" y="540" class="lb">link saved</text>
+  <text x="1160" y="554" class="lb">in the doc</text>
+
+  <!-- Cost notes -->
+  <g>
+    <rect x="32" y="676" width="1216" height="160" rx="16" fill="#F8FAFC" stroke="#CBD5E1"/>
+    <text x="52" y="704" class="h">How cloud calls and cost are kept low</text>
+    <text x="52" y="730" class="s">• Save a patient: 1 read + 1 write (transaction), whatever was changed (chart, treatment, payment, image link, appointment).</text>
+    <text x="52" y="752" class="s">• Sync: one query for documents changed since the last sync (syncedAt &gt; last). 1,000 patients and 5 changes = about 5 reads, not 1,000.</text>
+    <text x="52" y="774" class="s">• Offline cache on both apps: opening a patient costs no read. No sub-collections, no per-treatment or per-image documents, no Cloud Functions.</text>
+    <text x="52" y="796" class="s">• Images: lossless and ≤ 512 KB before upload; content-hash name means a re-attached image is never uploaded twice; download URLs cached per session.</text>
+    <text x="52" y="818" class="s">• Patient booking reads one public/info document (slots and busy times) instead of patient documents. A patient document stays under 750 KB (Firestore limit 1 MiB).</text>
+  </g>
+</svg>

@@ -4,6 +4,7 @@
 import { clone, uid, arr, sha256Hex } from "./util.js";
 import * as D from "./domain.js";
 import { firebaseBackend, demoBackend, Conflict } from "./cloud.js";
+import { encodeLossless } from "../sdk/dental-cloud.js";
 import { demoSeed } from "./demo.js";
 
 const listeners = new Set();
@@ -288,27 +289,16 @@ export async function removePatientLogin(pid) {
 
 // ------------------------------------------------------------------- images (lossless, ≤ 512 KB)
 export async function attachImage(pid, file) {
-  const img = await createImageBitmap(file);
-  let w = img.width, h = img.height, blob = null, ext = "png";
-  for (let i = 0; i < 8; i++) {
-    const c = document.createElement("canvas"); c.width = w; c.height = h;
-    c.getContext("2d").drawImage(img, 0, 0, w, h);
-    const png = await new Promise((r) => c.toBlob(r, "image/png"));
-    const webp = await new Promise((r) => c.toBlob(r, "image/webp", 1));
-    const best = webp && webp.type === "image/webp" && webp.size < png.size ? webp : png;
-    if (best.size <= 512 * 1024) { blob = best; ext = best.type === "image/webp" ? "webp" : "png"; break; }
-    w = Math.round(w * 0.8); h = Math.round(h * 0.8);
-  }
-  if (!blob) throw new Error("This image is too large to store within 512 KB");
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const hash = await sha256Hex(bytes);
-  const { path, reference } = await S.backend.uploadImage(S.clinicId, pid, bytes, ext, hash);
-  const copy = clone(patient(pid));
-  if (!(copy.images || []).some((x) => x.path === path)) {
-    arr(copy, "images").push({ path, reference, bytes: bytes.length, width: w, height: h, format: ext, at: Date.now() });
-    return save(copy, `Clinical image attached (${Math.round(bytes.length / 1024)} KB, lossless ${ext.toUpperCase()}${w !== img.width ? `, resized to ${w}×${h}` : ""})`);
-  }
-  return null;
+  // Lossless on this device (WebP verified pixel-exact, else PNG), <= 512 KB, then Storage; the
+  // gs:// link and path are saved in the patient's own document (images list).
+  const encoded = await encodeLossless(file);
+  const ref = await S.backend.uploadImage(S.clinicId, pid, encoded);
+  const current = patient(pid);
+  if ((current.images || []).some((x) => x.path === ref.path)) return null;
+  const { resized, ...link } = ref;
+  const copy = clone(current);
+  arr(copy, "images").push(link);
+  return save(copy, `Clinical image attached (${Math.round(link.bytes / 1024)} KB, lossless ${link.format.toUpperCase()}${resized ? `, resized to ${link.width}×${link.height}` : ""})`);
 }
 
 export async function signIn() { try { S.sessionError = ""; await S.backend.signInGoogle(); } catch (e) { S.sessionError = friendly(e); emit(); } }

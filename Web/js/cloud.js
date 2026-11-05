@@ -8,7 +8,8 @@ const SDK = "https://www.gstatic.com/firebasejs/11.0.2/";
 const MAX_BYTES = 750000;
 const LOCAL_FIELDS = ["dirty", "operationId", "remoteVersion", "cloudOwner", "retainedAt", "syncedAt", "patientDevices"];
 
-export class Conflict extends Error {}
+import { createDentalCloud, Conflict, sha256Hex } from "../sdk/dental-cloud.js";
+export { Conflict };
 
 export function staffInvites(config) {
   const invites = {};
@@ -84,6 +85,8 @@ export async function firebaseBackend(cfg) {
     db = fsM.initializeFirestore(app, { ignoreUndefinedProperties: true, localCache: fsM.persistentLocalCache({ tabManager: fsM.persistentMultipleTabManager() }) });
   } catch { db = fsM.getFirestore(app); }
   const storage = stM.getStorage(app);
+  // Patient documents and clinical images go through the shared Dental Cloud SDK (sdk/).
+  const sdk = createDentalCloud({ db, storage, fs: fsM, st: stM, options: { conflictMessage: (p) => `${p.name} was changed on another device or by the patient. Use Review conflict to keep your draft and load the cloud version.` } });
   const { doc, collection, getDoc, getDocs, query, where, limit, runTransaction, serverTimestamp, setDoc, updateDoc, deleteField, arrayUnion, arrayRemove, Timestamp } = fsM;
 
   const fromValue = (v) => {
@@ -172,39 +175,9 @@ export async function firebaseBackend(cfg) {
         return { config: next, revision, subscription, complimentary };
       });
     },
-    async commitPatient(clinicId, me, patient) {
-      return runTransaction(db, async (tx) => {
-        const ref = patientRef(clinicId, patient.id);
-        const snap = await tx.get(ref);
-        const serverRevision = snap.exists() ? snap.get("revision") || 0 : 0;
-        if (serverRevision !== (patient.remoteVersion || 0)) throw new Conflict(`${patient.name} was changed on another device or by the patient. Use Review conflict to keep your draft and load the cloud version.`);
-        const d = stripLocal(patient);
-        delete d.portal;
-        const portal = snap.exists() ? snap.get("portal") : null;
-        if (portal) d.portal = fromValue(portal);
-        Object.assign(d, { revision: serverRevision + 1, clinicId, updatedBy: me });
-        if (new TextEncoder().encode(JSON.stringify(d)).length > MAX_BYTES) throw new Error("Patient document is full. Export and archive older history first.");
-        tx.set(ref, { ...d, syncedAt: serverTimestamp() });
-        return d;
-      });
-    },
-    async listPatients(clinicId, since) {
-      let q = collection(db, "workspaces", clinicId, "patients");
-      if (since) q = query(q, where("syncedAt", ">", Timestamp.fromMillis(since)));
-      const snaps = await getDocs(q);
-      let newest = 0;
-      const records = snaps.docs.map((s) => {
-        const t = s.get("syncedAt");
-        if (t?.toMillis && t.toMillis() > newest) newest = t.toMillis();
-        const d = data(s); delete d.syncedAt; delete d.patientDevices; return d;
-      });
-      return { records, newest };
-    },
-    async getPatient(clinicId, id) {
-      const s = await getDoc(patientRef(clinicId, id));
-      if (!s.exists()) return null;
-      const d = data(s); delete d.syncedAt; delete d.patientDevices; return d;
-    },
+    commitPatient: (clinicId, me, patient) => sdk.records.commit(clinicId, me, patient),
+    listPatients: (clinicId, since) => sdk.records.listSince(clinicId, since),
+    getPatient: (clinicId, id) => sdk.records.get(clinicId, id),
     publishBusy: (clinicId, busy) => setDoc(publicRef(clinicId), { busy }, { merge: true }),
 
     async createPatientLogin(clinicId, me, patient, config, id, key) {
@@ -283,16 +256,8 @@ export async function firebaseBackend(cfg) {
         if (busy.some((m) => m.s === c.busy.s && m.e === c.busy.e && m.d === c.busy.d)) tx.update(publicRef(portal.clinicId), { busy: arrayRemove(c.busy), lastPortal: key });
       });
     },
-    async uploadImage(clinicId, patientId, bytes, ext, hash) {
-      const path = `workspaces/${clinicId}/patients/${patientId}/${hash}.${ext}`;
-      const ref = stM.ref(storage, path);
-      try { await stM.getMetadata(ref); } catch (e) {
-        if (e.code !== "storage/object-not-found") throw e;
-        await stM.uploadBytes(ref, bytes, { contentType: ext === "png" ? "image/png" : "image/webp" });
-      }
-      return { path, reference: `gs://${ref.bucket}/${path}` };
-    },
-    imageUrl: (path) => stM.getDownloadURL(stM.ref(storage, path)),
+    uploadImage: (clinicId, patientId, encoded) => sdk.images.upload(clinicId, patientId, encoded),
+    imageUrl: (path) => sdk.images.url(path),
   };
 }
 
@@ -391,12 +356,13 @@ export function demoBackend(seed) {
       db.public.busy = (db.public.busy || []).filter((m) => !(m.s === c.busy.s && m.e === c.busy.e && m.d === c.busy.d));
       persist();
     },
-    async uploadImage(clinicId, patientId, bytes, ext, hash) {
+    async uploadImage(clinicId, patientId, encoded) {
+      const { bytes, ext } = encoded, hash = await sha256Hex(bytes);
       const path = `workspaces/${clinicId}/patients/${patientId}/${hash}.${ext}`;
       const reader = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(new Blob([bytes], { type: ext === "png" ? "image/png" : "image/webp" })); });
       (db.images ||= {})[path] = reader;
       persist();
-      return { path, reference: `gs://demo/${path}` };
+      return { path, reference: `gs://demo/${path}`, sha256: hash, bytes: bytes.length, width: encoded.width, height: encoded.height, format: ext, resized: encoded.resized, at: Date.now() };
     },
     async imageUrl(path) { return db.images?.[path] || ""; },
   };

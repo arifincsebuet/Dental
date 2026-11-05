@@ -29,6 +29,7 @@
 | **Clinic branding** | Owner / admin set the clinic name, logo, address, phone, Google Maps location and brand colour (Settings › Clinic branding). The app then shows the clinic everywhere: launch screen, sidebar / toolbar, sign-in, browser tab and icon, patient app (with a **Find us** map, directions and call button) and every PDF (logo + address header, faint logo and name watermark). Same settings on Android and web |
 | **Languages** | 17 languages: English (default), Bangla, Hindi, Arabic, Chinese (Simplified), Spanish, French, Portuguese (Brazil), German, Russian, Japanese, Korean, Indonesian, Turkish, Italian, Vietnamese, Thai. Chosen per device in Settings, on the sign-in page and in the patient app. One shared dictionary (`Web/i18n/*.json` = `app/src/main/assets/i18n/*.json`) |
 | **Currency** | 33 common currencies with local names (BDT, INR, USD, EUR, GBP, JPY, KRW, SAR, AED…); invoices keep the currency they were issued in |
+| **Dental Cloud SDK** | The Firebase layer is a library: Android module `dentalcloud` and `Web/sdk/dental-cloud.js`, same API (records.commit / listSince / get, images.upload / attach / url). One Firestore document per patient; images lossless and ≤ 512 KB, stored once per SHA-256, link kept in the patient document. Diagram: `Docs/cloud-architecture.svg` |
 | How to use | All Android guides, adapted for the web, plus 3D lens and multi-select guides |
 
 ## 2. Made for the big screen
