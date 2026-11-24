@@ -19,6 +19,7 @@ exported for the browser (`godot/`, built from `godot-src/`).
 | `js/viewer3d.js` | Connects the page to the Godot 3D chart |
 | `sdk/dental-cloud.js` | **Dental Cloud SDK** (web): one Firestore document per patient, lossless images in Storage. Same API as the Android `dentalcloud` module; see `sdk/README.md` |
 | `js/i18n.js`, `i18n/` | Languages. `i18n/<code>.json` maps the English text to each language (same files as the Android app's `assets/i18n`). To add or fix a translation, edit the JSON in both places |
+| `js/inventory.js`, `inventory/catalog.json` | Inventory (stock, expiry, materials per treatment). The catalog stays in the app; the cloud holds one stock document per clinic. Same catalog file as the Android app's `assets/inventory/catalog.json` |
 | `js/brand.js` | Clinic branding (logo, colour, map) applied to the whole app |
 | `js/reports.js`, `vendor/` | PDF reports (jsPDF 2.5.1 + AutoTable 3.8.2, bundled so no CDN is needed) |
 | `godot/` | Godot 4.5.1 web export of the 3D chart (do not edit by hand). The engine file `index.wasm` (38 MB) is delivered as `index.wasm.part1` + `.part2`; `deploy.bat web` joins them, or double-click `godot/join-wasm.bat` |

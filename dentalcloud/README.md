@@ -1,4 +1,4 @@
-# Dental Cloud SDK (Android) 1.0
+# Dental Cloud SDK (Android) 1.1
 
 Firebase data layer of Dental Care, packaged as a library module so other clinic systems can use
 it. The web version with the same API is `Web/sdk/dental-cloud.js`. Diagram: `Docs/cloud-architecture.svg`.
@@ -35,7 +35,13 @@ cloud.records.commit(clinicId, uid, updated)
 cloud.images.download(link.path)                                     // bytes for display
 
 cloud.paths.record(clinicId, id); LosslessImage.encode(context, uri); DocCodec.toMap(json)
+
+// Inventory: one document per clinic, operations merged in a transaction (1 read + 1 write)
+val stock = cloud.inventory.get(clinicId)
+cloud.inventory.apply(clinicId, uid, JSONArray().put(JSONObject().put("op", "use").put("id", itemId).put("qty", 1).put("ref", treatmentId)), opId)
+InventoryCore.status(item, today); InventoryCore.summary(stock, today); InventoryCore.materialsFor(stock, templates, "Root canal")
 ```
+The inventory document shape and operations are the same as on the web (see `Web/sdk/README.md`).
 Records are `org.json.JSONObject` with an `id`; `remoteVersion` holds the revision last loaded.
 
 ## Options

@@ -173,8 +173,10 @@ class PdfReport(title: String, private val subtitle: String, private val config:
             canvas.drawRoundRect(RectF(x, y, x + tile, y + 44f), 6f, 6f, fill(Color.rgb(248, 250, 252)))
             canvas.drawRoundRect(RectF(x, y, x + tile, y + 44f), 6f, 6f, stroke(LINE))
             canvas.drawText(I18n.tr(label), x + 8f, y + 14f, paint(7.5f, MUTED, true))
-            val vp = paint(if (value.length > 14) 10f else 13f, color, true)
-            canvas.drawText(wrap(value, vp, tile - 14f).firstOrNull() ?: value, x + 8f, y + 33f, vp)
+            var size = 13f
+            var vp = paint(size, color, true)
+            while (size > 7f && vp.measureText(value) > tile - 14f) { size -= 0.5f; vp = paint(size, color, true) }
+            canvas.drawText(value, x + 8f, y + 33f, vp)
         }
         y += 52f
     }

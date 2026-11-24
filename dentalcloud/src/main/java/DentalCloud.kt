@@ -18,7 +18,7 @@ import org.json.JSONObject
 import java.security.MessageDigest
 
 /*
- * Dental Cloud SDK (Android) v1.0
+ * Dental Cloud SDK (Android) v1.1
  *
  * Reusable Firebase data layer for clinic software, shared with the web SDK (Web/sdk/dental-cloud.js):
  *   - ONE Firestore document per patient: profile, chart, treatments, appointments, invoices,
@@ -37,6 +37,7 @@ import java.security.MessageDigest
  *   val (changed, newest) = cloud.records.listSince(clinicId, lastSync)
  *   val link = cloud.images.upload(context, clinicId, patientId, uri)
  *   cloud.records.commit(clinicId, uid, cloud.images.attach(patient, link))
+ *   val stock = cloud.inventory.apply(clinicId, uid, JSONArray().put(JSONObject().put("op", "use").put("id", itemId).put("qty", 1)), opId)
  */
 class DentalCloud(
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance(),
@@ -57,11 +58,12 @@ class DentalCloud(
     /** The record changed on another device since it was loaded (optimistic concurrency). */
     class Conflict(message: String) : Exception(message)
 
-    companion object { const val VERSION = "1.0.0" }
+    companion object { const val VERSION = "1.1.0" }
 
     val paths = Paths(options)
     val records = Records()
     val images = Images()
+    val inventory = Inventory()
 
     class Paths(private val o: Options) {
         fun clinic(clinicId: String) = "${o.root}/$clinicId"
@@ -69,6 +71,33 @@ class DentalCloud(
         fun records(clinicId: String) = "${o.root}/$clinicId/${o.records}"
         fun record(clinicId: String, id: String) = "${o.root}/$clinicId/${o.records}/$id"
         fun image(clinicId: String, id: String, sha256: String, ext: String) = "${o.root}/$clinicId/${o.records}/$id/$sha256.$ext"
+        fun inventory(clinicId: String) = "${o.root}/$clinicId/inventory/main"
+    }
+
+    /** The clinic's stock: ONE document per clinic (see [InventoryCore] for its shape). */
+    inner class Inventory {
+        /** Whole inventory, 1 read. Empty inventory when the clinic has none yet. */
+        suspend fun get(clinicId: String): JSONObject {
+            val snap = db.document(paths.inventory(clinicId)).get().await()
+            return if (snap.exists()) DocCodec.fromDoc(snap).also { it.remove("updatedAt") } else InventoryCore.empty()
+        }
+
+        /**
+         * Applies stock operations in a transaction (1 read + 1 write) so changes made on several
+         * devices merge. [opId] makes a retried call safe (applied once).
+         */
+        suspend fun apply(clinicId: String, uid: String, ops: JSONArray, opId: String = ""): JSONObject = db.runTransaction { tx ->
+            val ref = db.document(paths.inventory(clinicId))
+            val snap = tx.get(ref)
+            val cur = if (snap.exists()) DocCodec.fromDoc(snap).also { it.remove("updatedAt") } else InventoryCore.empty()
+            val done = cur.optJSONArray("done")
+            if (opId.isNotEmpty() && done != null && (0 until done.length()).any { done.optString(it) == opId }) return@runTransaction cur
+            val next = InventoryCore.applyOps(cur, ops, opId, uid)
+            next.put("rev", cur.optLong("rev") + 1).put("clinicId", clinicId).put("updatedBy", uid)
+            check(next.toString().toByteArray().size <= options.maxDocBytes) { "The inventory document is full. Remove unused items." }
+            tx.set(ref, DocCodec.toMap(next) + ("updatedAt" to FieldValue.serverTimestamp()))
+            next
+        }.await()
     }
 
     inner class Records {

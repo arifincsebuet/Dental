@@ -2,6 +2,7 @@
 import { uid, zonedMs, todayIn, addDaysIso, dowOf, hm } from "./util.js";
 import { publicInfo } from "./cloud.js";
 import { QUADRANT_ORDER, busyTimes, normalizeChart } from "./domain.js";
+import { applyOps, emptyInventory } from "../sdk/inventory-core.js";
 
 const TZ = "Asia/Dhaka";
 let s = 11;
@@ -124,7 +125,7 @@ export function demoSeed() {
   const pub = publicInfo(config);
   pub.busy = busyTimes(Object.values(patients), config);
   return { ownerId, clinic: { config, revision: 3, subscription: { active: true, expiresAt: Date.now() + 25 * 86400000, tier: 1, productId: "dental_care_pro" }, complimentary: false },
-    public: pub, patients, portals: {}, clock: Date.now() };
+    public: pub, patients, portals: {}, inventory: demoInventory(), clock: Date.now() };
 }
 function toMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
 function addTreatment(p, tooth, procedure, status, doctor, atMs, feeTk, payments, notes = "", surfaces = []) {
@@ -151,4 +152,43 @@ function addTreatment(p, tooth, procedure, status, doctor, atMs, feeTk, payments
       payments: payments.map(([a, m, w]) => ({ id: uid(), amount: tk(a), method: m, reference: "", at: w, treatmentRef: id })) });
   }
   p.history.push({ id: uid(), at: atMs, text: `Treatment recorded · ${procedure} · ${status} · FDI ${tooth}` });
+}
+
+/** A starter stock list for the demo clinic (cost per unit in poisha). */
+function demoInventory() {
+  const today = todayIn(TZ), inDays = (n) => addDaysIso(today, n);
+  // [catalog id, unit, reorder level, cost Tk, stock, expiry in days or 0, batch]
+  const rows = [
+    ["restorative.composite", "syringe", 4, 850, 9, 420, "CMP-2611"], ["restorative.flowable", "syringe", 2, 700, 3, 60, "FL-0925"],
+    ["restorative.bonding", "bottle", 1, 2200, 2, 300, "BD-2603"], ["restorative.etch", "syringe", 2, 350, 5, 200, "ET-2602"],
+    ["restorative.gic", "pack", 1, 1800, 1, 500, "GC-2701"], ["restorative.amalgam", "capsule", 20, 90, 35, 700, "AM-2709"],
+    ["restorative.temp_fill", "jar", 1, 450, 2, 365, ""], ["restorative.matrix_bands", "piece", 20, 15, 60, 0, ""],
+    ["restorative.wedges", "piece", 30, 6, 150, 0, ""], ["endo.gp", "box", 2, 650, 4, 600, "GP-2805"],
+    ["endo.paper_points", "box", 2, 400, 1, 0, ""], ["endo.sealer", "tube", 1, 2500, 1, 25, "SL-2512"],
+    ["endo.naocl", "bottle", 2, 250, 6, 240, "NA-2607"], ["endo.niti", "piece", 6, 900, 12, 0, ""],
+    ["endo.irr_syringe", "piece", 20, 12, 80, 0, ""], ["endo.dam_sheets", "sheet", 20, 20, 36, 0, ""],
+    ["medicines.lidocaine", "cartridge", 50, 45, 140, 75, "LD-2602"], ["medicines.articaine", "cartridge", 30, 70, 24, 400, "AR-2701"],
+    ["medicines.topical", "tube", 1, 600, 2, -10, "TP-2511"], ["consumables.gloves", "pair", 100, 8, 640, 900, ""],
+    ["consumables.masks", "piece", 100, 5, 380, 0, ""], ["consumables.bibs", "piece", 100, 4, 90, 0, ""],
+    ["consumables.cups", "piece", 100, 2, 450, 0, ""], ["consumables.saliva_ejectors", "piece", 100, 4, 300, 0, ""],
+    ["consumables.cotton_rolls", "piece", 200, 1, 900, 0, ""], ["consumables.gauze", "piece", 100, 2, 260, 0, ""],
+    ["consumables.needles", "piece", 50, 9, 120, 500, "ND-2804"], ["consumables.microbrush", "piece", 50, 3, 40, 0, ""],
+    ["perio.prophy_paste", "jar", 1, 900, 2, 330, "PP-2610"], ["perio.prophy_cup", "piece", 20, 15, 45, 0, ""],
+    ["prostho.pvs", "cartridge", 2, 1600, 3, 150, "PV-2604"], ["prostho.crown_cement", "pack", 1, 2100, 1, 210, "CC-2606"],
+    ["consumables.pouches", "piece", 200, 3, 700, 0, ""], ["sterile.bio_ind", "piece", 5, 250, 8, 120, "BI-2603"],
+    ["equipment.chair", "piece", 0, 450000, 2, 0, ""], ["equipment.curing_light", "piece", 0, 18000, 2, 0, ""],
+    ["sterile.autoclave", "piece", 0, 120000, 1, 0, ""], ["rotary.hs_handpiece", "piece", 1, 15000, 3, 0, ""],
+  ];
+  const ops = [{ op: "supplier", id: "s1", n: "Dhaka Dental Supply", ph: "01711-550022" }, { op: "supplier", id: "s2", n: "MedPlus Distributors", ph: "01819-330011" }];
+  rows.forEach(([c, u, m, cost, q, exp, batch], i) => {
+    const id = "d" + String(i + 1).padStart(3, "0");
+    ops.push({ op: "item", id, c, u, m, p: tk(cost), s: i % 3 ? "s1" : "s2" });
+    ops.push({ op: "receive", id, qty: q, ...(exp ? { exp: inDays(exp), batch } : {}) });
+  });
+  let inv = applyOps(emptyInventory(), ops, { now: Date.now() - 40 * 86400000 });
+  // A few weeks of use so the monthly report has data.
+  const use = [["d001", 1.2], ["d017", 18], ["d020", 60], ["d021", 50], ["d025", 120], ["d003", 0.2], ["d004", 0.6], ["d013", 0.4]];
+  inv = applyOps(inv, use.map(([id, q]) => ({ op: "use", id, qty: q, ref: "" })), { now: Date.now() - 5 * 86400000 });
+  inv.rev = 1;
+  return inv;
 }

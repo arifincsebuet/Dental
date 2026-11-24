@@ -12,6 +12,7 @@ export const ACCESS = [
   ["billing", "Invoices & payments", "Create invoices, take payments, refunds"],
   ["patientLogins", "Patient app logins", "Create Patient IDs and passwords"],
   ["reports", "Reports", "Clinic reports and exports"],
+  ["inventory", "Inventory & stock", "Add stock, record use, counts, suppliers"],
   ["manageTeam", "Clinic settings, team & roles", "Add staff, change roles and access (admin)"],
 ];
 export const ROLES = ["admin", "dentist", "assistant", "receptionist", "cashier", "auditor"];
@@ -25,6 +26,7 @@ const DEFAULTS = {
   patientLogins: ["admin", "administrator", "dentist", "receptionist"],
   reports: ["admin", "administrator", "dentist", "cashier", "auditor"],
   manageTeam: ["admin", "administrator"],
+  inventory: ["admin", "administrator", "assistant", "receptionist"],
 };
 export const roleTitle = (r) => ({ admin: "Admin", administrator: "Admin", owner: "Owner" }[r] || (r ? r[0].toUpperCase() + r.slice(1) : ""));
 export const roleSummary = (r) => ({

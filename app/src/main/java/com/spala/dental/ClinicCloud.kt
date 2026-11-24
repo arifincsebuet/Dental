@@ -212,6 +212,13 @@ object ClinicCloud {
 
     suspend fun getPatient(clinicId: String, patientId: String): JSONObject? = sdk.records.get(clinicId, patientId)
 
+    /** Clinic inventory: one document, 1 read. */
+    suspend fun getInventory(clinicId: String): JSONObject = sdk.inventory.get(clinicId)
+
+    /** Stock operations merged in a transaction (1 read + 1 write); opId makes retries safe. */
+    suspend fun applyInventory(clinicId: String, uid: String, ops: org.json.JSONArray, opId: String): JSONObject =
+        sdk.inventory.apply(clinicId, uid, ops, opId)
+
     /**
      * Busy times for patient booking (no names). Rebuilt from the staff device's patients after a
      * sync and written only when it changed.

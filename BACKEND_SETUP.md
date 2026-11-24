@@ -58,6 +58,7 @@ workspaces/{clinicId}/public/info           patient-visible: name, time zone, cu
                                             busy times {s,e,d} (no names)
 workspaces/{clinicId}/patients/{patientId}  one per patient: profile, chart, treatments, appointments,
                                             invoices, history, image refs, portal login
+workspaces/{clinicId}/inventory/main        the clinic's whole stock in ONE document (short keys, see below)
 portals/{key}                               only for patients with an app login: their read-only copy
                                             + booking requests (key = SHA-256 of Patient ID + password)
 Storage: workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png   (≤ 512 KB, lossless, deduplicated)
@@ -77,6 +78,28 @@ Storage: workspaces/{clinicId}/patients/{patientId}/{sha256}.webp|png   (≤ 512
   times are rewritten only when appointments change.
 - **Indexes:** large fields are exempt; only `inviteEmails`, `syncedAt` and portal `clinicId` + `pending` are queried.
 - **Size guard:** the app refuses to save a patient document above ~750 KB.
+
+### Inventory and cost
+- **One document per clinic** for all stock (`inventory/main`). Only what must be shared is stored:
+  catalog id or custom name, unit, quantity, reorder level, unit cost, expiring batches, supplier,
+  the clinic's own material lists, the last 300 movements and 24 months of monthly use. About 300
+  items take roughly 60 KB (Firestore limit 1 MiB).
+- **Kept in the apps, never in the cloud:** the dental catalog (182 items in 14 categories with names,
+  units, purposes and expiry tracking) and the default materials for each procedure
+  (`Web/inventory/catalog.json` and `app/src/main/assets/inventory/catalog.json`, the same file).
+  They power search, suggestions and the materials proposed when a treatment is recorded.
+- **Reads:** the stock is read only when the Inventory screen, the home alerts or the record-treatment
+  dialog need it, and then at most once every 15 minutes per device (cached on the device). Refresh
+  forces a read. A clinic with 5 devices open all day costs about 5 × 4 × 10 = 200 reads a day at
+  most, far inside the free 50,000.
+- **Writes:** every stock change is 1 read + 1 write (transaction). Changes from several devices merge;
+  each carries an operation id so a retry is applied once. Offline changes wait on the device and
+  are sent at the next load or Sync.
+- **Treatments:** a completed treatment stores only `materials: {itemId: qty}` in the patient
+  document; the deduction is one inventory write.
+- **Rules:** any active staff member can read the stock; changing it needs the "Inventory & stock"
+  access item (admin, assistant, receptionist by default) or "Record & edit treatment" (dentists, to
+  take materials). Deploy the rules again after updating: `firebase deploy --only firestore:rules`.
 
 ## Accounts
 

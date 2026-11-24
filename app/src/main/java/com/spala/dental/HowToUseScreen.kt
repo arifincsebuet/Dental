@@ -373,6 +373,29 @@ private val GuideArticles = listOf(
         "Recording a payment doesn't charge a card. Needs the \"Invoices & payments\" access item."
     ),
     GuideArticle(
+        "inventory", "Inventory", "Keep stock, expiry and reorders in order",
+        "One stock list for the whole clinic, shared by the Android and web apps.",
+        listOf(
+            "Open the menu › Inventory. Tap Add item and search the dental list (182 common items in 14 categories) or type your own. Set the unit, the reorder level and the unit cost.",
+            "When a delivery arrives tap Receive stock: quantity, unit cost, expiry date (YYYY-MM-DD) and batch for medicines and materials that expire, and the supplier.",
+            "Tap Use on an item to record use, damage, expired disposal or a return. Stock is always taken from the earliest expiry first.",
+            "Tap Count after a physical count; the difference is logged.",
+            "Low or out, Expiring and Expired are counted at the top and shown on Home. The Reorder tab suggests how much to order from the last three months of use.",
+            "Tap PDF to save the stock list."
+        ),
+        "Stock is loaded from the cloud at most every 15 minutes on each device; tap Refresh for the latest. Changes made offline are sent at the next Sync."
+    ),
+    GuideArticle(
+        "materials", "Inventory", "Take materials from stock when you record a treatment",
+        "Completed treatments propose the materials they use; you confirm what to take.",
+        listOf(
+            "Inventory › Materials shows what each procedure uses (for example a composite filling: composite, bonding agent, etch, gloves, bib). Tap a procedure to change the list or quantities for your clinic.",
+            "Record a treatment as Completed. The dialog lists the proposed materials with what is in stock. Change the numbers, set 0 to skip an item, or add another item.",
+            "Save. The materials are taken from stock in one step and the treatment keeps the list, so the activity log shows which patient used them."
+        ),
+        "Only items your clinic has added to the inventory are proposed."
+    ),
+    GuideArticle(
         "reports", "Reports", "Review and share practice reports",
         "Compare activity and finances for a period.",
         listOf(

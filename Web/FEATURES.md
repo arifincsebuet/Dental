@@ -5,7 +5,7 @@
 | Area | On the web |
 |---|---|
 | Sign-in | Google sign-in for the clinic team; first account creates the clinic (owner); invited staff join by email. Patient app sign-in with Patient ID + password (no Firebase account) |
-| Roles & access | Admin, Dentist, Assistant, Receptionist, Cashier, Auditor + 9 access switches, enforced in the UI and by the same Firestore rules |
+| Roles & access | Admin, Dentist, Assistant, Receptionist, Cashier, Auditor + 10 access switches, enforced in the UI and by the same Firestore rules |
 | Patients | Register (duplicate hint), search by name / phone / ID / app ID, filters (Today, Dues, Alerts), edit profile, medical alerts, clinical story, reminder consent, archive / restore with reason |
 | **3D at a glance** | Every tooth number sits on a status disc (blue treated, teal planned, amber finding, grey missing) in front of the gum, with a matching collar ring; restorations show their material (composite blue, amalgam silver, crown gold); root canal treatment shows a red filled canal in the X-ray view; missing teeth show as a faint ghost with a cross. Same on Android (profile model and full 3D chart) and web. The Android full 3D tooth sheet lists the tooth's treatments with Fee · Paid · Due |
 | **3D chart (Godot)** | Same Godot model as Android: rotate, pan, zoom, views (Front/Upper/Lower/Left/Right), arch filter, tooth numbers, roots (X-ray look), tap sound, auto-turn, surface pad |
@@ -31,6 +31,7 @@
 | **Languages** | 17 languages: English (default), Bangla, Hindi, Arabic, Chinese (Simplified), Spanish, French, Portuguese (Brazil), German, Russian, Japanese, Korean, Indonesian, Turkish, Italian, Vietnamese, Thai. Chosen per device in Settings, on the sign-in page and in the patient app. One shared dictionary (`Web/i18n/*.json` = `app/src/main/assets/i18n/*.json`) |
 | **Currency** | 33 common currencies with local names (BDT, INR, USD, EUR, GBP, JPY, KRW, SAR, AED…); invoices keep the currency they were issued in |
 | **Dental Cloud SDK** | The Firebase layer is a library: Android module `dentalcloud` and `Web/sdk/dental-cloud.js`, same API (records.commit / listSince / get, images.upload / attach / url). One Firestore document per patient; images lossless and ≤ 512 KB, stored once per SHA-256, link kept in the patient document. Diagram: `Docs/cloud-architecture.svg` |
+| **Inventory** | One stock list for the clinic, same on Android and web: 182-item dental catalog in 14 categories (kept in the app), custom items, receive stock with cost, expiry and batch, use / damage / expired / return (earliest expiry first), stock counts, suppliers, low-stock and expiry alerts on Home (90 days), reorder suggestions from 3 months of use, activity log, stock value, PDF and CSV. Completed treatments propose their materials from per-procedure lists (editable per clinic) and take them from stock after you confirm. One Firestore document per clinic, read at most every 15 minutes per device |
 | How to use | All Android guides, adapted for the web, plus 3D lens and multi-select guides |
 
 ## 2. Made for the big screen

@@ -302,6 +302,7 @@ private fun ToothRow(
 // ---------------------------------------------------------------------------------------------
 
 private data class ProcedureOption(val label: String, val restoration: String? = null)
+internal val procedureNames: List<String> get() = procedureOptions.map { it.label }
 private val procedureOptions = listOf(
     ProcedureOption("Filling (composite)", "composite"), ProcedureOption("Filling (amalgam)", "amalgam"),
     ProcedureOption("Glass ionomer", "glass_ionomer"), ProcedureOption("Root canal"), ProcedureOption("Crown", "crown"),
@@ -328,6 +329,8 @@ fun RecordTreatmentDialog(
     editing: JSONObject? = null,
     /** Show the optional total fee (people with Invoices & payments access), like the web app. */
     canBill: Boolean = false,
+    /** Clinic stock: proposes the materials a completed treatment uses and takes them from stock. */
+    inventory: InventoryStore? = null,
     onSave: (JSONObject, String) -> String?,
 ) {
     val zoneOf = { runCatching { ClinicalRules.zone(config) }.getOrDefault(ZoneId.systemDefault()) }
@@ -350,6 +353,12 @@ fun RecordTreatmentDialog(
     // Fill the fee from Settings › Services when the procedure matches (until the user types one).
     LaunchedEffect(procedure) {
         if (editing == null && !feeTyped) feeText = serviceFee(config, procedure)?.let { java.math.BigDecimal.valueOf(it).movePointLeft(ClinicalRules.currencyDigits(currency)).stripTrailingZeros().toPlainString() }.orEmpty()
+    }
+    val stock = inventory?.takeIf { editing == null && it.canUse() }
+    val materials = remember { mutableStateMapOf<String, String>() }
+    LaunchedEffect(Unit) { stock?.ensure() }
+    LaunchedEffect(procedure, stock?.doc != null) {
+        if (stock?.doc != null) { materials.clear(); stock.propose(procedure.trim(), teeth.size).forEach { (id, q) -> materials[id] = qtyText(q) } }
     }
     AlertDialog(
         onDismissRequest = onDismiss, shape = RoundedCornerShape(28.dp),
@@ -388,6 +397,11 @@ fun RecordTreatmentDialog(
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
                     supportingText = { Text("Optional · filled from Services · payments are added later") }, shape = RoundedCornerShape(14.dp))
                 OutlinedTextField(notes, { notes = it }, label = { Text("Notes / outcome") }, minLines = 3, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+                if (stock?.doc != null && status == "Completed" && stock.items().isNotEmpty()) SurfaceCard(padding = 12.dp, background = Teal50) {
+                    Text("Materials used", style = MaterialTheme.typography.titleSmall, color = Ink)
+                    Text("Taken from stock when saved (earliest expiry first). Set 0 to skip an item.", style = MaterialTheme.typography.bodySmall, color = InkMuted)
+                    MaterialEditor(stock, materials)
+                }
                 if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             }
         },
@@ -439,7 +453,11 @@ fun RecordTreatmentDialog(
                         val first = copy.optJSONArray("treatments").objectList().last { it.optString("groupId") == group }
                         feeNote = " · " + setTreatmentFee(copy, first, fee, config)
                     }
-                    onSave(copy, "Treatment recorded · $name · $status · $teethText$feeNote")?.let { throw IllegalStateException(it) }
+                    val used = if (stock != null && status == "Completed") materialList(materials) else emptyList()
+                    val firstNew = copy.optJSONArray("treatments").objectList().first { it.optString("groupId") == group }
+                    if (used.isNotEmpty()) firstNew.put("materials", JSONObject().also { m -> used.forEach { (id, q) -> m.put(id, q) } })
+                    onSave(copy, "Treatment recorded · $name · $status · $teethText$feeNote" + if (used.isNotEmpty()) " · ${used.size} materials used" else "")?.let { throw IllegalStateException(it) }
+                    if (used.isNotEmpty()) stock?.deduct(used, firstNew.optString("id"), name)
                 }.onSuccess { onDismiss() }.onFailure { error = it.localizedMessage ?: "Review the treatment details" }
             }, shape = RoundedCornerShape(14.dp)) { Text("Save") }
         },

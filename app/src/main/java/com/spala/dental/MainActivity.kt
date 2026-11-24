@@ -92,6 +92,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val saveStatus = LocalEditorSaveStatus.current
+    val inventory = remember(store) { InventoryStore(context.applicationContext, store) }
     var showHowTo by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("Home") }
     var patientId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -189,7 +190,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                 when (action) {
                     "register" -> addPatient()
                     "book" -> { go("Schedule"); scheduleView = "Calendar" }
-                    "sync" -> store.sync()
+                    "sync" -> { store.sync(); inventory.sync() }
                     "howto" -> showHowTo = true
                     "signout" -> if (store.session == "local") store.leaveLocalMode() else store.signOut()
                 }
@@ -208,7 +209,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
             }
         }, actions = {
             if (store.busy) CircularProgressIndicator(Modifier.size(22.dp).padding(end = 4.dp), strokeWidth = 2.dp)
-            Surface(onClick = { store.sync() }, enabled = !store.busy, shape = RoundedCornerShape(50), color = Teal50,
+            Surface(onClick = { store.sync(); inventory.sync() }, enabled = !store.busy, shape = RoundedCornerShape(50), color = Teal50,
                 modifier = Modifier.padding(end = 12.dp).semantics { contentDescription = "Synchronize changes" }) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     GlyphIcon(Glyph.Sync, Teal700, 16.dp); Text("Sync", style = MaterialTheme.typography.labelLarge, color = Teal700)
@@ -428,6 +429,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
             } else when (page) {
                 "Home" -> {
                     HomeHero(store)
+                    if (inventory.canSee()) InventoryHomeAlerts(inventory) { page = "Inventory" }
                     store.patientLimit?.let { limit ->
                         if (store.activePatientCount >= limit * 95 / 100) SurfaceCard(onClick = { page = "Settings" }, background = Amber100) {
                             Text(if (store.activePatientCount >= limit) "Your plan is full" else "Your plan is almost full", style = MaterialTheme.typography.titleSmall, color = Ink)
@@ -493,6 +495,8 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
                         onOpenPatient = { id -> openPatient(id) },
                     ) else SchedulingScreen(store.patients, store.config, { changed, action -> store.save(changed, action); if (store.saveError == null) store.syncSoon() }, { id -> openPatient(id) })
                 }
+                "Inventory" -> if (inventory.canSee()) InventoryScreen(inventory, store)
+                    else CardBlock("Inventory", "You don't have access to the inventory. Ask your admin (Team & roles).")
                 "Reports" -> if (store.can("reports")) AdvancedReportsScreen(store.patients, store.config)
                     else CardBlock("Reports", "You don't have access to reports. Ask your admin (Team & roles).")
                 "Team" -> TeamScreen(store.config, store.can("manageTeam"), store.busy, onBack = { page = "Settings" }) { updated, action -> store.saveConfig(updated, action) }
@@ -584,7 +588,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
     recordTeeth?.let { teeth -> if (patient != null) RecordTreatmentDialog(
         patient, teeth, recordSurface,
         clinicianRecords(store.config).filter { it.optBoolean("active", true) }.map { it.optString("name") }.filter { it.isNotBlank() },
-        store.config, onDismiss = { recordTeeth = null; recordSurface = "" }, canBill = store.can("billing"),
+        store.config, onDismiss = { recordTeeth = null; recordSurface = "" }, canBill = store.can("billing"), inventory = inventory,
     ) { changed, action ->
         store.save(changed, action)
         store.saveError ?: run { selecting = false; selection.clear(); focusTooth = teeth.first(); null }

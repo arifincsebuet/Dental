@@ -1,4 +1,4 @@
-// Dental Cloud SDK (web) v1.0
+// Dental Cloud SDK (web) v1.1
 // Reusable Firebase data layer for clinic software: one Firestore document per patient (lists kept
 // inside it), revision-checked writes, incremental sync, and lossless clinical images (<= 512 KB)
 // in Firebase Storage whose links are stored in the patient document.
@@ -13,8 +13,12 @@
 //   const { records, newest } = await cloud.records.listSince(clinicId, lastSync);
 //   const ref = await cloud.images.upload(clinicId, patient.id, file);   // compress + upload + link
 //   await cloud.records.commit(clinicId, uid, cloud.images.attach(patient, ref));
+//   const stock = await cloud.inventory.apply(clinicId, uid, [{ op: "use", id: itemId, qty: 1 }], opId);
 
-export const VERSION = "1.0.0";
+import { applyOps, emptyInventory } from "./inventory-core.js";
+export * as InventoryCore from "./inventory-core.js";
+
+export const VERSION = "1.1.0";
 export const MAX_IMAGE_BYTES = 512 * 1024;
 
 /** The record changed on another device since it was loaded (optimistic concurrency). */
@@ -52,6 +56,7 @@ export function createDentalCloud({ db, storage = null, fs, st = null, options =
     publicInfo: (c) => `${o.root}/${c}/public/info`,
     record: (c, id) => `${o.root}/${c}/${o.records}/${id}`,
     image: (c, id, sha256, ext) => `${o.root}/${c}/${o.records}/${id}/${sha256}.${ext}`,
+    inventory: (c) => `${o.root}/${c}/inventory/main`,
   };
 
   const records = {
@@ -123,7 +128,34 @@ export function createDentalCloud({ db, storage = null, fs, st = null, options =
     },
   };
 
-  return { VERSION, options: o, paths, records, images, Conflict };
+  const inventory = {
+    /** The clinic's whole inventory (one document, 1 read). Empty inventory when none yet. */
+    async get(clinicId) {
+      const s = await getDoc(doc(db, paths.inventory(clinicId)));
+      if (!s.exists()) return emptyInventory();
+      const d = fromValue(s.data()); delete d.updatedAt; return d;
+    },
+    /**
+     * Applies stock operations in a transaction (1 read + 1 write), so changes made on several
+     * devices at the same time merge. opId makes a retried call safe (applied once).
+     */
+    async apply(clinicId, uid, ops, opId = "") {
+      return runTransaction(db, async (tx) => {
+        const ref = doc(db, paths.inventory(clinicId));
+        const snap = await tx.get(ref);
+        const cur = snap.exists() ? fromValue(snap.data()) : emptyInventory();
+        delete cur.updatedAt;
+        if (opId && (cur.done || []).includes(opId)) return cur;
+        const next = applyOps(cur, ops, { opId, by: uid });
+        next.rev = (cur.rev || 0) + 1; next.clinicId = clinicId; next.updatedBy = uid;
+        if (size(next) > o.maxDocBytes) throw new Error("The inventory document is full. Remove unused items.");
+        tx.set(ref, { ...next, updatedAt: serverTimestamp() });
+        return next;
+      });
+    },
+  };
+
+  return { VERSION, options: o, paths, records, images, inventory, Conflict };
 }
 
 export async function sha256Hex(bytes) {

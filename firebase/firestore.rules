@@ -6,6 +6,7 @@ rules_version = '2';
 //   workspaces/{clinic}                 clinic settings, members, invites, subscription
 //   workspaces/{clinic}/public/info     patient-visible: name, time zone, availability, busy times
 //   workspaces/{clinic}/patients/{id}   one document per patient (all of that patient's lists)
+//   workspaces/{clinic}/inventory/main  the clinic's whole stock list in ONE document (compact keys)
 //   portals/{key}                       patient app copy of one patient's record. key =
 //                                       sha256(Patient ID + password), so knowing the key is the
 //                                       login. Patients do not use Firebase Authentication.
@@ -46,7 +47,8 @@ service cloud.firestore {
         'billing': ['admin', 'administrator', 'cashier'],
         'patientLogins': ['admin', 'administrator', 'dentist', 'receptionist'],
         'reports': ['admin', 'administrator', 'dentist', 'cashier', 'auditor'],
-        'manageTeam': ['admin', 'administrator']
+        'manageTeam': ['admin', 'administrator'],
+        'inventory': ['admin', 'administrator', 'assistant', 'receptionist']
       }.get(name, []);
     }
     function clinicData(clinic) { return get(/databases/$(database)/documents/workspaces/$(clinic)).data; }
@@ -118,6 +120,22 @@ service cloud.firestore {
             && getAfter(/databases/$(database)/documents/portals/$(key)).data.requests.size()
               == get(/databases/$(database)/documents/portals/$(key)).data.get('requests', []).size() + 1;
         }
+      }
+
+      // The clinic's stock: one document. Item names, categories and default material lists live in
+      // the apps (catalog), only stock numbers are stored here. Every change is a transaction that
+      // raises rev by one, so changes from several devices merge instead of overwriting each other.
+      match /inventory/{doc} {
+        allow get: if doc == 'main' && hasRole(clinic, anyStaff());
+        allow create, update: if doc == 'main' && hasRole(clinic, writers())
+          && (can(clinic, 'inventory') || can(clinic, 'recordTreatment'))
+          && request.resource.data.rev == (resource == null ? 0 : resource.data.get('rev', 0)) + 1
+          && request.resource.data.clinicId == clinic
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.keys().hasOnly(['v', 'rev', 'items', 'sup', 'tpl', 'log', 'mon', 'done', 'clinicId', 'updatedBy', 'updatedAt'])
+          && request.resource.data.items is map && request.resource.data.log is list && request.resource.data.log.size() <= 300;
+        allow delete: if false;
       }
 
       match /patients/{patient} {

@@ -88,7 +88,9 @@ class Report {
       const x = M + i * (tile + gap);
       this.doc.setFillColor(248, 250, 252); this.doc.setDrawColor(...C.line); this.doc.roundedRect(x, this.y, tile, 44, 6, 6, "FD");
       this.font(7.5, true, C.muted); this.doc.text(tx(label), x + 8, this.y + 14);
-      this.font(String(value).length > 14 ? 10 : 13, true, c || C.ink); this.doc.text(this.doc.splitTextToSize(safe(value), tile - 14)[0] || "", x + 8, this.y + 33);
+      let size = 13; this.font(size, true, c || C.ink);
+      while (size > 7 && this.doc.getTextWidth(safe(value)) > tile - 14) { size -= 0.5; this.font(size, true, c || C.ink); }
+      this.doc.text(safe(value), x + 8, this.y + 33);
     });
     this.y += 52;
   }
@@ -343,6 +345,35 @@ export async function appointmentsPdf(periodLabel, a, b) {
   }
   if (!entries.length) R.text("No appointments in this period.", 9.5, C.muted);
   R.save(fileName("appointments", periodLabel.split(" · ")[0], todayIn(tz())));
+}
+
+// ============================================================================ inventory
+const whole = (minor) => { const d = currencyDigits(D.cur(S.config)); return Math.round(minor / 10 ** d) * 10 ** d; };
+export async function inventoryPdf(data) {
+  const s = data.summary;
+  const R = new Report(await jsPDFClass(), "Inventory", `${fmtIso(todayIn(tz()), true)} · ${s.items} items`);
+  R.header();
+  R.stats([["Items in use", String(s.items), C.teal], ["Low or out", String(s.low + s.out), C.amber], ["Expiring (90 days)", String(s.expiring), C.amber], ["Expired", String(s.expired), C.red], ["Stock value", money(whole(s.value)), C.green]]);
+  if (data.reorder.length) {
+    R.heading("To reorder");
+    R.table(["Item", "In stock", "Suggested order", "Supplier", "Estimated cost"], data.reorder.map((r) => [r.name, r.stock, r.order, r.supplier, r.cost ? money(r.cost) : "-"]), [3, 1.2, 1.4, 1.8, 1.3], [4]);
+  }
+  const exp = data.items.filter((r) => ["expired", "expiring"].includes(r.st));
+  if (exp.length) {
+    R.heading("Expired or expiring");
+    R.table(["Item", "In stock", "Earliest expiry", "Status"], exp.map((r) => [r.name, r.stock, r.expiry ? fmtIso(r.expiry) : "-", r.status]), [3.4, 1.2, 1.4, 1.4]);
+  }
+  const groups = {};
+  for (const r of data.items) (groups[r.cat] ||= []).push(r);
+  for (const g of Object.keys(groups)) {
+    R.heading(g);
+    R.table(["Item", "In stock", "Reorder at", "Expiry", "Unit cost", "Value", "Status"], groups[g].map((r) => [r.name, r.stock, r.reorder, r.expiry ? fmtIso(r.expiry) : "-", r.cost ? money(r.cost) : "-", r.value ? money(r.value) : "-", r.status]), [3, 1.1, 0.9, 1.1, 1.1, 1.2, 1.1], [2, 4, 5]);
+  }
+  if (data.usage?.rows.length) {
+    R.heading(`Used in ${data.usage.month}`);
+    R.table(["Item", "Used", "Cost"], data.usage.rows.map((r) => [r.name, r.used, r.cost ? money(r.cost) : "-"]), [4, 1.4, 1.4], [2]);
+  }
+  R.save(fileName("inventory", S.config.name || "clinic", todayIn(tz())));
 }
 
 // ============================================================================ invoice / receipt

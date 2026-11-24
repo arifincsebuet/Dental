@@ -426,3 +426,7 @@ svg.odo text.q{font-size:10px;font-weight:800;letter-spacing:.1em;fill:var(--mut
   .hide-sm{display:none!important}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+.mat-sec{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--brand-softer)}
+.mat-sec[hidden]{display:none}
+.mat-row .input{padding:6px 8px}
+.mat-row .grow{flex:1;min-width:0}

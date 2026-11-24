@@ -35,6 +35,7 @@ object Access {
         Permission("billing", "Invoices & payments", "Create invoices, take payments, refunds"),
         Permission("patientLogins", "Patient app logins", "Create Patient IDs and passwords"),
         Permission("reports", "Reports", "Clinic reports and exports"),
+        Permission("inventory", "Inventory & stock", "Add stock, record use, counts, suppliers"),
         Permission("manageTeam", "Clinic settings, team & roles", "Add staff, change roles and access (admin)"),
     )
 
@@ -60,6 +61,7 @@ object Access {
         "patientLogins" to setOf("admin", "administrator", "dentist", "receptionist"),
         "reports" to setOf("admin", "administrator", "dentist", "cashier", "auditor"),
         "manageTeam" to setOf("admin", "administrator"),
+        "inventory" to setOf("admin", "administrator", "assistant", "receptionist"),
     )
     fun roleDefault(role: String, key: String) = role == "owner" || role in defaults[key].orEmpty()
     fun preset(role: String): JSONObject = JSONObject().also { out -> items.forEach { out.put(it.key, roleDefault(role, it.key)) } }

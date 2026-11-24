@@ -7,6 +7,7 @@ import { S, save, can, patient, say, createPatientLogin, removePatientLogin, att
 import { Viewer } from "./viewer3d.js";
 import { I } from "./icons.js";
 import * as Reports from "./reports.js";
+import * as Inv from "./inventory.js";
 import { modal, field, input, textarea, select, check, chips, values, bookDialog, invoiceDialog, receivePaymentDialog, refundDialog, voidDialog, receiptText, shareText, setAppointmentStatus, confirmBox } from "./dialogs.js";
 
 export const P = { pid: "", tab: "overview", tooth: "", surface: "", multi: [], multiMode: false, q: "", filter: "All", archived: false, collapsed: typeof matchMedia === "function" && matchMedia("(max-width:1365px)").matches, listmode: false, earlier: null, dentition: "" };
@@ -269,6 +270,7 @@ function timeline(p, tooth) {
     <div class="between"><b>${esc(t.procedure)} <span class="muted" style="font-weight:600">· <button class="linkish" data-act="tooth" data-k="${t.tooth}">${esc(L(t.tooth))}</button>${t.surface && t.surface !== "Whole tooth" ? " " + esc(t.surface) : ""}</span></b><span class="badge ${badge(t.status)}">${esc(t.status)}</span></div>
     <div class="m">${fmtMs(t.performedAt || t.at, z())}${t.doctor ? " · " + esc(t.doctor) : ""}</div>
     ${t.notes ? `<div class="small" style="margin-top:4px">${esc(t.notes)}</div>` : ""}
+    ${t.materials && Object.keys(t.materials).length ? `<div class="small muted" style="margin-top:4px">${I("box")} ${Object.entries(t.materials).map(([id, q]) => `${esc(Inv.itemName(id))} × ${q}`).join(", ")}</div>` : ""}
     ${payBlock(p, t)}
     ${can("recordTreatment") ? `<div class="row" style="margin-top:6px"><button class="btn ghost sm" data-act="edit" data-id="${t.id}">${I("edit")}Edit</button>${(t.events || []).length > 1 ? `<span class="small muted">${t.events.length - 1} change${t.events.length > 2 ? "s" : ""} logged</span>` : ""}</div>` : ""}
   </div>`).join("")}</div>`;
@@ -526,9 +528,25 @@ export function recordDialog(teeth, editing = null, surface = "") {
       ${field("Date", input("date", editing ? ymd(editing.at) : todayIn(z()), 'type="date"'))}
       ${!editing && can("billing") ? field(`Total fee (${c()}, optional)`, input("fee", "", 'inputmode="decimal" placeholder="Filled from Services"'), "Creates the fee so payments can be added per visit") : fee ? field("Fee", `<div class="small" style="padding-top:10px">${money(fee.total, c())} · use Add payment to change</div>`) : ""}
       ${field("Notes / outcome", textarea("notes", editing?.notes || ""), "", true)}</div>
+      ${!editing && Inv.canUseStock() ? `<div id="matsec" class="mat-sec" hidden><div class="between"><b>Materials used</b><span class="small muted">Taken from stock when saved as Completed</span></div><div data-matbox style="margin-top:8px"></div><div data-matmore></div></div>` : ""}
       ${editing ? `<p class="small muted">The previous values are kept in the treatment's change log and the patient history.</p>` : ""}`,
     saveLabel: "Save",
-    onOpen: (f) => { if (f.fee) f.procedure.addEventListener("change", () => { const fee0 = D.serviceFee(S.config, f.procedure.value); if (fee0 != null && !f.fee.value) f.fee.value = minorToText(fee0, c()); }); },
+    onOpen: (f) => {
+      if (f.fee) f.procedure.addEventListener("change", () => { const fee0 = D.serviceFee(S.config, f.procedure.value); if (fee0 != null && !f.fee.value) f.fee.value = minorToText(fee0, c()); });
+      const sec = f.querySelector("#matsec");
+      if (!sec) return;
+      const status = () => f.querySelector('[data-pick="status"] .on')?.dataset.v || "Completed";
+      const fill = () => {
+        if (!Inv.INV.doc || !Object.keys(Inv.INV.doc.items || {}).length) { sec.hidden = true; return; }
+        sec.hidden = status() !== "Completed";
+        sec.querySelector("[data-matbox]").innerHTML = Inv.materialRows(Inv.proposeMaterials(f.procedure.value.trim(), teeth.length));
+        sec.querySelector("[data-matmore]").innerHTML = Inv.materialAddSelect();
+        Inv.wireMaterialAdd(f);
+      };
+      Inv.ensureInventory().then(fill);
+      f.procedure.addEventListener("change", fill);
+      f.querySelector('[data-pick="status"]')?.addEventListener("click", () => setTimeout(() => { sec.hidden = status() !== "Completed" || !Inv.INV.doc; }, 0));
+    },
     onSave: async (v) => {
       const at = zonedMs(v.date, "12:00", z());
       const copy = clone(p);
@@ -540,8 +558,13 @@ export function recordDialog(teeth, editing = null, surface = "") {
         const first = copy.treatments[copy.treatments.length - 1];
         feeText = " · " + D.saveTreatmentPayment(copy, first, { fee: feeMinor, amount: null, method: "Cash", note: "", at: Date.now() }, S.config, N());
       }
+      const mats = !editing && data.status === "Completed" ? Inv.readMaterials(v) : [];
+      const firstNew = !editing ? copy.treatments[copy.treatments.length - teeth.length] : null;
+      if (mats.length && firstNew) firstNew.materials = Object.fromEntries(mats);
       P.tooth = teeth.length === 1 ? teeth[0] : P.tooth; P.multi = []; P.multiMode = false;
-      return save(copy, text + feeText);
+      const err = await save(copy, text + feeText + (mats.length ? ` · ${mats.length} materials used` : ""));
+      if (!err && mats.length) Inv.deductMaterials(mats, firstNew.id, data.procedure);
+      return err;
     },
   });
 }

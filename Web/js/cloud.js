@@ -9,6 +9,7 @@ const MAX_BYTES = 750000;
 const LOCAL_FIELDS = ["dirty", "operationId", "remoteVersion", "cloudOwner", "retainedAt", "syncedAt", "patientDevices"];
 
 import { createDentalCloud, Conflict, sha256Hex } from "../sdk/dental-cloud.js";
+import { applyOps, emptyInventory } from "../sdk/inventory-core.js";
 export { Conflict };
 
 export function staffInvites(config) {
@@ -256,6 +257,8 @@ export async function firebaseBackend(cfg) {
         if (busy.some((m) => m.s === c.busy.s && m.e === c.busy.e && m.d === c.busy.d)) tx.update(publicRef(portal.clinicId), { busy: arrayRemove(c.busy), lastPortal: key });
       });
     },
+    getInventory: (clinicId) => sdk.inventory.get(clinicId),
+    applyInventory: (clinicId, me, ops, opId) => sdk.inventory.apply(clinicId, me, ops, opId),
     uploadImage: (clinicId, patientId, encoded) => sdk.images.upload(clinicId, patientId, encoded),
     imageUrl: (path) => sdk.images.url(path),
   };
@@ -365,5 +368,13 @@ export function demoBackend(seed) {
       return { path, reference: `gs://demo/${path}`, sha256: hash, bytes: bytes.length, width: encoded.width, height: encoded.height, format: ext, resized: encoded.resized, at: Date.now() };
     },
     async imageUrl(path) { return db.images?.[path] || ""; },
+    async getInventory() { if (!db.inventory) { db.inventory = seed().inventory; persist(); } return clone(db.inventory); },
+    async applyInventory(clinicId, me, ops, opId) {
+      const cur = db.inventory || emptyInventory();
+      if (opId && (cur.done || []).includes(opId)) return clone(cur);
+      const next = applyOps(cur, ops, { opId, by: me });
+      next.rev = (cur.rev || 0) + 1;
+      db.inventory = next; persist(); return clone(next);
+    },
   };
 }

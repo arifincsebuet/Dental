@@ -13,6 +13,7 @@ import { renderPortal, portalAction, afterPortal } from "./portal.js";
 import * as Reports from "./reports.js";
 import { pdf } from "./patient.js";
 import { langSelect, loadLang, watch } from "./i18n.js";
+import * as Inv from "./inventory.js";
 import { applyBrand, logoHtml, appName, brandOf, cachedBrand, COLORS, CURRENCIES, mapEmbed, mapLink, mapQuery, logoFromFile } from "./brand.js";
 
 const A = { brandDraft: null, route: "home", arg: "", day: "", month: "", schedView: "Calendar", selAppt: null, invFilter: "All", selInv: "", period: "Month", from: "", to: "", selStaff: "", helpQ: "", helpTopic: "All topics", helpId: "start", signTab: "team", theme: null };
@@ -27,11 +28,11 @@ setCtx({ render, go });
 
 // ============================================================================ shell
 const NAV = [
-  ["Clinic", [["home", "Home", "home"], ["patients", "Patients", "users"], ["schedule", "Appointments", "cal"], ["billing", "Billing", "receipt", "billing"], ["reports", "Reports", "chart", "reports"]]],
+  ["Clinic", [["home", "Home", "home"], ["patients", "Patients", "users"], ["schedule", "Appointments", "cal"], ["billing", "Billing", "receipt", "billing"], ["inventory", "Inventory", "box", "inventoryView"], ["reports", "Reports", "chart", "reports"]]],
   ["Administration", [["team", "Team & roles", "team"], ["settings", "Clinic settings", "cog"]]],
   ["Help", [["help", "How to use", "help"], ["portal", "Patient app", "user"]]],
 ];
-const TITLES = { home: "Home", patients: "Patients", schedule: "Appointments", billing: "Billing", reports: "Reports", team: "Team & roles", settings: "Clinic settings", help: "How to use" };
+const TITLES = { home: "Home", patients: "Patients", schedule: "Appointments", billing: "Billing", inventory: "Inventory", reports: "Reports", team: "Team & roles", settings: "Clinic settings", help: "How to use" };
 function allAppointments() {
   const out = [];
   for (const p of S.patients) { if (p.archived) continue; for (const a of p.appointments || []) out.push({ ...a, pid: p.id, pname: p.name, startAt: safeStart(a) }); }
@@ -39,7 +40,7 @@ function allAppointments() {
 }
 function next7() { const now = Date.now(); return allAppointments().filter((a) => !D.TERMINAL_APPOINTMENTS.includes(a.status) && a.startAt >= now && a.startAt < now + 7 * 86400000).length; }
 function shell(content) {
-  const sub = { home: fmtIso(todayIn(z()), true), patients: `${St.activePatientCount()} active records`, schedule: "Calendar, slots and bookings", billing: "Invoices, payments and receipts", reports: "Practice performance", team: "Staff, roles and access", settings: "Clinic, reminders, numbering, subscription", help: "Step-by-step guides" }[A.route] || "";
+  const sub = { home: fmtIso(todayIn(z()), true), patients: `${St.activePatientCount()} active records`, schedule: "Calendar, slots and bookings", billing: "Invoices, payments and receipts", inventory: "Stock, expiry and materials", reports: "Practice performance", team: "Staff, roles and access", settings: "Clinic, reminders, numbering, subscription", help: "Step-by-step guides" }[A.route] || "";
   const role = St.currentRole();
   const limit = St.patientLimit(), count = St.activePatientCount();
   const n7 = next7();
@@ -48,7 +49,7 @@ function shell(content) {
   <aside class="side">
     <div class="brand">${logoHtml(36)}<div><b>${esc(appName())}</b><small>${esc((S.config.address || "").split(",")[0] || "Clinic")}</small></div></div>
     <nav class="nav" aria-label="Main">
-      ${NAV.map(([h, items]) => `<h6>${h}</h6>` + items.filter(([, , , perm]) => !perm || can(perm)).map(([r, l, ic]) => `<a href="#/${r === "patients" && P.pid ? "patients/" + P.pid : r}" class="${A.route === r ? "on" : ""}" title="${l}">${I(ic)}<span class="lbl">${l}</span>${r === "schedule" && n7 ? `<span class="badge count">${n7}</span>` : ""}</a>`).join("")).join("")}
+      ${NAV.map(([h, items]) => `<h6>${h}</h6>` + items.filter(([, , , perm]) => !perm || (perm === "inventoryView" ? Inv.canSeeInventory() : can(perm))).map(([r, l, ic]) => `<a href="#/${r === "patients" && P.pid ? "patients/" + P.pid : r}" class="${A.route === r ? "on" : ""}" title="${l}">${I(ic)}<span class="lbl">${l}</span>${r === "schedule" && n7 ? `<span class="badge count">${n7}</span>` : ""}</a>`).join("")).join("")}
       <a href="#" data-act="signout" title="Sign out">${I("out")}<span class="lbl">Sign out</span></a>
     </nav>
     <div class="side-foot"><div class="plan">
@@ -117,6 +118,7 @@ function pageHome() {
     ...requested.map((a) => `<div class="list-item"><span style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--amber-soft);color:var(--amber)">${I("phone")}</span><div class="grow"><b>Patient app booking needs a decision</b><small>${esc(a.pname)} asked for ${fmtMs(a.startAt, z(), true)} with ${esc(a.doctor)}; that time was taken</small></div><button class="btn sm" data-act="openp" data-id="${a.pid}">Review</button></div>`),
     ...conflicts.map((p) => `<div class="list-item"><span style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--red-soft);color:var(--red)">${I("alert")}</span><div class="grow"><b>Sync conflict on ${esc(p.name)}</b><small>Changed on another device. Your draft is retained.</small></div><button class="btn sm" data-act="openp" data-id="${p.id}">Resolve</button></div>`),
     ...drafts.slice(0, 4).map(({ p, e }) => `<div class="list-item"><span style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--violet-soft);color:var(--violet)">${I("file")}</span><div class="grow"><b>Encounter draft not finalized</b><small>${esc(p.name)} · ${esc(e.complaint)} · ${esc(e.doctor)}</small></div><button class="btn sm" data-act="openenc" data-id="${p.id}">Open</button></div>`),
+    ...(Inv.canSeeInventory() ? Inv.homeAlerts() : []),
     limit && count / limit > 0.8 ? `<div class="list-item"><span style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--brand-softer);color:var(--brand)">${I("users")}</span><div class="grow"><b>Plan is ${Math.round((count / limit) * 100)}% full</b><small>${count.toLocaleString()} of ${limit.toLocaleString()} patients. Upgrade in the Android app or archive inactive patients.</small></div><a class="btn sm" href="#/settings">View</a></div>` : "",
   ].filter(Boolean);
   return `<div class="page">
@@ -144,6 +146,7 @@ function pageHome() {
       ${can("manageSlots") ? `<button data-act="openslots" data-date="${today}"><span class="ico" style="background:#0891B2">${I("clock")}</span>Open slots</button>` : ""}
       <button data-act="cmdk"><span class="ico" style="background:#7C3AED">${I("search")}</span>Find patient</button>
       ${can("billing") ? `<button data-act="newinvoice"><span class="ico" style="background:#B45309">${I("receipt")}</span>Create invoice</button>` : ""}
+      ${Inv.canStock() ? `<button data-act="stkhome"><span class="ico" style="background:#15803D">${I("box")}</span>Receive stock</button>` : ""}
       <button data-act="sync"><span class="ico" style="background:#334155">${I("sync")}</span>Sync now</button></div></div></div>
   </div></div>`;
 }
@@ -367,7 +370,7 @@ function brandCard(cfg, manage) {
 
 // ============================================================================ help
 function pageHelp() {
-  const order = ["start", "menu", "patients", "three-d", "lens", "multi", "record", "edit-treatment", "treatment-payments", "chart", "encounters", "treatments", "history", "slots", "booking", "reminders", "team", "patient-logins", "billing", "reports", "sync", "subscription", "branding", "language"];
+  const order = ["start", "menu", "patients", "three-d", "lens", "multi", "record", "edit-treatment", "treatment-payments", "chart", "encounters", "treatments", "history", "slots", "booking", "reminders", "team", "patient-logins", "billing", "inventory", "materials", "reports", "sync", "subscription", "branding", "language"];
   const guides = GUIDES.slice().sort((x, y) => order.indexOf(x[0]) - order.indexOf(y[0]));
   const q = A.helpQ.trim().toLowerCase();
   const list = guides.filter((g) => (A.helpTopic === "All topics" || g[1] === A.helpTopic) && (!q || [g[1], g[2], g[3], ...g[4], g[5] || ""].join(" ").toLowerCase().includes(q)));
@@ -419,7 +422,7 @@ function openCmd() {
 function cmdRender() {
   const v = ($("#cq")?.value || "").trim().toLowerCase();
   const ps = S.patients.filter((p) => !v || [p.name, p.phone, p.id, p.portal?.loginId || ""].join(" ").toLowerCase().includes(v)).slice(0, 8);
-  const pages = [["home", "Home"], ["schedule", "Appointments"], ["billing", "Billing"], ["reports", "Reports"], ["team", "Team & roles"], ["settings", "Clinic settings"], ["help", "How to use"], ["portal", "Patient app"]].filter((x) => !v || x[1].toLowerCase().includes(v));
+  const pages = [["home", "Home"], ["schedule", "Appointments"], ["billing", "Billing"], ["inventory", "Inventory"], ["reports", "Reports"], ["team", "Team & roles"], ["settings", "Clinic settings"], ["help", "How to use"], ["portal", "Patient app"]].filter((x) => !v || x[1].toLowerCase().includes(v));
   let i = 0;
   const row = (g, html) => `<div data-go="${g}" class="${i++ === cmdIdx ? "on" : ""}">${html}</div>`;
   $("#cres").innerHTML = (ps.length ? `<h6>Patients</h6>` + ps.map((p) => row("patients/" + p.id, `<div class="avatar">${initials(p.name)}</div><div style="flex:1"><b>${esc(p.name)}</b><div class="small muted num">${esc(p.phone || "")}${p.portal?.loginId ? " · " + esc(p.portal.loginId) : ""}</div></div>${p.allergies ? `<span class="badge red">${esc(p.allergies.split(",")[0])}</span>` : ""}`)).join("") : "")
@@ -430,13 +433,13 @@ function cmdRender() {
 function parse() {
   const h = location.hash.replace(/^#\/?/, "") || "home";
   const [r, arg] = h.split("/");
-  A.route = ["home", "patients", "schedule", "billing", "reports", "team", "settings", "help", "portal", "signin"].includes(r) ? r : "home";
+  A.route = ["home", "patients", "schedule", "billing", "inventory", "reports", "team", "settings", "help", "portal", "signin"].includes(r) ? r : "home";
   A.arg = arg || "";
   if (A.route !== "settings") A.brandDraft = null;
 }
 function pageFor() {
   if (A.route === "patients") return renderPatients(A.arg);
-  return ({ home: pageHome, schedule: pageSchedule, billing: pageBilling, reports: pageReports, team: pageTeam, settings: pageSettings, help: pageHelp })[A.route]?.() ?? pageHome();
+  return ({ home: pageHome, schedule: pageSchedule, billing: pageBilling, inventory: Inv.pageInventory, reports: pageReports, team: pageTeam, settings: pageSettings, help: pageHelp })[A.route]?.() ?? pageHome();
 }
 let lastRoute = "";
 export function render() {
@@ -458,6 +461,7 @@ export function render() {
   if (keep) { $("#main").scrollTop = keep.m; if ($("#prail")) $("#prail").scrollTop = keep.r || 0; if ($(".plist .items")) $(".plist .items").scrollTop = keep.l || 0; if ($("#pcenter")) $("#pcenter").scrollTop = keep.c || 0; }
   lastRoute = A.route + A.arg;
   if (A.route === "patients") afterRenderPatients(); else Viewer.unmount();
+  if (A.route === "inventory") Inv.afterInventory(render);
   const hq = $("#hq");
   if (hq) hq.oninput = () => { A.helpQ = hq.value; render(); const n = $("#hq"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
   showMessage();
@@ -477,11 +481,13 @@ function showMessage() {
 // ============================================================================ actions
 async function appAction(act, el, e) {
   const ds = el.dataset;
+  if (act.startsWith("stk") && act !== "stkhome" && Inv.inventoryAction(act, ds, render, csv, () => pdf(() => Reports.inventoryPdf(Inv.pdfRows())))) return;
   switch (act) {
     case "dismiss": S.message = null; $("#msg")?.remove(); return;
     case "drawer": $("#app")?.classList.toggle("drawer"); return;
     case "cmdk": openCmd(); return;
-    case "sync": sync(); return;
+    case "sync": sync().then(() => Inv.syncInventory()); return;
+    case "stkhome": Inv.ensureInventory().then(() => Inv.receiveDialog()); return;
     case "theme": A.theme = isDark() ? "light" : "dark"; document.documentElement.dataset.theme = A.theme; try { localStorage.setItem("dc-theme", A.theme); } catch { /* ignore */ } break;
     case "settheme": A.theme = ds.v; document.documentElement.dataset.theme = A.theme; try { localStorage.setItem("dc-theme", A.theme); } catch { /* ignore */ } break;
     case "signout": e.preventDefault(); confirmBox("Sign out", "You'll need to sign in with Google again to open the clinic.", "Sign out", async () => { await St.signOut(); go("home"); }, false); return;

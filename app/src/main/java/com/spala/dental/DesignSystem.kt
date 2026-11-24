@@ -41,7 +41,7 @@ import org.json.JSONObject
 // Glyphs: crisp line icons drawn on Canvas (no icon font dependency).
 // ---------------------------------------------------------------------------------------------
 
-enum class Glyph { Back, Chevron, Sync, Plus, Cube, Phone, Calendar, Alert, Tooth, Edit, Export, Image, Archive, Person, Clipboard, Check, Expand, Labels, Menu, Home, Bars, Gear, Help, Lock, Card, Logout, Shield }
+enum class Glyph { Back, Chevron, Sync, Plus, Cube, Phone, Calendar, Alert, Tooth, Edit, Export, Image, Archive, Person, Clipboard, Check, Expand, Labels, Menu, Home, Bars, Gear, Help, Lock, Card, Logout, Shield, Box, Minus }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, tint: Color, size: Dp = 20.dp, modifier: Modifier = Modifier) {
@@ -58,6 +58,12 @@ fun GlyphIcon(glyph: Glyph, tint: Color, size: Dp = 20.dp, modifier: Modifier = 
                 line(p(.70f, .14f), p(.74f, .32f)); line(p(.74f, .32f), p(.56f, .34f))
             }
             Glyph.Plus -> { line(p(.5f, .2f), p(.5f, .8f)); line(p(.2f, .5f), p(.8f, .5f)) }
+            Glyph.Minus -> line(p(.2f, .5f), p(.8f, .5f))
+            Glyph.Box -> {
+                val box = Path().apply { moveTo(w * .14f, h * .3f); lineTo(w * .5f, h * .12f); lineTo(w * .86f, h * .3f); lineTo(w * .86f, h * .7f); lineTo(w * .5f, h * .88f); lineTo(w * .14f, h * .7f); close() }
+                drawPath(box, tint, style = s)
+                line(p(.14f, .3f), p(.5f, .48f)); line(p(.5f, .48f), p(.86f, .3f)); line(p(.5f, .48f), p(.5f, .88f))
+            }
             Glyph.Cube -> {
                 val top = Path().apply { moveTo(w * .5f, h * .12f); lineTo(w * .86f, h * .31f); lineTo(w * .5f, h * .5f); lineTo(w * .14f, h * .31f); close() }
                 drawPath(top, tint, style = s)

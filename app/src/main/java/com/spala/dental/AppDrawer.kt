@@ -104,6 +104,8 @@ fun StaffDrawerContent(store: ClinicStore, currentPage: String, onNavigate: (Str
             DrawerEntry("Home", Glyph.Home, currentPage == "Home") { onNavigate("Home") }
             DrawerEntry("Patients", Glyph.Person, currentPage == "Patients", badge = store.patients.count { !it.optBoolean("archived") }.toString()) { onNavigate("Patients") }
             DrawerEntry("Appointments", Glyph.Calendar, currentPage == "Schedule", alert = upcomingAppointments(store.patients, store.config)) { onNavigate("Schedule") }
+            if (store.can("inventory") || store.can("recordTreatment") || store.can("reports") || store.currentRole == "auditor")
+                DrawerEntry("Inventory", Glyph.Box, currentPage == "Inventory") { onNavigate("Inventory") }
             DrawerEntry("Reports", Glyph.Bars, currentPage == "Reports") { onNavigate("Reports") }
             DrawerSection("Quick actions")
             DrawerEntry("Register patient", Glyph.Plus) { onAction("register") }
