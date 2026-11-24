@@ -35,6 +35,14 @@ class DentalBridge(godot: Godot) : GodotPlugin(godot) {
     }
     @UsedByGodot fun closeChart() { activity?.runOnUiThread { activity?.finish() } }
 
+    /** Status bar, navigation bar and cut-out sizes in window pixels, so the chart's bars stay clear of them. */
+    @UsedByGodot fun insets(): String = runCatching {
+        val view = activity?.window?.decorView ?: return@runCatching "{}"
+        val insets = androidx.core.view.ViewCompat.getRootWindowInsets(view) ?: return@runCatching "{}"
+        val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+        JSONObject().put("top", bars.top).put("bottom", bars.bottom).put("left", bars.left).put("right", bars.right).toString()
+    }.getOrDefault("{}")
+
     private fun validKey(key: String, dentition: String): Boolean {
         if (!Regex("[1-4][1-8]|[5-8][1-5]").matches(key)) return false
         return when (dentition) {
@@ -95,11 +103,22 @@ class DentalBridge(godot: Godot) : GodotPlugin(godot) {
                 if (!validKey(key, dentition)) continue
                 val lines = source.optJSONArray(key) ?: continue
                 val clean = JSONArray()
-                for (i in 0 until minOf(lines.length(), 6)) clean.put(lines.optString(i).filter { it == '\n' || !it.isISOControl() }.take(160))
+                for (i in 0 until minOf(lines.length(), 10)) clean.put(lines.optString(i).filter { it == '\n' || !it.isISOControl() }.take(160))
                 care.put(key, clean)
             }
         }
-        JSONObject().put("schemaVersion", 2).put("dentition", dentition).put("teeth", outputTeeth).put("care", care)
+        // Recent treatments across the mouth for the history list: tooth key, status and one short line.
+        val history = JSONArray()
+        input.optJSONArray("history")?.let { source ->
+            for (i in 0 until minOf(source.length(), 20)) {
+                val entry = source.optJSONObject(i) ?: continue
+                val key = entry.optString("key")
+                if (!validKey(key, dentition) && !Regex("[1-8][1-8]").matches(key)) continue
+                history.put(JSONObject().put("key", key).put("status", entry.optString("status").take(24))
+                    .put("text", entry.optString("text").filter { it == '\n' || !it.isISOControl() }.take(200)))
+            }
+        }
+        JSONObject().put("schemaVersion", 2).put("dentition", dentition).put("teeth", outputTeeth).put("care", care).put("history", history)
             .put("catalogVersion", "fdi-v1").put("chartVersion", version)
             .put("sessionToken", session).put("readOnly", input.optBoolean("readOnly", false))
             .put("sounds", input.optBoolean("sounds", true))

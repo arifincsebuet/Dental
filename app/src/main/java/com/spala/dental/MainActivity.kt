@@ -167,7 +167,7 @@ private fun ClinicApp(store: ClinicStore, billing: BillingManager) {
         chartPatientId = p.optString("id"); chartToken = uid()
         chart.put("notation", ToothNotation.current).put("sounds", TapSound.enabled)
         // Treatment facts per tooth (procedure, status, date, doctor, fee · paid · due) for the tooth sheet.
-        if (store.can("viewClinical")) chart.put("care", careLines(p, store.config))
+        if (store.can("viewClinical")) chart.put("care", careLines(p, store.config)).put("history", careHistory(p, store.config))
         if (!store.can("recordTreatment")) chart.put("readOnly", true)
         chartLauncher.launch(Intent(context, Dental3DActivity::class.java).putExtra("chart", chart.put("sessionToken", chartToken).toString()))
     }

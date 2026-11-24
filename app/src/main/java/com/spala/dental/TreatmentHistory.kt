@@ -138,7 +138,7 @@ fun careLines(patient: JSONObject, config: JSONObject): JSONObject {
     for ((key, items) in byTooth) {
         if (!Regex("[1-8][1-8]").matches(key)) continue
         val lines = JSONArray()
-        items.sortedByDescending { it.optLong("at") }.take(6).forEach { t ->
+        items.sortedByDescending { it.optLong("at") }.take(10).forEach { t ->
             val head = listOf(t.optString("procedure").take(40), I18n.tr(t.optString("status")), shortDate(t.optLong("performedAt").takeIf { it > 0 } ?: t.optLong("at"), config),
                 t.optString("doctor").take(32)).filter { it.isNotBlank() }.joinToString(" · ")
             val fee = treatmentFee(patient, treatmentRef(t))?.let { feeText(it) }.orEmpty()
@@ -146,6 +146,24 @@ fun careLines(patient: JSONObject, config: JSONObject): JSONObject {
         }
         out.put(key, lines)
     }
+    return out
+}
+
+/**
+ * Recent treatments of the whole mouth for the full 3D chart (newest first): tooth, status and
+ * "procedure · status · date · doctor" plus Fee · Paid · Due. No notes.
+ */
+fun careHistory(patient: JSONObject, config: JSONObject, limit: Int = 20): JSONArray {
+    val out = JSONArray()
+    patient.optJSONArray("treatments").objectList().filter { it.optString("status") != "Cancelled" }
+        .flatMap { t -> keysOf(t).filter { Regex("[1-8][1-8]").matches(it) }.map { it to t } }
+        .sortedByDescending { (_, t) -> t.optLong("performedAt").takeIf { it > 0 } ?: t.optLong("at") }
+        .take(limit).forEach { (key, t) ->
+            val head = listOf(t.optString("procedure").take(40), I18n.tr(t.optString("status")), shortDate(t.optLong("performedAt").takeIf { it > 0 } ?: t.optLong("at"), config),
+                t.optString("doctor").take(32)).filter { it.isNotBlank() }.joinToString(" · ")
+            val fee = treatmentFee(patient, treatmentRef(t))?.let { feeText(it) }.orEmpty()
+            out.put(JSONObject().put("key", key).put("status", t.optString("status")).put("text", (head + if (fee.isNotBlank()) "\n" + fee else "").take(200)))
+        }
     return out
 }
 

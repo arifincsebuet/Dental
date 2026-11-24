@@ -123,6 +123,12 @@ var badges: Dictionary = {}
 var lens_from_host := false
 var active_lens: Dictionary = {}
 var care_box := VBoxContainer.new()
+var safe_box: MarginContainer
+var rail: VBoxContainer
+var summary_row := HBoxContainer.new()
+var history_box := VBoxContainer.new()
+var history_scroll := ScrollContainer.new()
+var insets := {"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0}
 var disc_texture: ImageTexture
 
 # UI
@@ -185,6 +191,8 @@ func _ready() -> void:
 	camera.near = 0.05
 	build_environment()
 	build_ui()
+	apply_safe_area()
+	get_viewport().size_changed.connect(apply_safe_area)
 	show_loading()
 	update_camera()
 	set_process_unhandled_input(false)
@@ -193,6 +201,7 @@ func _ready() -> void:
 	await get_tree().process_frame
 	if input_valid:
 		build_inventory()
+	apply_safe_area() # system bar sizes are known once the window is shown
 	toggle_buttons["123"].button_pressed = show_labels
 	set_process_unhandled_input(input_valid)
 	var fade := create_tween()
@@ -1009,6 +1018,7 @@ func legend_item(color: Color, text: String, hollow: bool = false) -> HBoxContai
 func build_ui() -> void:
 	add_child(canvas)
 	var safe := MarginContainer.new()
+	safe_box = safe
 	safe.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	safe.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["margin_left", "margin_right"]: safe.add_theme_constant_override(side, 28)
@@ -1037,7 +1047,8 @@ func build_ui() -> void:
 	bar_row.add_child(titles)
 	titles.add_child(label("3D Dental Chart", 32, INK, true))
 	var dentition: String = str(chart.get("dentition", "permanent"))
-	var subtitle := dentition.capitalize() + " dentition  ·  Rev " + str(chart.get("chartVersion", 0))
+	var counts := chart_counts()
+	var subtitle := dentition.capitalize() + " dentition  ·  " + str(counts["treated"]) + " teeth treated"
 	if read_only: subtitle += "  ·  Read only"
 	titles.add_child(label(subtitle, 22, MUTED))
 	var reset := pill("Reset")
@@ -1054,7 +1065,7 @@ func build_ui() -> void:
 		top.add_child(error)
 
 	# --- Right rail -------------------------------------------------------------------------
-	var rail := VBoxContainer.new()
+	rail = VBoxContainer.new()
 	rail.add_theme_constant_override("separation", 14)
 	rail.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
 	rail.offset_left = -128
@@ -1097,7 +1108,24 @@ func build_ui() -> void:
 	# Idle: arch filter, guidance and legend.
 	sheet_idle.add_theme_constant_override("separation", 18)
 	sheet_idle.add_child(segmented(["Both", "Upper", "Lower"], arch_buttons, set_arch))
-	sheet_idle.add_child(label("View only · tap a tooth to review its record." if read_only else "Tap a tooth to review it and record treatment.", 25, INK, false, true))
+	# Same summary as the patient profile: treated, planned, findings, missing.
+	summary_row.add_theme_constant_override("separation", 12)
+	for spec in [["treated", "Treated", STATUS_COLORS["treated"]], ["planned", "Planned", TEAL], ["findings", "Findings", Color("b45309")], ["missing", "Missing", MUTED]]:
+		summary_row.add_child(metric(str(counts[spec[0]]), spec[1], spec[2]))
+	sheet_idle.add_child(summary_row)
+	sheet_idle.add_child(label("View only · tap a tooth to review its record." if read_only else "Tap a tooth to see its treatment history and record treatment.", 25, INK, false, true))
+	# Recent treatments of this patient (tap one to open that tooth).
+	var history: Array = chart.get("history", []) if chart.get("history", []) is Array else []
+	if not history.is_empty():
+		sheet_idle.add_child(label("Treatment history", 22, MUTED, true))
+		history_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		history_scroll.custom_minimum_size = Vector2(0, mini(history.size(), 3) * 92)
+		history_box.add_theme_constant_override("separation", 8)
+		history_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		history_scroll.add_child(history_box)
+		sheet_idle.add_child(history_scroll)
+		for entry in history.slice(0, 20):
+			if entry is Dictionary: history_box.add_child(history_row(entry))
 	sheet_idle.add_child(label("Drag to rotate  ·  pinch to zoom  ·  two fingers to pan  ·  double-tap to reset", 21, MUTED, false, true))
 	var legend := HFlowContainer.new()
 	legend.add_theme_constant_override("h_separation", 26)
@@ -1182,6 +1210,103 @@ func build_ui() -> void:
 	view_buttons["Front"].button_pressed = true
 	arch_buttons["Both"].button_pressed = true
 
+## Counts shown in the summary (same rules as the patient profile).
+func chart_counts() -> Dictionary:
+	var out := {"treated": 0, "planned": 0, "findings": 0, "missing": 0}
+	for key in chart.get("teeth", {}).keys():
+		var state: Dictionary = chart["teeth"][key]
+		if state.get("presence", "unknown") in LOST and str(state.get("replacement", "none")) in ["none", ""]: out["missing"] += 1
+		if is_treated(state): out["treated"] += 1
+		if not state.get("treatmentStates", []).is_empty(): out["planned"] += 1
+		if has_finding(state): out["findings"] += 1
+	return out
+
+func metric(value: String, caption: String, color: Color) -> PanelContainer:
+	var box := PanelContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var style := box_style(Color(color, 0.09), 22)
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
+	box.add_theme_stylebox_override("panel", style)
+	var column := VBoxContainer.new()
+	column.alignment = BoxContainer.ALIGNMENT_CENTER
+	column.add_theme_constant_override("separation", 0)
+	box.add_child(column)
+	var number := label(value, 32, color, true)
+	number.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(number)
+	var text := label(caption, 19, MUTED)
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(text)
+	return box
+
+## One history entry: tooth badge + "procedure · status · date · doctor" (+ fee line). Tap opens the tooth.
+func history_row(entry: Dictionary) -> Control:
+	var key := str(entry.get("key", ""))
+	var button := Button.new()
+	button.flat = true
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(0, 84)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	button.add_child(row)
+	var status := str(entry.get("status", ""))
+	var tint: Color = STATUS_COLORS["treated"] if status == "Completed" else (TEAL if status in ["Planned", "Accepted", "In progress"] else MUTED)
+	var badge := PanelContainer.new()
+	badge.custom_minimum_size = Vector2(84, 72)
+	badge.add_theme_stylebox_override("panel", box_style(Color(tint, 0.14), 20))
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var badge_text := label(notation_label(key) if key.length() == 2 else "", 22, tint, true)
+	badge_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	badge.add_child(badge_text)
+	row.add_child(badge)
+	var text := label(str(entry.get("text", "")), 22, INK, false, true)
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(text)
+	button.pressed.connect(open_history.bind(key))
+	return button
+
+func open_history(key: String) -> void:
+	if not teeth.has(key): return
+	var body: Node3D = teeth[key]
+	if not body.get_parent().visible: set_arch("Both")
+	select_tooth(body)
+
+## Keeps the bars and sheet clear of the phone's status bar, notch and navigation bar.
+func apply_safe_area() -> void:
+	if host_ui or safe_box == null: return
+	var vp := get_viewport().get_visible_rect().size
+	var win := Vector2(DisplayServer.window_get_size())
+	if win.x <= 0 or win.y <= 0: return
+	var scale := vp / win
+	var top := 0.0; var bottom := 0.0; var left := 0.0; var right := 0.0
+	var area := DisplayServer.get_display_safe_area()
+	if area.size.x > 0 and area.size.y > 0:
+		top = maxf(0.0, area.position.y); left = maxf(0.0, area.position.x)
+		bottom = maxf(0.0, win.y - area.end.y); right = maxf(0.0, win.x - area.end.x)
+	# Android: status and navigation bar sizes from the app (the safe area covers only cut-outs).
+	if chart.get("insets", null) is Dictionary or (bridge and not web):
+		var parsed = chart["insets"] if chart.get("insets", null) is Dictionary else JSON.parse_string(str(bridge.insets()))
+		if parsed is Dictionary:
+			top = maxf(top, float(parsed.get("top", 0))); bottom = maxf(bottom, float(parsed.get("bottom", 0)))
+			left = maxf(left, float(parsed.get("left", 0))); right = maxf(right, float(parsed.get("right", 0)))
+	insets = {"top": top * scale.y, "bottom": bottom * scale.y, "left": left * scale.x, "right": right * scale.x}
+	safe_box.add_theme_constant_override("margin_top", 36 + int(insets["top"]))
+	safe_box.add_theme_constant_override("margin_left", 28 + int(insets["left"]))
+	safe_box.add_theme_constant_override("margin_right", 28 + int(insets["right"]))
+	sheet.offset_left = 20 + insets["left"]
+	sheet.offset_right = -20 - insets["right"]
+	sheet.offset_bottom = -20 - insets["bottom"]
+	if rail:
+		rail.offset_left = -128 - insets["right"]
+		rail.offset_right = -28 - insets["right"]
+
 func go_back() -> void:
 	if bridge: bridge.closeChart()
 
@@ -1233,9 +1358,18 @@ func update_camera() -> void:
 	# Portrait phones: step back so the whole arch fits the narrow width.
 	var size := get_viewport().get_visible_rect().size
 	var aspect := size.x / maxf(size.y, 1.0)
-	var fit := maxf(1.0, 0.92 / maxf(aspect, 0.3))
+	# Same framing as the patient profile: the whole arch (about ±5.4 units with labels) fits the width.
+	var fit := maxf(1.0, 5.4 / (13.2 * tan(deg_to_rad(camera.fov * 0.5)) * maxf(aspect, 0.2)))
 	camera.position = cur_target + Vector3(0, cur_distance * fit * 0.30, cur_distance * fit)
 	camera.look_at(cur_target)
+	# Centre the model in the free space between the top bar and the bottom sheet.
+	if not host_ui and safe_box and safe_box.get_child_count() > 0 and size.y > 0:
+		var top_y: float = (safe_box.get_child(0) as Control).get_global_rect().end.y
+		var bottom_y: float = sheet.get_global_rect().position.y if sheet.visible else size.y
+		if bottom_y > top_y + 100.0:
+			var shift_px := size.y * 0.5 - (top_y + bottom_y) * 0.5
+			var depth := cur_distance * fit * sqrt(1.09)
+			camera.v_offset = -shift_px * 2.0 * depth * tan(deg_to_rad(camera.fov * 0.5)) / size.y
 
 func _process(delta: float) -> void:
 	# Inertial orbit after a fling, then critically damped easing toward the targets.
@@ -1479,7 +1613,7 @@ func refresh_details(state: Dictionary) -> void:
 	var lines: Array = care.get(selected, []) if care is Dictionary else []
 	if not lines.is_empty():
 		care_box.add_child(label("Treatment history", 22, MUTED, true))
-		for line in lines.slice(0, 6):
+		for line in lines.slice(0, 10):
 			var row := label("•  " + str(line), 24, INK, false, true)
 			care_box.add_child(row)
 	if chip_row.get_child_count() == 0:
